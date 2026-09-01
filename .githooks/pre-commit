@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -e
+
+# Interactive version bumper. Bumps pubspec.yaml's version/build number and
+# stages it as part of the commit.
+#
+# Skip the prompt when there's no controlling TTY (CI, scripted commits, agents
+# committing over a pipe). Without this guard, opening /dev/tty fails and
+# `set -e` aborts the commit — which silently breaks every non-interactive
+# commit path.
+if ! { : </dev/tty; } 2>/dev/null; then
+  echo "pre-commit: no controlling TTY, skipping version bump prompt."
+  exit 0
+fi
+
+read -p "Bump version? (y/n): " bump </dev/tty
+if [[ "$bump" != "y" ]]; then
+  echo "Skipping version bump."
+  exit 0
+fi
+
+read -p "Which bump? (major/minor/patch/none): " type </dev/tty
+
+if [[ ! "$type" =~ ^(major|minor|patch|none)$ ]]; then
+  echo "Invalid bump type. Use major, minor, patch, or none."
+  exit 1
+fi
+
+pubspec="pubspec.yaml"
+
+current=$(grep "^version:" "$pubspec" | awk '{print $2}')
+semver=${current%%+*}
+build=${current##*+}
+
+IFS='.' read -r major minor patch <<< "$semver"
+
+if [[ "$type" != "none" ]]; then
+  case "$type" in
+    major) ((major++)); minor=0; patch=0 ;;
+    minor) ((minor++)); patch=0 ;;
+    patch) ((patch++)) ;;
+  esac
+fi
+
+# The build number always increments, including on `none`.
+((build++))
+
+new_version="$major.$minor.$patch+$build"
+
+sed -i.bak "s/^version: .*/version: $new_version/" "$pubspec"
+rm "$pubspec.bak"
+
+echo ""
+echo "✨ Version updated to $new_version"
+echo ""
+
+git add "$pubspec"
+
+# Explicitly signal success — the last command's status would otherwise leak out.
+exit 0

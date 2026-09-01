@@ -1,0 +1,82 @@
+name: Flutter CI
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+
+# Cancel superseded runs on the same branch/PR so a new push doesn't wait behind
+# an outdated one (and to save CI minutes).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # .env.* are gitignored secret files that are declared as assets in
+      # pubspec.yaml. Nothing in CI reads them, but `flutter analyze` verifies
+      # that declared assets exist, so create empty placeholders.
+      - name: Create placeholder env files
+        run: touch .env.dev .env.stg .env.prod
+
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze project source
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # This repository is public, so a credential committed even once is
+      # compromised — the object stays in history and is indexed within minutes.
+      # Deliberately dependency-free and narrowly targeted: broad entropy rules
+      # produce false positives (Flutter's own commit SHAs in .metadata) that
+      # train people to ignore the job.
+      - name: Fail if a credential file is tracked
+        run: |
+          if git ls-files --error-unmatch \
+              '.env' '.env.*' '.secrets/*' \
+              'android/key.properties' \
+              '**/google-services.json' '**/GoogleService-Info.plist' \
+              'sentry.properties' 2>/dev/null | grep .; then
+            echo "::error::A credential file is tracked in git. Remove it and add it to .gitignore."
+            exit 1
+          fi
+          echo "No credential files tracked."
+
+      - name: Fail if a credential-shaped string is committed
+        run: |
+          if git grep -nIE \
+              'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|sk-[A-Za-z0-9]{32,}' \
+              -- . ':(exclude)pubspec.lock' ':(exclude).github/workflows/*'; then
+            echo "::error::A credential-shaped string is committed. Rotate it, then remove it."
+            exit 1
+          fi
+          echo "No credential-shaped strings found."
