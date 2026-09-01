@@ -1,0 +1,80 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+android/app/.cxx/
+coverage/
+
+.tmp/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+.tmp/
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+android/key.properties
+
+.env.prod
+.env.stg
+.env.dev
+.env
+
+# Local MCP server config (points at the Supabase project refs). Per-developer,
+# not repo state. Lives in .secrets/ and is symlinked into each worktree by
+# setup-worktree.sh.
+.mcp.json
+
+# Google Sign-In credentials
+**/google-services.json
+**/GoogleService-Info.plist
+
+sentry.properties
+
+# Secrets — single source of truth for env/keystore/service files (guide §2).
+# Symlinked into worktrees once the bare+worktree layout is adopted.
+.secrets/
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
+# Coverage output
+lcov.info
+coverage/html/
