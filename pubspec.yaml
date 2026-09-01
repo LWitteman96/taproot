@@ -86,3 +86,56 @@ flutter:
     - .env.dev
     - .env.stg
     - .env.prod
+
+# Native flavor configuration. Regenerate with:
+#   dart run flutter_flavorizr
+#
+# The instruction list is explicit and deliberately excludes the icon and
+# flutter:* processors. Icons are skipped because the plant/app art is still with
+# the external designer; the flutter:app / flutter:pages / flutter:main /
+# flutter:flavors processors are skipped because they scaffold a demo app and
+# would overwrite the hand-written entry points in lib/main_<flavor>.dart.
+#
+# Unlike inkBlox, the iOS bundle id and Android applicationId are kept identical
+# per flavor rather than diverging into com.<app>.app / com.<app>.application.
+flavorizr:
+  ide: "vscode"
+  instructions:
+    - android:androidManifest
+    - android:buildGradle
+    - android:flavorizrGradle
+    - android:label
+    - ios:podfile
+    - ios:xcconfig
+    - ios:buildTargets
+    - ios:schema
+    - ios:plist
+    - ide:config
+  app:
+    android:
+      flavorDimensions: "flavor-type"
+
+  flavors:
+    dev:
+      app:
+        name: "Taproot Dev"
+      android:
+        applicationId: "com.taproot.app.dev"
+      ios:
+        bundleId: "com.taproot.app.dev"
+
+    stg:
+      app:
+        name: "Taproot Stg"
+      android:
+        applicationId: "com.taproot.app.stg"
+      ios:
+        bundleId: "com.taproot.app.stg"
+
+    prod:
+      app:
+        name: "Taproot"
+      android:
+        applicationId: "com.taproot.app"
+      ios:
+        bundleId: "com.taproot.app"
