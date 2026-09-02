@@ -1,0 +1,12 @@
+# Keep the append-only record append-only across merges.
+#
+# Every branch adds an entry at the top of the progress log, so two branches in
+# flight conflict on the same line every time — always resolved by keeping both.
+# `merge=union` does that automatically. It is safe here *only* because the file
+# holds nothing mutable: the status table that used to live at its top now sits
+# in docs/status.md, where a union merge would have duplicated rows instead of
+# merging them.
+#
+# Caveat worth knowing: union merge never raises a conflict, so it will not tell
+# you the two entries interleaved out of order. Check newest-first after a merge.
+docs/progress-log.md merge=union

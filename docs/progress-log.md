@@ -2,36 +2,22 @@
 
 *What has actually been built, in the order it was built, and what each piece decided along the way.*
 
-The five specs describe the **target**. This file describes the **state**, so that picking the work up
-in a fresh worktree doesn't start with an archaeology session. It is append-only: add a new entry at
-the top, don't rewrite old ones. When something recorded here turns out to be wrong, add the
-correction as a new entry rather than editing history.
+The five specs describe the **target**. This file describes how the code got where it is, so that
+picking the work up in a fresh worktree doesn't start with an archaeology session. For where things
+stand *right now*, read [status.md](status.md) — this file is history, that one is state.
+
+**Append-only.** Add a new entry at the top; don't rewrite old ones. When something recorded here
+turns out to be wrong, add the correction as a new entry rather than editing history. A stale
+"Next" inside an old entry is not a mistake — it is what was true at the time.
 
 **One entry per meaningful chunk of work.** Keep each to: what landed, what it decided, what it left
 open, and what comes next. Design *rationale* belongs in the governing spec (see
 [growth-engine.md §10](growth-engine.md#10-implementation-reconciliations) for the pattern) — this
 file points at it rather than repeating it.
 
----
-
-## Where the project stands
-
-| Area | State |
-|---|---|
-| Flavors (dev / stg / prod) | Built — entry points, resolver, native config |
-| CI, lint, pre-commit hook | Built |
-| **Growth engine** (`lib/core/engine/`) | **Built and reviewed — stage, vitality, roots, autonomy, adherence, renegotiation** |
-| **Local SQLite store + repositories** | **Built — schema, four repositories, engine inputs loader** |
-| Supabase project, migrations, RLS | Not started |
-| Notification scheduling + nudge ledger | Not started |
-| Reflection check-in and chips | Not started |
-| Garden rendering | Not started (blocked on external illustrator) |
-| Insight surfacing | Not started |
-
-Build order from the infrastructure guide (§16): engine → local store and repositories → completion
-tap → Supabase sync → notifications and the nudge ledger → reflection check-in → garden → insights.
-The engine and the store are done, so **the completion tap is next** — the first feature code, and
-the first thing in `lib/features/` with a page attached to it.
+Because entries are independent, this file is declared `merge=union` in `.gitattributes`: when two
+branches each add an entry, both survive instead of conflicting. The one thing to check after a
+merge is that the entries are still newest-first — union keeps both blocks but does not order them.
 
 ---
 
