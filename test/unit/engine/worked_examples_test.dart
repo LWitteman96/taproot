@@ -241,6 +241,18 @@ void main() {
       expect(growth.constantsVersion, 1);
     });
 
+    test('a Seed habit reports the Seedling window, not a phantom one', () {
+      // Sprout's gate has no window of its own, and clamping its zero-day
+      // window to the 14-day floor produced an AdherenceWindow belonging to no
+      // gate at all.
+      final growth = evaluateGrowth(inputs: inputs(), at: day(3));
+
+      expect(growth.stage, Stage.seed);
+      expect(growth.currentWindow.windowReps, 3);
+      expect(growth.currentWindow.windowDays, 14);
+      expect(growth.currentWindow.expectedCompletions, closeTo(6, 1e-9));
+    });
+
     test(
       'a graduated habit is Bloom with a converged cue and real autonomy',
       () {

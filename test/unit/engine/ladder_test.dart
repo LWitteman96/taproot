@@ -309,6 +309,23 @@ void main() {
     });
   });
 
+  group('the gate a habit is working toward', () {
+    test('skips Sprout, which has no window of its own', () {
+      // Sprout's gate is a raw first-completion milestone (windowReps: 0),
+      // which windowDaysForReps would clamp into a phantom 14-day window
+      // belonging to no gate at all.
+      expect(gateInProgress(Stage.seed).windowReps, 3);
+      expect(gateInProgress(Stage.sprout).windowReps, 3);
+      expect(gateInProgress(Stage.seedling).windowReps, 8);
+      expect(gateInProgress(Stage.young).windowReps, 12);
+      expect(gateInProgress(Stage.mature).windowReps, 20);
+    });
+
+    test('a bloomed habit keeps measuring against its own gate', () {
+      expect(gateInProgress(Stage.bloom).windowReps, 20);
+    });
+  });
+
   group('stage is monotonic', () {
     test('an earned stage is banked, never lost', () {
       final habit = inputs(completions: steadyThreePerWeek(weeks: 4));

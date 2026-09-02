@@ -2,6 +2,7 @@ import 'package:taproot/core/engine/adherence.dart';
 import 'package:taproot/core/engine/constants.dart';
 import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/engine/inputs.dart';
+import 'package:taproot/core/engine/ladder.dart';
 import 'package:taproot/core/engine/pauses.dart';
 import 'package:taproot/core/engine/vitality.dart';
 import 'package:taproot/core/utils/local_dates.dart';
@@ -40,7 +41,7 @@ RenegotiationTrigger? renegotiationTrigger({
   }
 
   // Measured over the window of the gate the habit is working toward.
-  final gate = EngineConstants.stageGates[stage.next ?? stage]!;
+  final gate = gateInProgress(stage);
   final current = computeAdherence(
     inputs: inputs,
     windowReps: gate.windowReps,

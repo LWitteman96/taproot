@@ -65,6 +65,14 @@ abstract final class EngineConstants {
   /// are invalid and must be recomputed, never migrated.
   static const int version = 1;
 
+  // ── Inputs ────────────────────────────────────────────────────────────────
+
+  /// f is a weekly frequency and the specs' range tops out at daily — §4
+  /// reasons explicitly about "a perfect 7-of-7 at f=7" as the extreme. Twice
+  /// daily would be a v2 shape, not a larger f.
+  static const int minimumTargetFrequency = 1;
+  static const int maximumTargetFrequency = 7;
+
   // ── Adherence windows (growth spec §2) ────────────────────────────────────
 
   /// W_days = clamp(W_reps × 7 / f, 14, 42).

@@ -1,5 +1,6 @@
 import 'package:meta/meta.dart';
 
+import 'package:taproot/core/engine/constants.dart';
 import 'package:taproot/core/models/completion.dart';
 import 'package:taproot/core/models/nudge.dart';
 import 'package:taproot/core/models/pause_interval.dart';
@@ -20,12 +21,21 @@ class HabitInputs {
     this.reflections = const <Reflection>[],
     this.nudges = const <NudgeRecord>[],
     this.pauses = const <PauseInterval>[],
-  });
+  }) : assert(
+         targetFrequency >= EngineConstants.minimumTargetFrequency &&
+             targetFrequency <= EngineConstants.maximumTargetFrequency,
+         'targetFrequency is a weekly count in 1..7',
+       );
 
   final String habitId;
 
   /// f — target frequency in times per week. User-declared at creation; this
   /// is the identity commitment and the engine's anchor.
+  ///
+  /// Asserted in range because zero is not a graceful failure: the window
+  /// arithmetic divides by it, giving `NaN.ceil()` or `Infinity.ceil()` — both
+  /// throw — and `paceExemptionThreshold(0)` returns 0, which pins vitality at
+  /// 1.0 forever. Better to catch a bad persisted row here than downstream.
   final int targetFrequency;
 
   final DateTime createdAt;

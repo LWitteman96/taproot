@@ -70,8 +70,7 @@ HabitGrowth evaluateGrowth({
     autonomy: autonomy,
     currentWindow: computeAdherence(
       inputs: inputs,
-      // The gate the habit is working toward, or its own once it has bloomed.
-      windowReps: EngineConstants.stageGates[stage.next ?? stage]!.windowReps,
+      windowReps: gateInProgress(stage).windowReps,
       at: at,
     ),
     isShallowRooted: isShallowRooted(stage: stage, roots: roots.depth),

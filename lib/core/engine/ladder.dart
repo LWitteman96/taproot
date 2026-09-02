@@ -149,6 +149,22 @@ StageProgress computeStageProgress({
 Stage computeStage({required HabitInputs inputs, required DateTime at}) =>
     computeStageProgress(inputs: inputs, at: at).stage;
 
+/// The gate the habit is working toward: the next rung that has a window of
+/// its own, or its own gate once it has bloomed.
+///
+/// Sprout is a raw first-completion milestone with `windowReps: 0`, which
+/// `windowDaysForReps` would clamp into a phantom 14-day window belonging to
+/// no gate at all. A Seed habit therefore works toward Seedling.
+StageGate gateInProgress(Stage stage) {
+  var working = stage.next ?? stage;
+  while (EngineConstants.stageGates[working]!.windowReps <= 0) {
+    final next = working.next;
+    if (next == null) break;
+    working = next;
+  }
+  return EngineConstants.stageGates[working]!;
+}
+
 /// Whether the plant renders top-heavy — at this stage in behaviour, below its
 /// advisory root threshold in understanding.
 bool isShallowRooted({required Stage stage, required double roots}) {

@@ -8,6 +8,26 @@ import '../../utils/engine_builders.dart';
 void main() {
   setUp(resetFixtureIds);
 
+  group('HabitInputs guards its frequency', () {
+    test('rejects a frequency the window arithmetic cannot divide by', () {
+      // f = 0 is not a graceful failure: the window maths gives NaN.ceil() or
+      // Infinity.ceil(), both of which throw, and paceExemptionThreshold(0)
+      // pins vitality at 1.0 forever.
+      expect(() => inputs(targetFrequency: 0), throwsA(isA<AssertionError>()));
+      expect(() => inputs(targetFrequency: -1), throwsA(isA<AssertionError>()));
+    });
+
+    test('rejects a frequency past daily', () {
+      expect(() => inputs(targetFrequency: 8), throwsA(isA<AssertionError>()));
+    });
+
+    test('accepts the full weekly range', () {
+      for (var frequency = 1; frequency <= 7; frequency++) {
+        expect(() => inputs(targetFrequency: frequency), returnsNormally);
+      }
+    });
+  });
+
   group('windowDaysForReps — W_days = clamp(W_reps x 7 / f, 14, 42)', () {
     test('f = 3, the spec worked example', () {
       expect(windowDaysForReps(windowReps: 3, targetFrequency: 3), 14);
