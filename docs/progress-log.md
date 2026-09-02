@@ -20,7 +20,7 @@ file points at it rather than repeating it.
 |---|---|
 | Flavors (dev / stg / prod) | Built — entry points, resolver, native config |
 | CI, lint, pre-commit hook | Built |
-| **Growth engine** (`lib/core/engine/`) | **Built — stage, vitality, roots, autonomy, adherence, renegotiation** |
+| **Growth engine** (`lib/core/engine/`) | **Built and reviewed — stage, vitality, roots, autonomy, adherence, renegotiation** |
 | Local SQLite store + repositories | Not started |
 | Supabase project, migrations, RLS | Not started |
 | Notification scheduling + nudge ledger | Not started |
@@ -31,6 +31,39 @@ file points at it rather than repeating it.
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
 tap → Supabase sync → notifications and the nudge ledger → reflection check-in → garden → insights.
 The engine is done, so **the local store is next**.
+
+---
+
+## 2026-09-02 — engine review and fixes
+
+Branch: `feature/growth-engine`, on top of the entry below. PR [#1](https://github.com/LWitteman96/taproot/pull/1).
+
+### Found
+
+A review of the engine turned up **four correctness bugs, all invisible to the test suite for the same reason**: every fixture samples at whole days, 09:00, and every one of these needs either a sub-day sample or a non-default field to show itself. Worth internalising before writing the next batch of tests — a suite built entirely from tidy fixtures tests the tidy path.
+
+| Bug | Symptom |
+|---|---|
+| Replay grid anchored to the evaluation instant's clock time | Stage regressed a rung between two openings of the garden screen on one evening |
+| Whole paused days subtracted from a fractional elapsed | A paused plant drooped through the afternoon and sprang back at midnight, daily |
+| `CueType.unknown` keyed on its type, and it is the default | Eight different cues read as perfect convergence, inflating the least self-aware user through Bloom's hard root gate |
+| First-un-nudged-completion milestone read the last-10 autonomy sample | The milestone retracted itself, so it would have fired twice |
+
+Plus two small ones — a phantom adherence window for Seed-stage habits, and an unvalidated `targetFrequency` where 0 throws inside the window arithmetic.
+
+### Fixed
+
+All six, with a regression test each, and the monotonicity property test widened to quarter-day sampling. That widened test was verified to *fail* against the old replay grid before the fix was restored — a property test that has never been seen to fail is an assumption, not evidence.
+
+192 tests, all three gates green.
+
+The durable lessons are written up as [growth-engine.md §10 — four invariants](growth-engine.md#four-invariants-the-implementation-has-to-hold), since they constrain future code rather than just recording history.
+
+### Left open
+
+The **clamp-collapse two-window rule** is now an open calibration question in §9 rather than a defect. Both readings satisfy §3 as written; the stricter one costs a weekly habit about six more weeks to bloom. It needs a product decision, and the review thread on PR #1 was deliberately left unresolved as the marker.
+
+`pausedDaysBetween` has no caller in `lib/` since the pause fix — kept with a doc note warning against elapsed-time use, pending a call on whether to delete it.
 
 ---
 

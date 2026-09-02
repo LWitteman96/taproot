@@ -249,6 +249,7 @@ Resist synthesizing insight before the data supports it. A fabricated "aha" is w
 - **Nudge-fade rates** are guesses. This is the single most important thing to instrument, because it trades retention against the app's integrity — and the tempting direction (nudge more) is the one that hollows the product out.
 - **Wilt-duration trigger (7 days)** — should probably be shorter at Sprout, where the user is newest and most likely to leave.
 - **Advisory root thresholds** — do they need to exist at all, or is the tall-and-shallow visual sufficient on its own?
+- **Does the clamp-collapse rule need to add *time*, or only rigour (§3)?** "Two consecutive passing windows" is implemented as the 84 days ending now, both scored at θ=0.80. Because the sequential-window rule already forces Bloom's own window to open after Mature was earned, the earlier of those two windows lies *before* Mature — so the rule re-scores pre-Mature history at the higher bar rather than demanding another 42 days after it. Both readings satisfy "hold the bar for twelve weeks rather than six" as written; the stricter one costs a weekly habit roughly six more weeks to bloom. Unresolved.
 - **What the wilt freeze freezes at (§4).** "Vitality floors at droop-onset" reads literally as V = 1.0, since that *is* the value at onset — the plant stops looking unwell the moment the app decides the target is wrong. The alternative reading is that vitality holds at whatever it was when candidacy began, which for the wilted-7-days trigger means holding at 0. Implemented literally and isolated as `EngineConstants.wiltFreezeFloor`; the two readings say different things to a drowning user and this is untested.
 
 **Resolved by pressure-testing (see §1, §3, §4, §5, §6, §7):** convergence penalty on internal cues · root gates over-tightened on intermediate stages · responsive habits out of v1 scope · vacuous `c` on empty cue sets · renegotiation latency · clamp collapse at low `f` · pacing exemption dead at high `f` · nudge dependence invisible.
@@ -302,6 +303,18 @@ The droop formula needs a "last completion" that a fresh seed doesn't have. It r
 `ceil(0.8 × f)` needs a floating-point guard: `0.8` has no exact binary form, so `0.8 × 5` lands a hair above 4.0 and a naive `ceil` demands 5 of 5 from an f=5 habit. The engine subtracts 1e-9 before rounding, which keeps the 0.8 a live tunable instead of hard-coding it as 4/5.
 
 All window arithmetic runs on **local dates**, and elapsed time is measured on the local wall clock (`lib/core/utils/local_dates.dart`). A day is a wall-clock day, not a 24-hour block, so a DST transition never shifts droop onset by an hour.
+
+### Four invariants the implementation has to hold
+
+These are not spec readings — they are properties the code must preserve, each recorded because breaking it produced a bug that the worked-example tests could not see. Every one of them was invisible to a suite that samples at whole days, 09:00.
+
+**The stage replay grid must not depend on the time of day it is asked about.** Stage is recomputed by replaying history against a grid of candidate instants. Anchoring that grid to the evaluation instant's clock time meant asking an hour later shifted every candidate, so a gate that had passed was never re-examined and `earnedAt` moved — which let a later stage's `notBefore` start binding and dropped the plant a rung between two openings of the garden screen on one evening. The grid is anchored to end-of-day, with the evaluation instant as the only floating candidate. **Monotonicity has to be tested across times of day, not just across days.**
+
+**Elapsed time is measured as time; windows are measured in days.** Both are local-calendar quantities but they are not interchangeable. Subtracting whole paused days from a fractional elapsed made a paused plant droop through the afternoon and spring back at midnight. Pause spans are clipped to the range and summed as time for anything continuous (the droop curve); whole local dates remain the unit for anything windowed (adherence, C₇).
+
+**The type-stability exemption belongs to `internal` alone.** Keying every non-external cue type on its type swept in `unknown` — which is the default on a `Reflection` — so eight genuinely different cues collapsed onto one key and read as perfect convergence. Since roots hard-gate Bloom, that inflated the least self-aware user through the top rung: the precise inversion §5 exists to prevent. Everything that is not an internal state is compared by label.
+
+**A milestone must not be computed from a rolling sample.** "The first un-nudged completion" read off the last-10 autonomy window, which made it *happened recently* rather than *has happened*, so it retracted itself once the early completion aged out. Autonomy is a rolling measure by design; milestones built on it need their own full-ledger query.
 
 ### What the engine deliberately does not do
 
