@@ -249,5 +249,73 @@ Resist synthesizing insight before the data supports it. A fabricated "aha" is w
 - **Nudge-fade rates** are guesses. This is the single most important thing to instrument, because it trades retention against the app's integrity — and the tempting direction (nudge more) is the one that hollows the product out.
 - **Wilt-duration trigger (7 days)** — should probably be shorter at Sprout, where the user is newest and most likely to leave.
 - **Advisory root thresholds** — do they need to exist at all, or is the tall-and-shallow visual sufficient on its own?
+- **Does the clamp-collapse rule need to add *time*, or only rigour (§3)?** "Two consecutive passing windows" is implemented as the 84 days ending now, both scored at θ=0.80. Because the sequential-window rule already forces Bloom's own window to open after Mature was earned, the earlier of those two windows lies *before* Mature — so the rule re-scores pre-Mature history at the higher bar rather than demanding another 42 days after it. Both readings satisfy "hold the bar for twelve weeks rather than six" as written; the stricter one costs a weekly habit roughly six more weeks to bloom. Unresolved.
+- **What the wilt freeze freezes at (§4).** "Vitality floors at droop-onset" reads literally as V = 1.0, since that *is* the value at onset — the plant stops looking unwell the moment the app decides the target is wrong. The alternative reading is that vitality holds at whatever it was when candidacy began, which for the wilted-7-days trigger means holding at 0. Implemented literally and isolated as `EngineConstants.wiltFreezeFloor`; the two readings say different things to a drowning user and this is untested.
 
 **Resolved by pressure-testing (see §1, §3, §4, §5, §6, §7):** convergence penalty on internal cues · root gates over-tightened on intermediate stages · responsive habits out of v1 scope · vacuous `c` on empty cue sets · renegotiation latency · clamp collapse at low `f` · pacing exemption dead at high `f` · nudge dependence invisible.
+
+---
+
+## 10. Implementation reconciliations
+
+*Written while building `lib/core/engine/`. Each entry is a place where this spec's prose and its formulas disagreed, or where a rule was stated qualitatively and the code needed a definition. None of them changes a calibrated number — they record which reading was implemented, and why. The tests in `test/unit/engine/` are the enforcement.*
+
+### The ladder is sequential — a window may not open before the previous stage was earned
+
+§3 states a fastest possible path to bloom of ≈96 days. That number only falls out if the stage windows run *successively*: 19 + 28 + 42 days, each one opening no earlier than the moment the previous stage was earned. Evaluated concurrently — every window measured against the same completion history — a flawless f=3 user satisfies all four gates at once and blooms in about six weeks, which contradicts the spec's own intent that bloom land past the ~66-day Lally median.
+
+So: **Young, Mature and Bloom each require their qualifying window to begin at or after the instant the previous stage was earned.** Seedling is exempt, because its gate is really the "3 completions" milestone and applying the rule would push a seedling out to day 14.
+
+With perfect play at f=3 this puts bloom on day 88 — close enough to the spec's ≈96 that the two readings can be treated as the same claim.
+
+Consequence for storage: stage is a **replay over history**, not a running maximum of an instantaneous check. `computeStageProgress` walks one candidate instant per local day and records when each rung was first cleared. Monotonicity is a property of that replay rather than something the database has to protect.
+
+### Seedling is gated by both of its stated requirements
+
+The stage table gives Seedling a prose requirement ("3 completions") *and* a W_reps/θ row (3, 0.50). They coincide only at f=3: at f=7 the adherence rule asks for 7 runs in 14 days, at f=1 it asks for 2 in 21. Both apply — cumulative completions **and** the adherence gate. Sprout keeps its own cumulative minimum of 1.
+
+### W_days rounds up to a whole calendar day
+
+A window is a set of local dates, so `W_reps × 7 / f` is rounded up before clamping. This is what makes §3's Young window read as *19 days expecting 8.1 runs* rather than 18.67 expecting 8.0. No threshold integer moves either way; the rounding just makes the published numbers reproducible.
+
+### Convergence is measured over the last 8 reflections, then filtered
+
+§5 says `c` is the modal share "over the last 8 reflections" and also that it is computed "only over cue-bearing reflections". Read as *the last 8 cue-bearing reflections*, the `< 3 ⇒ c = 0` rule almost never fires once a user has ever answered three times — which defeats the degenerate case the rule exists for. Implemented as: **take the last 8 reflections, then keep the cue-bearing ones.** A user whose recent check-ins are all `can't remember` therefore has 0 cue-bearing reflections in the window and `c = 0`, which is the reading §5 argues for at length.
+
+### Renegotiation needed two rules the spec gives only qualitatively
+
+**The two-window adherence trigger requires two windows of real history.** The earlier window must begin strictly after `created_at`. Without that guard an empty pre-creation window reads as a failing one and *every* new habit is flagged as a renegotiation candidate on day one. With it, the over-ambitious 5×/week starter of §7 is flagged on exactly day 28, as the spec predicts — and the wilt trigger catches them on day 10, which is the entire reason both triggers exist.
+
+**Observed pace** — the number behind *"you've been running about once a week"* — is completions over the last 28 active days, converted to a weekly rate, rounded, clamped to 1–7. It is also what defines the upward trigger: sustained A = 1.0 across two consecutive windows *plus* an observed pace above the declared `f`. §7 describes the upward mechanic but gives it no threshold; this avoids inventing a second magic number.
+
+**A paused habit is never a renegotiation candidate.** Pause already says "not now"; proposing a lower target on top of it punishes the honesty the mechanic exists to protect.
+
+### Completions are counted, not completion-days
+
+`completions_in_window` counts events, so two waterings in one day count as two reps. The 1.0 cap is what bounds the effect; preventing accidental double-taps is the UI's job, not the engine's.
+
+### A habit that has never been watered measures its gap from creation
+
+The droop formula needs a "last completion" that a fresh seed doesn't have. It runs from `created_at`, so a designed-but-abandoned habit wilts on the same schedule as any other plant rather than sitting at full vitality forever.
+
+### Two arithmetic details worth not rediscovering
+
+`ceil(0.8 × f)` needs a floating-point guard: `0.8` has no exact binary form, so `0.8 × 5` lands a hair above 4.0 and a naive `ceil` demands 5 of 5 from an f=5 habit. The engine subtracts 1e-9 before rounding, which keeps the 0.8 a live tunable instead of hard-coding it as 4/5.
+
+All window arithmetic runs on **local dates**, and elapsed time is measured on the local wall clock (`lib/core/utils/local_dates.dart`). A day is a wall-clock day, not a 24-hour block, so a DST transition never shifts droop onset by an hour.
+
+### Four invariants the implementation has to hold
+
+These are not spec readings — they are properties the code must preserve, each recorded because breaking it produced a bug that the worked-example tests could not see. Every one of them was invisible to a suite that samples at whole days, 09:00.
+
+**The stage replay grid must not depend on the time of day it is asked about.** Stage is recomputed by replaying history against a grid of candidate instants. Anchoring that grid to the evaluation instant's clock time meant asking an hour later shifted every candidate, so a gate that had passed was never re-examined and `earnedAt` moved — which let a later stage's `notBefore` start binding and dropped the plant a rung between two openings of the garden screen on one evening. The grid is anchored to end-of-day, with the evaluation instant as the only floating candidate. **Monotonicity has to be tested across times of day, not just across days.**
+
+**Elapsed time is measured as time; windows are measured in days.** Both are local-calendar quantities but they are not interchangeable. Subtracting whole paused days from a fractional elapsed made a paused plant droop through the afternoon and spring back at midnight. Pause spans are clipped to the range and summed as time for anything continuous (the droop curve); whole local dates remain the unit for anything windowed (adherence, C₇).
+
+**The type-stability exemption belongs to `internal` alone.** Keying every non-external cue type on its type swept in `unknown` — which is the default on a `Reflection` — so eight genuinely different cues collapsed onto one key and read as perfect convergence. Since roots hard-gate Bloom, that inflated the least self-aware user through the top rung: the precise inversion §5 exists to prevent. Everything that is not an internal state is compared by label.
+
+**A milestone must not be computed from a rolling sample.** "The first un-nudged completion" read off the last-10 autonomy window, which made it *happened recently* rather than *has happened*, so it retracted itself once the early completion aged out. Autonomy is a rolling measure by design; milestones built on it need their own full-ledger query.
+
+### What the engine deliberately does not do
+
+Reflection priority scoring (reflection spec §2) and insight detection (§6) are **not** in `lib/core/engine/`. They are feature-layer concerns that consume engine outputs. Their tunables — the 0.5 threshold, the 48h recency penalty, the weekly budgets — already live in `constants.dart` so they have one home when that work starts.

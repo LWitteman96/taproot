@@ -9,16 +9,16 @@ explicit object the user designs and refines. See [README.md](README.md) for the
 
 ## Current state — read this first
 
-**The app is a scaffold. Almost nothing is implemented yet.**
+**The app is early. Read [docs/progress-log.md](docs/progress-log.md) for what actually exists.**
 
-- `lib/main.dart` is still the unmodified `flutter create` counter app.
-- `test/widget_test.dart` is still the generated counter smoke test.
-- There are no flavors, no Supabase project, no engine, no features.
-- `.githooks/` does not exist yet, although `core.hooksPath` already points at it (a harmless no-op).
+At the time of writing: flavors, CI and the pre-commit hook are wired up, and the **growth engine is
+built and reviewed** — `lib/core/engine/` plus `lib/core/models/` and
+`lib/core/utils/local_dates.dart`, with 192 tests under `test/unit/`. There is no Supabase project, no local store, no repositories, and no
+features. `lib/app/` and `lib/features/` do not exist yet.
 
-Do not write code that assumes `lib/app/`, `lib/core/`, or `lib/features/` already exist — create
-what you need. The structure below is the **target**, taken from
-[docs/infrastructure-guide.md](docs/infrastructure-guide.md) §15, not a description of what's on disk.
+Do not assume a directory exists because it appears below — the structure is the **target**, taken
+from [docs/infrastructure-guide.md](docs/infrastructure-guide.md) §15. Check the progress log, then
+check the disk.
 
 The three gates — `flutter analyze`, `dart format --output=none --set-exit-if-changed .`, and
 `flutter test` — are currently green. **Keep them green from commit one.** The infrastructure guide
@@ -39,6 +39,7 @@ Before implementing anything, read the governing document.
 | [docs/reflection-logic.md](docs/reflection-logic.md) | Prompt scheduling, framings, cue and friction taxonomies, insight rules |
 | [docs/starter-chip-library.md](docs/starter-chip-library.md) | Chip content and the first-reflection surfacing rule |
 | [docs/infrastructure-guide.md](docs/infrastructure-guide.md) | Every stack and architecture decision, with rationale |
+| [docs/progress-log.md](docs/progress-log.md) | What is built, what it decided, what comes next |
 
 Two rules about the specs:
 
