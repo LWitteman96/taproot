@@ -69,8 +69,13 @@ class Habit {
 
   final DateTime createdAt;
 
-  /// Set while a pause is running. The pause *intervals* live in their own
-  /// table — this is the current-state stamp the UI reads.
+  /// Set while a pause is running — the start of the open pause interval.
+  ///
+  /// **Derived, not stored.** The pause ledger is the only place this fact
+  /// lives; the repository fills this in on read and never writes it back.
+  /// That is why [toJson] omits `paused_at` while [fromJson] accepts it: the
+  /// map a repository builds carries the derived value, and a map this model
+  /// produces must not be able to contradict the ledger.
   final DateTime? pausedAt;
 
   final DateTime? graduatedAt;
@@ -105,7 +110,7 @@ class Habit {
     'routine': routine,
     'reward': reward,
     'created_at': encodeDateTime(createdAt),
-    'paused_at': encodeDateTime(pausedAt),
+    // No 'paused_at': see the field doc — it is derived from the pause ledger.
     'graduated_at': encodeDateTime(graduatedAt),
   };
 

@@ -2,6 +2,7 @@ import 'package:logging/logging.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:taproot/app/database/app_database.dart';
+import 'package:taproot/app/database/store_exceptions.dart';
 import 'package:taproot/app/database/store_logging.dart';
 import 'package:taproot/core/models/habit.dart';
 import 'package:taproot/core/models/pause_interval.dart';
@@ -28,12 +29,25 @@ class LocalHabitService implements HabitRepository {
 
   final Uuid _uuid;
 
+  /// Habits with their pause state joined back on.
+  ///
+  /// `paused_at` is not a column — it is the start of the open interval in
+  /// `habit_pauses`. Reading it through a join is what makes it impossible for
+  /// the stamp and the ledger to disagree. At most one interval is open per
+  /// habit ([pauseHabit] enforces it), so the join cannot fan out.
+  static const String _habitsWithPauseState =
+      '''
+    SELECT h.*, p.started_at AS paused_at
+    FROM ${AppSchema.habits} h
+    LEFT JOIN ${AppSchema.habitPauses} p
+      ON p.habit_id = h.id AND p.ended_at IS NULL
+    WHERE h.deleted_at IS NULL
+  ''';
+
   @override
   Future<List<Habit>> allHabits() => guardStore(_log, 'allHabits', () async {
-    final rows = await _database.query(
-      AppSchema.habits,
-      where: 'deleted_at IS NULL',
-      orderBy: 'created_at ASC, id ASC',
+    final rows = await _database.rawQuery(
+      '$_habitsWithPauseState ORDER BY h.created_at ASC, h.id ASC',
     );
     return rows.map(Habit.fromJson).toList();
   });
@@ -41,11 +55,9 @@ class LocalHabitService implements HabitRepository {
   @override
   Future<Habit?> habitById(String habitId) =>
       guardStore(_log, 'habitById', () async {
-        final rows = await _database.query(
-          AppSchema.habits,
-          where: 'id = ? AND deleted_at IS NULL',
-          whereArgs: <Object?>[habitId],
-          limit: 1,
+        final rows = await _database.rawQuery(
+          '$_habitsWithPauseState AND h.id = ? LIMIT 1',
+          <Object?>[habitId],
         );
         return rows.isEmpty ? null : Habit.fromJson(rows.single);
       });
@@ -53,6 +65,9 @@ class LocalHabitService implements HabitRepository {
   @override
   Future<void> saveHabit(Habit habit) =>
       guardStore(_log, 'saveHabit', () async {
+        // `habit.toJson()` deliberately carries no `paused_at`, so this cannot
+        // reach pause state even by accident — that lives in habit_pauses and
+        // is owned by pauseHabit/resumeHabit alone.
         final row = toRow(habit.toJson())..addAll(_syncStamp());
 
         // Not ConflictAlgorithm.replace: that is a DELETE followed by an
@@ -62,14 +77,33 @@ class LocalHabitService implements HabitRepository {
           final updated = await transaction.update(
             AppSchema.habits,
             row,
-            where: 'id = ?',
+            // Tombstones are excluded: an update that matched one would report
+            // success while habitById kept returning null and every child
+            // write kept throwing UnknownHabitException.
+            where: 'id = ? AND deleted_at IS NULL',
             whereArgs: <Object?>[habit.id],
           );
-          if (updated == 0) {
-            await transaction.insert(AppSchema.habits, row);
+          if (updated > 0) return;
+
+          if (await _isKnown(transaction, habit.id)) {
+            // The row exists but is deleted — the same expected-but-abnormal
+            // condition a completion for a deleted habit reports.
+            throw UnknownHabitException(habit.id);
           }
+          await transaction.insert(AppSchema.habits, row);
         });
       });
+
+  Future<bool> _isKnown(DatabaseExecutor executor, String habitId) async {
+    final rows = await executor.query(
+      AppSchema.habits,
+      columns: <String>['id'],
+      where: 'id = ?',
+      whereArgs: <Object?>[habitId],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
 
   @override
   Future<void> deleteHabit(String habitId) =>
@@ -94,18 +128,9 @@ class LocalHabitService implements HabitRepository {
           await requireExistingHabit(transaction, habitId);
           if (await _openPause(transaction, habitId) != null) return;
 
-          // The habit stamp and the interval are one write. If they could
-          // diverge, the engine would count a miss on a day the user paused.
+          // One write, one source of truth: the open interval *is* the paused
+          // state. There is no habit stamp to keep in step with it.
           final now = _clock();
-          await transaction.update(
-            AppSchema.habits,
-            <String, Object?>{
-              'paused_at': encodeDateTime(now),
-              ..._syncStamp(now),
-            },
-            where: 'id = ?',
-            whereArgs: <Object?>[habitId],
-          );
           await transaction.insert(AppSchema.habitPauses, <String, Object?>{
             'id': _uuid.v4(),
             'habit_id': habitId,
@@ -125,12 +150,6 @@ class LocalHabitService implements HabitRepository {
           if (open == null) return;
 
           final now = _clock();
-          await transaction.update(
-            AppSchema.habits,
-            <String, Object?>{'paused_at': null, ..._syncStamp(now)},
-            where: 'id = ?',
-            whereArgs: <Object?>[habitId],
-          );
           await transaction.update(
             AppSchema.habitPauses,
             <String, Object?>{

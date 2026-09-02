@@ -21,6 +21,76 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-02 — store review and fixes
+
+Branch: `feature/local-store-and-repositories`, after review of PR #2.
+
+### Landed
+
+Nine findings, seven fixed, two answered. 377 tests, all three gates green.
+
+**Two findings were the same bug twice: a whole-row upsert writing columns the model does
+not own.**
+
+- `saveHabit` wrote `paused_at` straight from the model. A stale `Habit` — an edit form
+  holding a copy loaded before the pause — cleared the stamp while leaving the interval open.
+  The habit then read as *unpaused* (so nothing offered Resume) while the engine saw
+  `ended_at IS NULL` and treated every following day as paused: vitality frozen, with no way
+  back through the public API.
+
+  Fixed by deleting the column. **Paused state is the existence of an open `habit_pauses`
+  row**, and the repository joins it back on when reading — one home for one fact, so the two
+  cannot disagree. `Habit.toJson()` no longer emits `paused_at` while `fromJson` still reads
+  it, which is what lets the repository hand the derived value back. This is the same rule the
+  engine values follow; it just took a bug to notice `paused_at` was on the wrong side of it.
+
+- `saveNudge` overwrote `sent`, `confirmed` and `declined`. A scheduler re-saving an occasion
+  after `markSent` flipped `sent` back to 0, moving an occasion that *was* nudged into
+  autonomy's un-nudged denominator and quietly depressing the graduation gate. A save now
+  restates the schedule; the outcome belongs to the `mark*` methods once the row exists.
+
+**The rest:**
+
+- **`UNIQUE (habit_id, expected_occasion_at)` was the wrong grain both ways.** `computeAutonomy`
+  matches occasions to completions by *local date*, so two occasions hours apart on one day
+  both counted; and a genuine duplicate raised an untyped `DatabaseException` that `guardStore`
+  logs at `severe`, defeating the typed non-reportable policy. The constraint is gone;
+  `LocalNudgeService` enforces one occasion per habit per local day and reports
+  `DuplicateOccasionException`. A local date cannot be expressed as a SQL constraint over a UTC
+  timestamp, which is why this could not stay in the schema.
+- **`target_frequency` now has a `CHECK (BETWEEN 1 AND 7)`.** `Habit` and `HabitInputs` both
+  assert it and release builds strip asserts; a stored 0 divides through the engine as
+  `Infinity` and throws in `.ceil()`, in production only.
+- **`saveHabit` no longer matches tombstones.** It used to report success on a soft-deleted
+  habit while `habitById` returned null and every child write threw. Now a typed
+  `UnknownHabitException`, like every other write against a deleted habit.
+- **`recordRetraction` added** for the sync path. `retractCompletion` is the user's undo and
+  checks existence and the window; ingestion checks neither, because a retraction can arrive
+  before the completion it retracts (which is why that table has no foreign key) and the window
+  was already judged on the device where undo was pressed. Re-judging it here against another
+  clock in another timezone would drop legitimate undos. The schema test that proved the insert
+  was *possible* now has a repository path that makes it reachable.
+- **`FakeNudgeService` gained the same local-date rule**, and all of the above went into
+  `store_contract.dart` first — so both implementations are held to it rather than only the
+  real one.
+
+### Answered, not fixed
+
+- **`openLocalDatabase()` has no caller.** Correct, and it is the whole job of
+  `feature/app-skeleton`, which is already branched off this one.
+- **`HabitInputsLoader` does four unbounded scans per habit.** The deliberate trade recorded in
+  the entry below: the ladder replays from the start, so a windowed read would silently change
+  the answer rather than fail. It becomes real work when the garden renders many plants —
+  a batch path and a cache keyed by `EngineConstants.version`, not a narrower query.
+
+### Left open
+
+- The undo window edge cases from the entry below are untouched.
+- Nothing enforces "one occasion per local day" across a *sync merge* — two devices can each
+  write a row for the same day and the union keeps both. The pusher will need to reconcile.
+
+---
+
 ## 2026-09-02 — local store and repositories
 
 Branch: `feature/local-store-and-repositories`.

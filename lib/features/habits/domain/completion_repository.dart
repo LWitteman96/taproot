@@ -41,4 +41,21 @@ abstract class CompletionRepository {
   /// it this throws [CompletionNotRetractableException]. An id the store has
   /// never seen throws [UnknownCompletionException].
   Future<void> retractCompletion(String habitId, String completionId);
+
+  /// Records a retraction that happened elsewhere — the sync path, not the UI.
+  ///
+  /// Unlike [retractCompletion] this asks no questions: it neither requires the
+  /// completion to be present nor checks the undo window. Both are deliberate.
+  /// A retraction can reach this device **before** the completion it retracts
+  /// (which is why `completion_retractions` has no foreign key to
+  /// `completions`), and the window was already judged on the device where the
+  /// user actually pressed undo — re-judging it here against a different clock
+  /// and a different timezone would drop legitimate undos.
+  ///
+  /// Idempotent. Still throws [UnknownHabitException] for an unknown habit.
+  Future<void> recordRetraction(
+    String habitId,
+    String completionId, {
+    required DateTime retractedAt,
+  });
 }
