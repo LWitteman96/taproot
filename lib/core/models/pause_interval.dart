@@ -1,5 +1,7 @@
 import 'package:meta/meta.dart';
 
+import 'package:taproot/core/utils/json_codec.dart';
+
 /// A stretch of paused days (growth spec §7).
 ///
 /// Paused days are excluded from every window — they are not misses — and
@@ -15,6 +17,19 @@ class PauseInterval {
   final DateTime? endedAt;
 
   bool get isOpen => endedAt == null;
+
+  /// The interval only. Row identity — `id` and `habit_id` — belongs to the
+  /// `habit_pauses` row and is added by the repository, because the engine
+  /// reasons about the stretch of days, not about which row recorded it.
+  factory PauseInterval.fromJson(Map<String, Object?> json) => PauseInterval(
+    startedAt: requireDateTime(json, 'started_at'),
+    endedAt: readDateTime(json, 'ended_at'),
+  );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'started_at': encodeDateTime(startedAt),
+    'ended_at': encodeDateTime(endedAt),
+  };
 
   PauseInterval copyWith({
     DateTime? startedAt,
