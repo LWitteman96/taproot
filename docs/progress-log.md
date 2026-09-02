@@ -21,6 +21,97 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-02 — the app skeleton
+
+Branch: `feature/app-skeleton`, stacked on `feature/local-store-and-repositories`.
+
+### Landed
+
+The wiring between `main()` and a screen. Nothing product-facing — the point of the branch is that
+the database now opens **on a device**, which nothing had ever done outside an in-memory FFI test.
+
+```
+lib/app/startup/    app_startup (appStartupProvider, retryAppStartup)
+                    app_startup_widget (loading · error-with-retry · through)
+lib/app/logging/    logging (setupLogging, stopLogging)
+lib/app/theme/      app_colors · app_spacing · app_radius · app_dimensions · themedata
+lib/app/router/     app_router (goRouterProvider, the gate, AppRoutes)
+lib/app/database/   database_provider — rewritten, see below
+lib/features/garden/pages/           garden_page (placeholder shell)
+lib/features/habits/pages/           habit_creation_page (placeholder shell)
+```
+
+One native fix came along for the ride, because without it the branch could not meet its own point:
+`flutter run --flavor dev` did not build at all. `flutter_flavorizr`'s `ios:buildTargets` processor
+points every flavor's build configuration at `AppIcon-$(ASSET_PREFIX)`, but `pubspec.yaml`
+deliberately excludes its icon processor while the app art is with the designer — so `AppIcon-dev`
+did not exist and Xcode refused the build. `ios/Runner/Assets.xcassets/` now carries `AppIcon-dev`,
+`AppIcon-stg` and `AppIcon-prod` as copies of the default set. Fixing it there rather than by editing
+`ASSETCATALOG_COMPILER_APPICON_NAME` keeps the generated build settings intact, so re-running
+flavorizr does not undo it. They are placeholders; real per-flavor icons replace them.
+
+36 new tests — 394 in total. Widget tests for `lib/app/` go in `test/app/`, mirroring `lib/app/` the way
+`test/features/` mirrors `lib/features/`; the `ProviderContainer`-only ones stay in `test/unit/app/`.
+
+### Decided
+
+- **`appDatabaseProvider` no longer throws until overridden.** It is now derived —
+  `databaseOpenerProvider` → `openedDatabaseProvider` (a `FutureProvider<Database>`) →
+  `appDatabaseProvider` (`requireValue`). The old shape worked from `main()` but left a failed open
+  with nowhere to land, and "a completion tap must never fail" means a database that will not open
+  needs a screen, not a crash. Existing `appDatabaseProvider.overrideWithValue(database)` test
+  overrides are untouched by the change.
+- **The retry invalidates `openedDatabaseProvider`, not `appStartupProvider`.** This is the whole
+  trap of the pattern: invalidating the startup provider alone re-runs its body, which awaits an
+  `openedDatabaseProvider` still holding its cached error — so the button re-reads the old failure
+  and does nothing, convincingly. `retryAppStartup(container)` is the single copy of that list, taken
+  by `ProviderContainer` rather than `WidgetRef` so the button and the test run the same code, and
+  there is a test asserting that the narrow version *would* fail.
+- **Startup gates the whole app, inside `MaterialApp`.** `AppStartupWidget` sits in the router's
+  `builder`, so its loading and error screens get the theme, directionality and media query like any
+  other screen, and no route can be reached before the store is open.
+- **The palette is written out, not seeded.** `ColorScheme.fromSeed` spreads one hue across
+  Material's full tonal range and produces exactly the even, synthetic look design-spec §6 steers
+  away from. Three hues — moss, bark, amber — plus warm neutrals; nothing is `#FFFFFF` or `#000000`,
+  and the error tone is fired clay rather than alarm red. Light and dark are built by one function
+  from a `ColorScheme`, so they can only differ in colour.
+- **The gate is stubbed open, but its failure path is real and tested.** `resolveAppGate` returns
+  the open gate because there is no auth, no profile row and no habit creation to read — reporting
+  "no habits" today would strand every launch on a placeholder. The half that is easy to get wrong
+  later is the `catch`, so that is written now: any error resolves to `failSafeAppGate`, which sends
+  a user *onward* into habit creation rather than locking them out (guide §7), and the redirect only
+  evaluates on the root path so it does not re-run per push.
+- **`redirectFor` is a plain function.** Testing a guard by driving a navigator tests the navigator;
+  the two rules worth protecting — root-path-only, and never guess while unresolved — are assertions
+  about a function.
+- **Logging takes an injectable sink.** `setupLogging` routes `package:logging` into
+  `dart:developer`, at `Level.ALL` on dev/stg and `Level.WARNING` on prod. The sink parameter is what
+  makes the level rules testable; before this branch every `Logger` in the services wrote to a root
+  with no listener and was discarded.
+
+### Left open
+
+- **Supabase and Sentry are still not initialised.** The `.env` files hold no credentials and
+  `Supabase.initialize` on an empty URL throws at launch; `lib/main.dart` documents the missing §4
+  steps in place. They arrive with the first real backend call.
+- **`AppGate` has one field.** `hasProfile` joins it when auth lands, `notificationsDecided` when the
+  permission flow does — the latter matters, because a denied permission is a designed app mode and
+  not an error.
+- **The two pages are placeholder shells.** `GardenPage` carries the flavor readout and the "lead
+  with accumulated progress" shape but no garden; `HabitCreationPage` exists so the fail-safe gate
+  has a real destination rather than a 404.
+- **No custom typeface.** The warmth comes from metrics — line height, letter spacing, body size —
+  because the typeface is with the same designer as the plant art.
+- **`GardenTicker` does not exist yet.** Ambient animation, reduced motion and the throttle that
+  keeps widget tests out of a running animation arrive with the garden.
+
+### Next
+
+The completion tap: controllers over the four repositories, the press-and-hold watering gesture with
+its non-gestural accessible path, and the undo window — the first feature code with a real screen.
+
+---
+
 ## 2026-09-02 — local store and repositories
 
 Branch: `feature/local-store-and-repositories`.
