@@ -11,10 +11,12 @@ explicit object the user designs and refines. See [README.md](README.md) for the
 
 **The app is early. Read [docs/progress-log.md](docs/progress-log.md) for what actually exists.**
 
-At the time of writing: flavors, CI and the pre-commit hook are wired up, and the **growth engine is
-built and reviewed** — `lib/core/engine/` plus `lib/core/models/` and
-`lib/core/utils/local_dates.dart`, with 192 tests under `test/unit/`. There is no Supabase project, no local store, no repositories, and no
-features. `lib/app/` and `lib/features/` do not exist yet.
+At the time of writing: flavors, CI and the pre-commit hook are wired up, the **growth engine is
+built and reviewed** (`lib/core/engine/`, `lib/core/models/`, `lib/core/utils/`), and so is the
+**local SQLite store** — `lib/app/database/` plus `HabitRepository`, `CompletionRepository`,
+`ReflectionRepository` and `NudgeRepository` under `lib/features/`, with a `HabitInputsLoader`
+feeding the engine. 358 tests under `test/unit/`. There is no Supabase project, and no feature
+has a page yet: `lib/features/*` holds `domain/`, `services/` and `providers/` only.
 
 Do not assume a directory exists because it appears below — the structure is the **target**, taken
 from [docs/infrastructure-guide.md](docs/infrastructure-guide.md) §15. Check the progress log, then

@@ -1,5 +1,7 @@
 import 'package:meta/meta.dart';
 
+import 'package:taproot/core/utils/json_codec.dart';
+
 /// How a completion got recorded.
 enum CompletionSource { tap, nudgeConfirmation, backfill }
 
@@ -30,6 +32,24 @@ class Completion {
   final bool wasNudged;
 
   final CompletionSource source;
+
+  factory Completion.fromJson(Map<String, Object?> json) => Completion(
+    id: requireString(json, 'id'),
+    habitId: requireString(json, 'habit_id'),
+    completedAt: requireDateTime(json, 'completed_at'),
+    wasNudged: readBool(json, 'was_nudged'),
+    source:
+        readEnum(json, 'source', CompletionSource.values) ??
+        CompletionSource.tap,
+  );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'id': id,
+    'habit_id': habitId,
+    'completed_at': encodeDateTime(completedAt),
+    'was_nudged': wasNudged,
+    'source': encodeEnum(source),
+  };
 
   Completion copyWith({
     String? id,

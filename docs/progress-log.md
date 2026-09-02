@@ -21,7 +21,7 @@ file points at it rather than repeating it.
 | Flavors (dev / stg / prod) | Built — entry points, resolver, native config |
 | CI, lint, pre-commit hook | Built |
 | **Growth engine** (`lib/core/engine/`) | **Built and reviewed — stage, vitality, roots, autonomy, adherence, renegotiation** |
-| Local SQLite store + repositories | Not started |
+| **Local SQLite store + repositories** | **Built — schema, four repositories, engine inputs loader** |
 | Supabase project, migrations, RLS | Not started |
 | Notification scheduling + nudge ledger | Not started |
 | Reflection check-in and chips | Not started |
@@ -30,7 +30,113 @@ file points at it rather than repeating it.
 
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
 tap → Supabase sync → notifications and the nudge ledger → reflection check-in → garden → insights.
-The engine is done, so **the local store is next**.
+The engine and the store are done, so **the completion tap is next** — the first feature code, and
+the first thing in `lib/features/` with a page attached to it.
+
+---
+
+## 2026-09-02 — local store and repositories
+
+Branch: `feature/local-store-and-repositories`.
+
+### Landed
+
+The SQLite store and the four repositories that sit on it, plus the seam that lets the store drive
+the engine:
+
+```
+lib/app/database/       app_database (schema, migrations, row encoding) · database_provider
+                        store_exceptions · store_logging
+lib/core/models/        habit (new) · toJson/fromJson on all five models
+lib/core/utils/         json_codec
+lib/features/habits/    domain: habit_repository, completion_repository,
+                                completion_retraction
+                        services: local_habit_service, local_completion_service,
+                                  habit_inputs_loader
+                        providers: habit_providers
+lib/features/reflection/    domain + services + providers: reflections
+lib/features/notifications/ domain + services + providers: the nudge ledger
+```
+
+166 new tests, written before the code. The two that matter most:
+
+- **`test/utils/store_contract.dart`** is one behavioural contract run twice — against the SQLite
+  services and against the in-memory fakes in `test/utils/fake_repositories.dart`. A fake that
+  quietly disagrees with the real store is worse than no fake, because it makes feature tests pass
+  against behaviour the app does not have.
+- **`habit_inputs_loader_test.dart`** replays the spec's Young worked example *through the store* —
+  writing rows and reading them back — and asserts the same stage the engine's own test asserts. A
+  wrong column, a lost timezone or a dropped ledger row shows up as a different stage rather than as
+  a green suite.
+
+All three gates green.
+
+### Decided
+
+- **`ConflictAlgorithm.replace` is banned on `habits`.** sqflite implements it as DELETE + INSERT,
+  which fires `ON DELETE CASCADE` and takes every completion, reflection and nudge with it. Upserts
+  go update-then-insert inside a transaction.
+- **Timestamps encode at millisecond precision.** `DateTime.toIso8601String` prints six fractional
+  digits when microseconds are non-zero and three when they are not, and `"…00.000Z"` sorts *after*
+  `"…00.000123Z"` as a string. Every range scan in the store — including the local-day window —
+  depends on fixed width, so `encodeDateTime` truncates.
+- **Sync plumbing lands now, before Supabase exists.** `pending_sync`, `updated_at` and a
+  `deleted_at` tombstone are in v1 of the schema. Adding them on the sync branch would mean a
+  migration over live local data.
+- **No `user_id` in the local schema.** The local database belongs to whoever is signed in on the
+  device; the sync layer stamps `auth.uid()` on push and the remote schema keeps it for RLS. This
+  also makes a guest → account upgrade a no-op rather than a re-attribution pass. Switching accounts
+  on one device would need a local wipe.
+- **Every child write checks the habit itself** rather than leaning on the foreign key, so callers
+  get a typed `UnknownHabitException` instead of a generic `DatabaseException` — and so a
+  *soft-deleted* habit is rejected too, which the foreign key cannot see. That exception and
+  `UnknownNudgeException` are expected-but-abnormal and deliberately never reach Sentry.
+- **`recentReflections` does not filter.** Convergence is measured over the last 8 reflections and
+  *then* narrowed to cue-bearing ones (§10). Filtering in the repository would hand the engine eight
+  cue-bearing reflections and silently delete the "fewer than three ⇒ c = 0" rule.
+- **`plantType` is a free string, not an enum.** The plant set is still with the external
+  illustrator; closing the type now would be inventing a list the design spec does not have.
+- **A completion tap can be undone, and an undo is its own append-only event.** An accidental tap
+  while browsing the garden makes people feel they cheated, which is worse for motivation than the
+  missed rep it fakes. `completion_retractions` is keyed by `(habit_id, completion_id)` and inserted
+  into, never updated — so both ledgers merge as a union in either order and a stale replay of the
+  completion cannot resurrect it. A `retracted_at` column on `completions` would have been simpler
+  and would have made an append-only event mutable, dragging back the last-write-wins conflict
+  handling that decision exists to avoid. The table has no foreign key to `completions`, because on
+  sync the retraction can arrive first.
+- **The undo window is the rest of the completion's local day, and stage may regress inside it.**
+  Stage is a replay over history, so shrinking the history replays a lower rung — the window is what
+  keeps that from reaching back into a plant grown weeks ago. The reasoning, and the two alternatives
+  rejected (a stored stage floor; refusing the undo), are in
+  [growth-engine.md §10](growth-engine.md#stage-is-monotonic-in-time-but-not-under-an-undo).
+
+### Left open
+
+- **The undo window's midnight edge.** A tap at 23:58 noticed at 00:03 cannot be undone. Added to
+  growth-engine.md §9 as an open calibration question rather than patched with a second boundary.
+- **A backfilled completion is not undoable**, because the window is judged on the day the completion
+  records, not the day it was entered. `CompletionSource.backfill` exists but nothing creates one
+  yet; revisit when the backfill UI does.
+- **Undo does not clear a nudge's `confirmed` flag.** Autonomy self-corrects — it matches completions
+  against occasions, so an undone completion drops out on its own — but the ledger column is left
+  saying a nudge was confirmed by a completion that no longer counts. Cross-aggregate cascade belongs
+  with the notifications branch, not in `CompletionRepository`.
+- **Startup wiring does not exist yet.** `appDatabaseProvider` throws until overridden and
+  `openLocalDatabase()` has no caller — `lib/app/startup/` arrives with the completion tap.
+- **`onUpgrade` has no steps yet**, only the idempotent `ensureColumn` mechanism and a worked comment
+  showing the shape. It is tested directly rather than through a v1 → v2 migration that does not
+  exist.
+- Nothing reads `pending_sync` yet. The pusher arrives with Supabase.
+
+### Next
+
+The completion tap: `lib/features/garden/` and `lib/features/habits/` controllers over these
+repositories, `lib/app/startup/` opening the database, and the tap writing locally with no spinner
+and no failure path — plus the undo affordance on top of `retractCompletion`. Worth settling there:
+the *gesture*. A bare tap is what makes the accident possible in the first place, and design-spec
+§ "the watering interaction" already asks for something with more craft than a tap — press-and-hold
+or a drag makes the mis-tap structurally unlikely instead of merely recoverable. Then Supabase, whose migrations should mirror this schema column for column —
+the model `toJson` keys are already the intended Postgres column names.
 
 ---
 
