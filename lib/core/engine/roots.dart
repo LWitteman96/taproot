@@ -59,15 +59,20 @@ bool countsTowardConvergence(Reflection reflection) =>
     reflection.inputMode != InputMode.skipped &&
     reflection.cueReported != null;
 
-/// The key a reflection converges on: the exact cue label for external types,
-/// the type itself for internal states.
+/// The key a reflection converges on: the type itself for internal states, the
+/// exact cue label for everything else.
 ///
 /// A habit genuinely anchored to an internal state ("when I feel stressed") is
 /// not a badly-designed loop and shouldn't have its roots halved for varying
-/// the label.
-String convergenceKeyFor(Reflection reflection) => reflection.cueType.isExternal
-    ? 'label:${reflection.cueReported?.trim().toLowerCase()}'
-    : 'type:${reflection.cueType.name}';
+/// the label. That exemption is for `internal` alone — keying every
+/// non-external type this way swept `unknown` in with it, and since `unknown`
+/// is the default on a `Reflection`, eight genuinely different cues collapsed
+/// onto one key and read as perfectly converged. Roots hard-gate Bloom, so
+/// that inflated the least self-aware user straight through the top rung.
+String convergenceKeyFor(Reflection reflection) =>
+    reflection.cueType == CueType.internal
+    ? 'type:${reflection.cueType.name}'
+    : 'label:${reflection.cueReported?.trim().toLowerCase()}';
 
 /// N — sum of credit over reflections at or before [at].
 double weightedReflectionCount({

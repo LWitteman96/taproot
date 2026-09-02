@@ -360,13 +360,19 @@ void main() {
           nudges: nudges,
         );
 
+        // Sampled at quarter-day steps, not whole days. Time of day is part
+        // of the input space: an earlier replay grid was anchored to the
+        // evaluation instant's clock time, so the stage was monotone when
+        // asked at 09:00 every day and regressed when asked twice in one
+        // evening.
         var previous = Stage.seed;
-        for (var d = 0; d <= 130; d++) {
-          final stage = computeStage(inputs: habit, at: day(d));
+        for (var quarter = 0; quarter <= 130 * 4; quarter++) {
+          final at = quarter / 4;
+          final stage = computeStage(inputs: habit, at: day(at));
           expect(
             stage.index,
             greaterThanOrEqualTo(previous.index),
-            reason: 'seed $seed regressed from $previous to $stage on day $d',
+            reason: 'seed $seed regressed from $previous to $stage on day $at',
           );
           previous = stage;
         }

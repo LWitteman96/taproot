@@ -302,6 +302,40 @@ void main() {
       );
     });
 
+    test('an unclassified cue is compared by label, not swept in', () {
+      // Regression: keying every non-external type on the type itself swept
+      // `unknown` — the default on a Reflection — in with internal states, so
+      // eight genuinely different cues collapsed onto one key and read as
+      // perfect convergence. Roots hard-gate Bloom, so that inflated the least
+      // self-aware user through the top rung.
+      final habit = inputs(
+        reflections: <Reflection>[
+          for (var i = 0; i < 8; i++)
+            reflectionOn(i, cueReported: 'cue $i', cueType: CueType.unknown),
+        ],
+      );
+
+      expect(
+        computeConvergence(inputs: habit, at: day(10)),
+        closeTo(0.125, 1e-9),
+      );
+    });
+
+    test('an unclassified cue still converges when it is consistent', () {
+      final habit = inputs(
+        reflections: <Reflection>[
+          for (var i = 0; i < 8; i++)
+            reflectionOn(
+              i,
+              cueReported: 'after breakfast',
+              cueType: CueType.unknown,
+            ),
+        ],
+      );
+
+      expect(computeConvergence(inputs: habit, at: day(10)), 1.0);
+    });
+
     test('convergence keys group internal cues and separate external ones', () {
       final stressed = reflectionOn(
         0,

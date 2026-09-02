@@ -233,6 +233,28 @@ void main() {
       );
     });
 
+    test('vitality does not move within a paused day', () {
+      // Regression: whole-day pause arithmetic made a paused plant droop
+      // through the afternoon and recover at midnight, every day.
+      final paused = inputs(
+        completions: completionsOn(<num>[0]),
+        pauses: <PauseInterval>[pauseFrom(3)],
+      );
+      final frozen = rawVitality(
+        inputs: paused,
+        stage: Stage.seedling,
+        at: day(3),
+      );
+
+      for (final t in <num>[3.2, 3.6, 3.99, 4.2, 4.6, 12]) {
+        expect(
+          rawVitality(inputs: paused, stage: Stage.seedling, at: day(t)),
+          closeTo(frozen, 1e-9),
+          reason: 'day $t',
+        );
+      }
+    });
+
     test('an open pause holds vitality indefinitely', () {
       final paused = inputs(
         completions: completionsOn(<num>[0]),

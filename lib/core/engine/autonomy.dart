@@ -43,12 +43,7 @@ AutonomyResult computeAutonomy({
       ? unNudged
       : unNudged.sublist(unNudged.length - EngineConstants.autonomySampleSize);
 
-  final completedDates = <LocalDate>{};
-  for (final completion in inputs.completions) {
-    if (completion.completedAt.isAfter(at)) continue;
-    completedDates.add(LocalDate.from(completion.completedAt));
-  }
-
+  final completedDates = _completedLocalDates(inputs, at);
   final completed = sample
       .where(
         (nudge) =>
@@ -71,10 +66,35 @@ double nudgeRateForStage(Stage stage) =>
 
 /// Whether the first un-nudged completion has happened — the app's whole
 /// thesis landing, and an explicit milestone.
+///
+/// Scans the whole ledger, not the autonomy sample. Reading it off
+/// [computeAutonomy] meant "happened in the last 10 occasions", so the
+/// milestone retracted itself once the user's early un-nudged completion aged
+/// out — and a milestone that un-fires will fire twice.
 bool hasUnNudgedCompletion({
   required HabitInputs inputs,
   required DateTime at,
-}) => computeAutonomy(inputs: inputs, at: at).completed > 0;
+}) {
+  final completedDates = _completedLocalDates(inputs, at);
+  for (final nudge in inputs.nudges) {
+    if (nudge.sent) continue;
+    if (nudge.expectedOccasionAt.isAfter(at)) continue;
+    if (completedDates.contains(LocalDate.from(nudge.expectedOccasionAt))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// The local dates carrying at least one completion at or before [at].
+Set<LocalDate> _completedLocalDates(HabitInputs inputs, DateTime at) {
+  final dates = <LocalDate>{};
+  for (final completion in inputs.completions) {
+    if (completion.completedAt.isAfter(at)) continue;
+    dates.add(LocalDate.from(completion.completedAt));
+  }
+  return dates;
+}
 
 /// Graduation: Bloom, c >= 0.8, autonomy >= 0.6. "This one seems locked in —
 /// we'll stop asking."

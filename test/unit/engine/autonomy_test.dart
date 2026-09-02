@@ -163,6 +163,43 @@ void main() {
     });
   });
 
+  group('the milestone does not retract', () {
+    test('stays true once an un-nudged completion has ever landed', () {
+      // Regression: reading this off the last-10 autonomy sample made it
+      // "happened recently" rather than "has happened", so it flipped back to
+      // false as the early completion aged out — and a milestone that un-fires
+      // will fire twice.
+      final habit = inputs(
+        completions: completionsOn(<num>[1]),
+        nudges: <NudgeRecord>[
+          nudgeOn(1, sent: false),
+          ...nudgesOn(<num>[
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+          ], sent: false),
+        ],
+      );
+
+      expect(hasUnNudgedCompletion(inputs: habit, at: day(1.5)), isTrue);
+      expect(hasUnNudgedCompletion(inputs: habit, at: day(15.5)), isTrue);
+      expect(hasUnNudgedCompletion(inputs: habit, at: day(400)), isTrue);
+      // Autonomy itself still reads only the recent sample, as it should.
+      expect(computeAutonomy(inputs: habit, at: day(15.5)).value, 0);
+    });
+  });
+
   group('graduation', () {
     test('needs Bloom, c >= 0.8 and autonomy >= 0.6', () {
       expect(

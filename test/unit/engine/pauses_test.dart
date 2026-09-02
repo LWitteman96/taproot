@@ -136,16 +136,49 @@ void main() {
     });
 
     test('an open pause freezes the clock entirely', () {
-      // Vitality freezes while paused (growth spec §7). A pause takes effect
-      // for the whole local day it starts on, so the day the user pauses on is
-      // never held against them.
+      // Vitality freezes while paused (growth spec §7). A pause owns whole
+      // local dates, so the clock stops at midnight opening the start date —
+      // here 0.625 of a day after the 09:00 starting instant — and never
+      // moves again.
       final frozen = activeElapsedDays(
         from: day(0),
         to: day(30),
         pauses: <PauseInterval>[pauseFrom(1)],
       );
 
-      expect(frozen, closeTo(0, 1e-9));
+      expect(frozen, closeTo(0.625, 1e-9));
+    });
+
+    test('does not move at all while the pause is running', () {
+      // Regression: subtracting whole calendar days from a fractional elapsed
+      // made this climb through each paused day and snap back a full day at
+      // local midnight, so a paused plant drooped through the afternoon and
+      // sprang back overnight.
+      final pauses = <PauseInterval>[pauseFrom(3)];
+      final atPauseStart = activeElapsedDays(
+        from: day(0),
+        to: day(3),
+        pauses: pauses,
+      );
+
+      for (final t in <num>[3.2, 3.6, 3.99, 4.2, 4.6, 9.9, 40]) {
+        expect(
+          activeElapsedDays(from: day(0), to: day(t), pauses: pauses),
+          closeTo(atPauseStart, 1e-9),
+          reason: 'day $t',
+        );
+      }
+    });
+
+    test('resumes where it stopped once the pause ends', () {
+      final active = activeElapsedDays(
+        from: day(0),
+        to: day(8.5),
+        pauses: <PauseInterval>[pauseFrom(3, endDay: 5)],
+      );
+
+      // Days 3, 4 and 5 are owned by the pause; everything else elapsed.
+      expect(active, closeTo(5.5, 1e-9));
     });
 
     test('never goes negative for a fully paused range', () {

@@ -158,32 +158,36 @@ bool isShallowRooted({required Stage stage, required double roots}) {
   return roots < threshold;
 }
 
-/// One instant per local day the habit has existed for, plus [at] itself.
+/// The replay grid: the close of each local day the habit has lived through,
+/// plus [at] itself.
 ///
-/// Day granularity is enough: every gate is a day-scale quantity, and the
-/// alternative — replaying every event instant plus every window offset — buys
-/// nothing a user could see.
+/// The grid must not depend on the *time of day* it is asked about. An earlier
+/// version anchored every candidate to `at`'s clock time, so re-evaluating an
+/// hour later shifted the whole grid, a gate that had passed on the old grid
+/// was never re-examined, and `earnedAt` moved — which let a later stage's
+/// `notBefore` start binding and dropped the plant a rung between two openings
+/// of the garden screen on the same evening.
+///
+/// Anchoring to end-of-day fixes the prefix for good: only the final,
+/// floating candidate moves as the clock advances, and everything a stage
+/// reads (completions, reflections, nudges up to an instant) only grows within
+/// a day. The `notBefore` rule compares *dates*, so recording a stage at the
+/// close of the day it was earned rather than at the exact moment costs
+/// nothing.
+///
+/// Day granularity is enough: every gate is a day-scale quantity, and
+/// replaying every event instant plus every window offset would buy nothing a
+/// user could see.
 List<DateTime> _candidateInstants(HabitInputs inputs, DateTime at) {
   final instants = <DateTime>[inputs.createdAt];
-  final local = at.isUtc ? at.toLocal() : at;
-  final span = daysBetween(
-    LocalDate.from(inputs.createdAt),
-    LocalDate.from(local),
-  );
+  final createdOn = LocalDate.from(inputs.createdAt);
+  final span = daysBetween(createdOn, LocalDate.from(at));
 
   for (var offset = 0; offset <= span; offset++) {
-    final date = LocalDate.from(inputs.createdAt).addDays(offset);
-    final candidate = DateTime(
-      date.year,
-      date.month,
-      date.day,
-      local.hour,
-      local.minute,
-      local.second,
-      local.millisecond,
-    );
-    if (candidate.isAfter(inputs.createdAt) && !candidate.isAfter(at)) {
-      instants.add(candidate);
+    final date = createdOn.addDays(offset);
+    final endOfDay = DateTime(date.year, date.month, date.day, 23, 59, 59, 999);
+    if (endOfDay.isAfter(inputs.createdAt) && !endOfDay.isAfter(at)) {
+      instants.add(endOfDay);
     }
   }
   if (instants.last != at) instants.add(at);

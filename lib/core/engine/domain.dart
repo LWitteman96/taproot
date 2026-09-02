@@ -33,8 +33,12 @@ enum CueType {
   social,
   unknown;
 
-  /// Whether convergence is measured on the exact cue label (external) rather
-  /// than on type stability (internal) — growth spec §5 exemption.
+  /// Whether this is an external cue type — event, time, location or social.
+  ///
+  /// Note that convergence keys off `internal` specifically rather than off
+  /// this getter: `unknown` is neither external nor an internal state, and
+  /// must be compared by label like the external types (see
+  /// `convergenceKeyFor`).
   bool get isExternal =>
       this == CueType.event ||
       this == CueType.time ||
