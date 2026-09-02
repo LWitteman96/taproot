@@ -30,6 +30,22 @@ Future<Database> openTestDatabase() {
   );
 }
 
+/// The same database, opened without sqflite's background isolate.
+///
+/// Widget tests run inside `flutter_test`'s fake-async zone, which pumps
+/// microtasks and fake timers but never delivers a message from another
+/// isolate. With the isolate-backed factory the open simply never completes:
+/// the app stays on its loading screen and `pumpAndSettle` spins until it times
+/// out, several minutes later, looking like a hang rather than a wrong factory.
+/// Same SQLite, same schema, one isolate.
+Future<Database> openTestDatabaseInWidgetTest() {
+  sqfliteFfiInit();
+  return openAppDatabase(
+    databaseFactory: databaseFactoryFfiNoIsolate,
+    path: inMemoryDatabasePath,
+  );
+}
+
 /// A habit with every field filled, unless overridden.
 Habit testHabit({
   String id = 'habit-1',

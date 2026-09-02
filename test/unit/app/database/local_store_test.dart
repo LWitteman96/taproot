@@ -157,19 +157,23 @@ void main() {
       },
     );
 
-    test('the database provider must be overridden before it is read', () {
+    test('the database provider is unreadable until startup has opened it', () {
+      // The handle is derived from openedDatabaseProvider rather than injected,
+      // so a read before the open finishes is a programming error rather than a
+      // silent null. Startup's loading and error screens are what stop callers
+      // ever getting here — see test/unit/app/startup/app_startup_test.dart.
       final container = ProviderContainer();
       addTearDown(container.dispose);
 
-      // Riverpod 3 wraps a throwing provider, so this asserts on the message
-      // rather than on StateError.
+      // Riverpod wraps anything a provider throws, and the wrapper is not part
+      // of its public API, so this asserts on the message rather than the type.
       expect(
         () => container.read(appDatabaseProvider),
         throwsA(
           isA<Object>().having(
             (error) => error.toString(),
             'toString',
-            contains('appDatabaseProvider must be overridden'),
+            contains('AsyncValueIsLoadingException'),
           ),
         ),
       );
