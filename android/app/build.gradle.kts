@@ -6,10 +6,16 @@ plugins {
 
 android {
     namespace = "com.taproot.taproot"
-    compileSdk = flutter.compileSdkVersion
+    // permission_handler_android requires compiling against API 37+. AGP 9.0.1
+    // reports 36 as its maximum *recommended* compileSdk, so this is deliberately
+    // ahead of that recommendation to satisfy the dependency.
+    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // Required by flutter_local_notifications, which uses java.time APIs
+        // below its minSdk.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -32,6 +38,10 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 kotlin {
