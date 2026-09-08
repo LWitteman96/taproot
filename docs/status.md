@@ -19,6 +19,7 @@ Update this file in the same commit as the work it describes.
 | CI, lint, pre-commit hook | Built |
 | **Growth engine** (`lib/core/engine/`) | **Built and reviewed — stage, vitality, roots, autonomy, adherence, renegotiation** |
 | **Local SQLite store + repositories** | **Built — schema, four repositories, engine inputs loader** |
+| **App skeleton** (`lib/app/`) | **Built — startup, logging, theme, router; two placeholder pages** |
 | Supabase project, migrations, RLS | Not started |
 | Notification scheduling + nudge ledger | Not started |
 | Reflection check-in and chips | Not started |
@@ -27,8 +28,13 @@ Update this file in the same commit as the work it describes.
 
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
 tap → Supabase sync → notifications and the nudge ledger → reflection check-in → garden → insights.
-The engine and the store are done, so **the completion tap is next** — the first feature code, and
-the first thing in `lib/features/` with a page attached to it.
+The engine, the store and the wiring between `main()` and a screen are done, so **the completion tap
+is next** — the first feature code, over repositories that already exist.
+
+What the skeleton does *not* include, deliberately: Supabase and Sentry are still uninitialised (the
+`.env` files hold no credentials, and `Supabase.initialize` on an empty URL throws at launch), the
+router's gate is stubbed open with only its fail-safe path implemented, and `GardenPage` and
+`HabitCreationPage` are placeholder shells.
 
 ---
 

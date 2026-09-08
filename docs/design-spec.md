@@ -33,6 +33,15 @@ There are two ways a user arrives at a habit, but they're powered by a **single 
 - **Journey A — Track an existing habit.** The habit already has a loop; the user just isn't conscious of it. After completing the habit, the app occasionally asks what cued it and how they rewarded themselves, **reverse-engineering** the loop to make it explicit and reinforceable.
 - **Journey B — Design a new habit from scratch.** The user writes down the intended cue, routine, and reward up front, then enters a **validation / cue-testing** phase where the app checks whether the designed loop actually fires in practice.
 
+**Journey B is the default path. Journey A is an explicit opt-out.** Creating a habit walks the full cue → routine → reward design unless the user deliberately chooses the simpler "I already do this, help me understand it" option. This is the one place the product's whole differentiator is either exercised or skipped: §1 is explicit that no competitor makes the user architect the loop, and an app that offers designing and tracking as equal-weight choices at the front door is a tracker with a designer bolted on. Defaulting to design is what makes it a habit designer.
+
+The opt-out is not a lesser mode — Journey A habits reverse-engineer their loop through reflection and arrive at the same place by a different route. What it must not be is the path of least resistance, because the full design takes two minutes and pays for itself for months.
+
+Consequences worth stating, since they reach the data model:
+
+- `Habit.designedCue`, `routine` and `reward` are nullable, which is what lets a Journey A habit exist before its loop is known. That nullability is now load-bearing, not incidental.
+- Which route a habit took is worth knowing — a Journey A habit that has since discovered a reliable cue is a *graduation* of sorts, and the two populations will behave differently under every metric in the growth engine. Open question for the habit-creation work: record the route explicitly, or infer it from "was a designed cue present at creation".
+
 ### One engine, three framings
 
 The same lightweight reflection moment shifts its question based on habit state:
@@ -117,6 +126,23 @@ The engine is decided *in principle* but the **actual formula is not yet nailed 
 - **The watering / completion tap earns real craft** — a water drop, soil darkening, the plant perking upright, a subtle haptic. **Not confetti** (overused, childish); something that feels physically gratifying, like the *thunk* of a well-made switch.
 - **Reflection has its own softer, more conversational visual language**, distinct from the quick tracking UI — so the app has two moods: the satisfying *tap* of tracking, and the slower, thoughtful *check-in* of reflection.
 
+### Watering is a press-and-hold, not a tap
+
+**Decided.** Completing a habit is a deliberate, sustained gesture — press and hold, ideally a press-and-swipe that tips a watering can and lowers the water onto the plant and soil. Not a tap.
+
+Two reasons, and the second is the one that made the call:
+
+1. **It is the gesture the craft above asks for.** A tap cannot feel like the *thunk* of a well-made switch; there is nothing to feel. A hold has duration, so it can carry the pour, the soil darkening and the haptic as one continuous act rather than a state change with an animation played over it.
+2. **A tap makes the accident possible.** The home screen is explicitly a place you open to *visit* — to look at the garden with nothing to do. A tap-to-complete target on a screen designed for idle browsing will be hit by accident, and an accidental completion makes people feel they cheated, which costs more motivation than the rep it fakes. A sustained gesture is not something a thumb does by mistake.
+
+Undo still earns its place — it covers "I marked it and then didn't actually do it", which no gesture prevents — but with a hold it is the correction, not the primary defence. See [growth-engine.md §10](growth-engine.md#stage-is-monotonic-in-time-but-not-under-an-undo) for the undo window and what it costs.
+
+**This decision carries an accessibility requirement, not a nice-to-have.** A sustained press or a drag is precisely what motor-impairment and switch-control users cannot reliably perform, so a hold-only completion would make the app's core interaction unusable for them. The gesture ships with:
+
+- **An accessible completion path that requires neither holding nor dragging** — reachable through the normal accessibility affordances, not hidden in a settings screen. The plant carries a semantic label and action for its stage, vitality and root depth regardless.
+- **The pour animation behind the `GardenTicker` abstraction**, so it can be globally throttled or disabled — for reduced-motion preferences, for battery, and so widget tests are not fighting a running animation.
+- **A hold duration that is tunable**, in `constants.dart` with everything else. Long enough not to trigger by accident, short enough not to feel like a chore several times a week; the balance is untested and is a calibration question, not a law.
+
 ### Open — for the "design" workstream
 Because plant art is going to a paid designer, the design work should focus on **everything around the plants**: overall layout, palette, the watering animation, ambient garden behavior (sway / light / weather), and the reflection UI. Treat the plant illustrations as placeholder slots for now.
 
@@ -125,13 +151,14 @@ Because plant art is going to a paid designer, the design work should focus on *
 ## 7. Summary of Major Decisions
 
 1. Habit **designer**, not just a tracker — the cue → routine → reward loop is explicit and user-owned.
-2. **Two journeys** (track existing / design new), **one reflection engine** with three framings (validation / discovery / diagnosis).
+2. **Two journeys** (track existing / design new), **one reflection engine** with three framings (validation / discovery / diagnosis). **Designing the full loop is the default path**; reverse-engineering an existing habit is an explicit opt-out, not an equal-weight choice at the front door.
 3. Reflection = **tap-not-type chips**, ~2–3×/week, payoff is **"aha" pattern surfacing**, and the app **graduates** automatic habits by backing off.
 4. **Organic garden** metaphor; **one plant per habit**, plant type chosen at creation as an **identity moment**.
 5. **Watering = behavior (above ground); roots = reflection (below ground).** Tall + shallow-rooted = precarious.
 6. **Resilience scales with growth stage**; droop is recoverable, stages are banked; signals are invitations, not accusations. No fragile streaks.
 7. **Growth engine** = rolling window vs. user's target frequency, forgiving early; **bloom needs both watering and roots**.
 8. **Home screen leads with the garden** (accumulated progress); garden is **ambient/alive**; warm, calm, tactile visual tone; **crafted watering moment**, not confetti.
+9. **Watering is a press-and-hold**, ideally a press-and-swipe pouring from a watering can — never a bare tap, which both feels like nothing and gets hit by accident on a screen built for idle browsing. Ships with a non-gestural accessible completion path and the animation behind `GardenTicker`.
 
 ---
 
