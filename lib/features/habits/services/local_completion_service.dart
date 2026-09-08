@@ -134,6 +134,27 @@ class LocalCompletionService implements CompletionRepository {
         });
       });
 
+  @override
+  Future<void> recordRetraction(
+    String habitId,
+    String completionId, {
+    required DateTime retractedAt,
+  }) => guardStore(_log, 'recordRetraction', () async {
+    await _database.transaction((transaction) async {
+      await requireExistingHabit(transaction, habitId);
+      await transaction.insert(
+        AppSchema.completionRetractions,
+        <String, Object?>{
+          'habit_id': habitId,
+          'completion_id': completionId,
+          'retracted_at': encodeDateTime(retractedAt),
+          'pending_sync': 0,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    });
+  });
+
   Future<bool> _isRetracted(
     DatabaseExecutor executor,
     String habitId,

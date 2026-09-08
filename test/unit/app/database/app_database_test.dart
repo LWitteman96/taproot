@@ -64,7 +64,6 @@ void main() {
           'routine',
           'reward',
           'created_at',
-          'paused_at',
           'graduated_at',
           'updated_at',
           'deleted_at',
@@ -72,6 +71,37 @@ void main() {
         ]),
       );
     });
+
+    test('paused state is not a habits column', () async {
+      // It is the existence of an open habit_pauses row. Two homes for one
+      // fact is what let a whole-row upsert clear the stamp while leaving the
+      // interval open — unpaused to the UI, paused forever to the engine.
+      expect(await columnsOf(AppSchema.habits), isNot(contains('paused_at')));
+    });
+
+    test(
+      'the weekly target range is enforced by the schema, not just asserts',
+      () async {
+        // Habit and HabitInputs both assert 1..7, and release builds strip
+        // asserts. A stored 0 divides through the engine as Infinity and throws
+        // in .ceil() — in production only.
+        Future<void> insertWithFrequency(int frequency) =>
+            database.insert(AppSchema.habits, <String, Object?>{
+              'id': 'habit-$frequency',
+              'name': 'Run',
+              'plant_type': 'oak',
+              'target_frequency': frequency,
+              'created_at': '2026-01-05T08:00:00.000Z',
+              'updated_at': '2026-01-05T08:00:00.000Z',
+              'pending_sync': 1,
+            });
+
+        await expectLater(insertWithFrequency(1), completes);
+        await expectLater(insertWithFrequency(7), completes);
+        expect(() => insertWithFrequency(0), throwsA(isA<DatabaseException>()));
+        expect(() => insertWithFrequency(8), throwsA(isA<DatabaseException>()));
+      },
+    );
 
     test('no table stores a derived engine value', () async {
       for (final table in await tableNames()) {
@@ -129,34 +159,22 @@ void main() {
       },
     );
 
-    test('the nudge ledger holds one row per expected occasion', () async {
-      await database.insert(AppSchema.habits, <String, Object?>{
-        'id': 'habit-1',
-        'name': 'Run',
-        'plant_type': 'oak',
-        'target_frequency': 3,
-        'created_at': '2026-01-05T08:00:00.000Z',
-        'updated_at': '2026-01-05T08:00:00.000Z',
-        'pending_sync': 1,
-      });
-
-      Map<String, Object?> occasion(String id) => <String, Object?>{
-        'id': id,
-        'habit_id': 'habit-1',
-        'expected_occasion_at': '2026-01-06T17:00:00.000Z',
-        'sent': 0,
-        'confirmed': 0,
-        'declined': 0,
-        'updated_at': '2026-01-05T08:00:00.000Z',
-        'pending_sync': 1,
-      };
-
-      await database.insert(AppSchema.nudges, occasion('n-1'));
-
-      expect(
-        () => database.insert(AppSchema.nudges, occasion('n-2')),
-        throwsA(isA<DatabaseException>()),
+    test('the nudge ledger carries no instant-grain uniqueness', () async {
+      // One occasion per habit per *local day* is the real rule, because that
+      // is the grain computeAutonomy matches at — and a local date cannot be
+      // expressed as a SQL constraint on a UTC timestamp. LocalNudgeService
+      // enforces it and reports it as a typed DuplicateOccasionException;
+      // a UNIQUE here would have raised an untyped DatabaseException that
+      // guardStore logs at severe, defeating the non-reportable policy.
+      final indexes = await database.rawQuery(
+        "SELECT sql FROM sqlite_master WHERE type = 'index' "
+        "AND tbl_name = '${AppSchema.nudges}'",
       );
+      final unique = indexes
+          .map((row) => (row['sql'] as String?) ?? '')
+          .where((sql) => sql.toUpperCase().contains('UNIQUE'));
+
+      expect(unique, isEmpty);
     });
 
     test('an undo is its own append-only event', () async {

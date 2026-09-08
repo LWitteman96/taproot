@@ -119,6 +119,56 @@ void storeContract(StoreOpener open) {
       expect(await store.habits.allHabits(), isEmpty);
     });
 
+    test('saving a stale copy cannot clear a running pause', () async {
+      // The regression that motivated dropping the paused_at column: an edit
+      // form holding a habit loaded before the pause used to write pausedAt:
+      // null straight over it, leaving the interval open. The habit then read
+      // as unpaused (so nothing offered Resume) while the engine saw an open
+      // interval and treated every following day as paused — vitality frozen,
+      // with no way back through the public API.
+      await seedHabit();
+      await store.habits.pauseHabit('habit-1');
+      final stale = testHabit(createdAt: startOfTest);
+      expect(stale.pausedAt, isNull);
+
+      await store.habits.saveHabit(stale.copyWith(name: 'Evening run'));
+
+      final habit = await store.habits.habitById('habit-1');
+      expect(habit!.name, 'Evening run');
+      expect(habit.isPaused, isTrue, reason: 'the pause ledger is the truth');
+      expect((await store.habits.pausesFor('habit-1')).single.isOpen, isTrue);
+    });
+
+    test(
+      'pause state is read back from the ledger, not from what was saved',
+      () async {
+        await seedHabit();
+        clock.advance(const Duration(days: 4));
+
+        // A habit claiming to be paused, saved while no interval is open.
+        await store.habits.saveHabit(
+          testHabit(createdAt: startOfTest, pausedAt: clock.now),
+        );
+
+        expect((await store.habits.habitById('habit-1'))!.isPaused, isFalse);
+        expect(await store.habits.pausesFor('habit-1'), isEmpty);
+      },
+    );
+
+    test(
+      'saving a deleted habit is a typed exception, not a silent no-op',
+      () async {
+        await seedHabit();
+        await store.habits.deleteHabit('habit-1');
+
+        expect(
+          () => store.habits.saveHabit(testHabit(name: 'Back from the dead')),
+          throwsA(isA<UnknownHabitException>()),
+        );
+        expect(await store.habits.habitById('habit-1'), isNull);
+      },
+    );
+
     test('deleting is idempotent, and unknown ids are a no-op', () async {
       await seedHabit();
 
@@ -499,6 +549,48 @@ void storeContract(StoreOpener open) {
         expect(await store.completions.completionsFor('habit-1'), isEmpty);
       });
 
+      test(
+        'a retraction can be recorded before its completion arrives',
+        () async {
+          // The sync path. The retraction ledger has no foreign key to
+          // completions precisely so this can land first; recordRetraction is
+          // what makes that reachable without bypassing the repository.
+          await seedHabit();
+
+          await store.completions.recordRetraction(
+            'habit-1',
+            'c-1',
+            retractedAt: startOfTest,
+          );
+          await store.completions.recordCompletion(
+            completion('c-1', startOfTest),
+          );
+
+          expect(await store.completions.completionsFor('habit-1'), isEmpty);
+        },
+      );
+
+      test('an ingested retraction ignores the undo window', () async {
+        // The window was already judged on the device where the user pressed
+        // undo. Re-judging it here, against another clock in another timezone,
+        // would drop legitimate undos.
+        await seedHabit();
+        await store.completions.recordCompletion(
+          completion('c-1', startOfTest),
+        );
+        clock.advance(const Duration(days: 30));
+
+        await expectLater(
+          store.completions.recordRetraction(
+            'habit-1',
+            'c-1',
+            retractedAt: startOfTest,
+          ),
+          completes,
+        );
+        expect(await store.completions.completionsFor('habit-1'), isEmpty);
+      });
+
       test('an unknown completion is a typed exception', () async {
         await seedHabit();
 
@@ -761,14 +853,88 @@ void storeContract(StoreOpener open) {
       );
     });
 
-    test('saving the same id twice updates in place', () async {
+    test('saving the same id twice updates the schedule in place', () async {
       await seedHabit();
       await store.nudges.saveNudge(nudge('n-1', startOfTest, sent: false));
-      await store.nudges.saveNudge(nudge('n-1', startOfTest));
+      final rescheduled = startOfTest.add(const Duration(hours: 3));
+
+      await store.nudges.saveNudge(
+        NudgeRecord(
+          id: 'n-1',
+          habitId: 'habit-1',
+          expectedOccasionAt: startOfTest,
+          sent: false,
+          scheduledFor: rescheduled,
+        ),
+      );
 
       final ledger = await store.nudges.nudgesFor('habit-1');
       expect(ledger, hasLength(1));
-      expect(ledger.single.sent, isTrue);
+      expect(ledger.single.scheduledFor!.isAtSameMomentAs(rescheduled), isTrue);
+    });
+
+    test(
+      'a re-save cannot roll back an outcome the mark methods set',
+      () async {
+        // sent / confirmed / declined belong to markSent and friends once the
+        // row exists. A scheduler re-saving the occasion used to flip sent back
+        // to 0, moving an occasion that *was* nudged into autonomy's un-nudged
+        // denominator and quietly depressing the graduation gate.
+        await seedHabit();
+        await store.nudges.saveNudge(nudge('n-1', startOfTest, sent: false));
+        await store.nudges.markSent('n-1');
+        await store.nudges.markConfirmed('n-1');
+
+        await store.nudges.saveNudge(nudge('n-1', startOfTest, sent: false));
+
+        final row = (await store.nudges.nudgesFor('habit-1')).single;
+        expect(row.sent, isTrue);
+        expect(row.confirmed, isTrue);
+      },
+    );
+
+    test('a second occasion on the same local day is refused', () async {
+      // The ledger is one row per occasion, and computeAutonomy matches
+      // occasions to completions by local date — so uniqueness is per local
+      // day, not per instant. Two rows hours apart would both land in the
+      // denominator.
+      await seedHabit();
+      await store.nudges.saveNudge(nudge('n-1', startOfTest));
+
+      expect(
+        () => store.nudges.saveNudge(
+          nudge('n-2', startOfTest.add(const Duration(hours: 6))),
+        ),
+        throwsA(
+          isA<DuplicateOccasionException>().having(
+            (error) => error.existingNudgeId,
+            'existingNudgeId',
+            'n-1',
+          ),
+        ),
+      );
+      expect(await store.nudges.nudgesFor('habit-1'), hasLength(1));
+    });
+
+    test('the next local day is a different occasion', () async {
+      await seedHabit();
+      await store.nudges.saveNudge(nudge('n-1', startOfTest));
+
+      await expectLater(
+        store.nudges.saveNudge(
+          nudge(
+            'n-2',
+            DateTime(
+              startOfTest.year,
+              startOfTest.month,
+              startOfTest.day + 1,
+              9,
+            ),
+          ),
+        ),
+        completes,
+      );
+      expect(await store.nudges.nudgesFor('habit-1'), hasLength(2));
     });
 
     test('marks a nudge sent, confirmed and declined', () async {

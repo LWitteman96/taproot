@@ -23,6 +23,8 @@ Future<T> guardStore<T>(
     rethrow;
   } on CompletionNotRetractableException {
     rethrow;
+  } on DuplicateOccasionException {
+    rethrow;
   } catch (error, stackTrace) {
     log.severe('$action failed', error, stackTrace);
     rethrow;

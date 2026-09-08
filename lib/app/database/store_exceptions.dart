@@ -53,3 +53,22 @@ class CompletionNotRetractableException implements Exception {
   String toString() =>
       'CompletionNotRetractableException($habitId/$completionId)';
 }
+
+/// Two ledger rows claimed the same expected occasion.
+///
+/// The ledger holds one row per occasion, and the engine matches occasions to
+/// completions by **local date** — so uniqueness is per habit per local day,
+/// not per instant. A second row for a day that already has one would be
+/// counted twice in autonomy's denominator.
+class DuplicateOccasionException implements Exception {
+  const DuplicateOccasionException(this.habitId, this.existingNudgeId);
+
+  final String habitId;
+
+  /// The row already holding that local date.
+  final String existingNudgeId;
+
+  @override
+  String toString() =>
+      'DuplicateOccasionException($habitId, existing: $existingNudgeId)';
+}

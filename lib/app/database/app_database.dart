@@ -29,6 +29,16 @@ export 'package:sqflite/sqflite.dart'
 ///   on the completion. Both ledgers stay insert-only, so merging two devices
 ///   is still a union — and a device replaying a completion it has not heard
 ///   was undone cannot resurrect it.
+/// - `habits` has **no `paused_at` column**. Whether a habit is paused is the
+///   existence of an open row in `habit_pauses`, so there is exactly one place
+///   that fact lives. Storing it twice let a whole-row habit upsert clear the
+///   stamp while leaving the interval open, which reads as "not paused" to the
+///   UI and "paused forever" to the engine.
+///
+/// The invariants SQLite enforces rather than trusting Dart to: the weekly
+/// target is 1..7, checked in the schema because the matching asserts in
+/// `Habit` and `HabitInputs` are stripped from release builds, and a target of
+/// 0 divides through the whole engine as `Infinity`.
 ///
 /// No table stores a derived engine value. Stage, vitality, roots and autonomy
 /// are computed from these rows at read time, so tuning an engine constant is
@@ -107,13 +117,13 @@ Future<void> _create(Database database, int version) async {
       name TEXT NOT NULL,
       identity_statement TEXT,
       plant_type TEXT NOT NULL,
-      target_frequency INTEGER NOT NULL,
+      target_frequency INTEGER NOT NULL
+        CHECK (target_frequency BETWEEN 1 AND 7),
       designed_cue TEXT,
       designed_cue_type TEXT,
       routine TEXT,
       reward TEXT,
       created_at TEXT NOT NULL,
-      paused_at TEXT,
       graduated_at TEXT,
       updated_at TEXT NOT NULL,
       deleted_at TEXT,
@@ -181,7 +191,6 @@ Future<void> _create(Database database, int version) async {
       declined INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
       pending_sync INTEGER NOT NULL DEFAULT 0,
-      UNIQUE (habit_id, expected_occasion_at),
       FOREIGN KEY (habit_id) REFERENCES ${AppSchema.habits} (id) ON DELETE CASCADE
     )
   ''');

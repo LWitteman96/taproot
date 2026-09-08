@@ -4,6 +4,7 @@ import 'package:taproot/core/models/habit.dart';
 import 'package:taproot/core/models/nudge.dart';
 import 'package:taproot/core/models/pause_interval.dart';
 import 'package:taproot/core/models/reflection.dart';
+import 'package:collection/collection.dart';
 import 'package:taproot/core/utils/local_dates.dart';
 import 'package:taproot/features/habits/domain/completion_repository.dart';
 import 'package:taproot/features/habits/domain/completion_retraction.dart';
@@ -46,7 +47,10 @@ class FakeHabitService implements HabitRepository {
 
   @override
   Future<List<Habit>> allHabits() async =>
-      _habits.values.where((habit) => !_deleted.contains(habit.id)).toList()
+      _habits.values
+          .where((habit) => !_deleted.contains(habit.id))
+          .map((habit) => _withPauseState(habit)!)
+          .toList()
         ..sort((a, b) {
           final byCreation = a.createdAt.compareTo(b.createdAt);
           return byCreation != 0 ? byCreation : a.id.compareTo(b.id);
@@ -54,10 +58,23 @@ class FakeHabitService implements HabitRepository {
 
   @override
   Future<Habit?> habitById(String habitId) async =>
-      _deleted.contains(habitId) ? null : _habits[habitId];
+      _deleted.contains(habitId) ? null : _withPauseState(_habits[habitId]);
 
   @override
-  Future<void> saveHabit(Habit habit) async => _habits[habit.id] = habit;
+  Future<void> saveHabit(Habit habit) async {
+    if (_deleted.contains(habit.id)) throw UnknownHabitException(habit.id);
+    // pausedAt is derived from the ledger, never taken from the incoming model.
+    _habits[habit.id] = habit.copyWith(pausedAt: () => null);
+  }
+
+  /// Joins the open pause interval back on, the way the SQLite read does.
+  Habit? _withPauseState(Habit? habit) {
+    if (habit == null) return null;
+    final open = (_pauses[habit.id] ?? const <PauseInterval>[])
+        .where((interval) => interval.isOpen)
+        .firstOrNull;
+    return habit.copyWith(pausedAt: () => open?.startedAt);
+  }
 
   @override
   Future<void> deleteHabit(String habitId) async {
@@ -70,9 +87,7 @@ class FakeHabitService implements HabitRepository {
     final intervals = _pauses.putIfAbsent(habitId, () => <PauseInterval>[]);
     if (intervals.any((interval) => interval.isOpen)) return;
 
-    final now = _clock();
-    intervals.add(PauseInterval(startedAt: now));
-    _habits[habitId] = _habits[habitId]!.copyWith(pausedAt: () => now);
+    intervals.add(PauseInterval(startedAt: _clock()));
   }
 
   @override
@@ -82,9 +97,9 @@ class FakeHabitService implements HabitRepository {
     final openIndex = intervals.indexWhere((interval) => interval.isOpen);
     if (openIndex < 0) return;
 
-    final now = _clock();
-    intervals[openIndex] = intervals[openIndex].copyWith(endedAt: () => now);
-    _habits[habitId] = _habits[habitId]!.copyWith(pausedAt: () => null);
+    intervals[openIndex] = intervals[openIndex].copyWith(
+      endedAt: () => _clock(),
+    );
   }
 
   @override
@@ -139,6 +154,17 @@ class FakeCompletionService implements CompletionRepository {
       throw CompletionNotRetractableException(habitId, completionId);
     }
     _retracted.add(key);
+  }
+
+  @override
+  Future<void> recordRetraction(
+    String habitId,
+    String completionId, {
+    required DateTime retractedAt,
+  }) async {
+    _habits.requireLive(habitId);
+    // No existence check and no window check — see the interface.
+    _retracted.add(_keyOf(habitId, completionId));
   }
 
   @override
@@ -222,7 +248,30 @@ class FakeNudgeService implements NudgeRepository {
   @override
   Future<void> saveNudge(NudgeRecord nudge) async {
     _habits.requireLive(nudge.habitId);
-    _nudges[nudge.id] = nudge;
+
+    final date = LocalDate.from(nudge.expectedOccasionAt);
+    final clash = _nudges.values.firstWhereOrNull(
+      (other) =>
+          other.habitId == nudge.habitId &&
+          other.id != nudge.id &&
+          LocalDate.from(other.expectedOccasionAt) == date,
+    );
+    if (clash != null) {
+      throw DuplicateOccasionException(nudge.habitId, clash.id);
+    }
+
+    final existing = _nudges[nudge.id];
+    if (existing == null) {
+      _nudges[nudge.id] = nudge;
+      return;
+    }
+    // sent / confirmed / declined belong to the mark* methods once the row
+    // exists; a re-save restates the schedule, not the outcome.
+    _nudges[nudge.id] = nudge.copyWith(
+      sent: existing.sent,
+      confirmed: existing.confirmed,
+      declined: existing.declined,
+    );
   }
 
   @override

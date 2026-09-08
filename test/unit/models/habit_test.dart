@@ -43,7 +43,6 @@ void main() {
       expect(restored.routine, original.routine);
       expect(restored.reward, original.reward);
       expect(restored.createdAt.isAtSameMomentAs(original.createdAt), isTrue);
-      expect(restored.pausedAt!.isAtSameMomentAs(original.pausedAt!), isTrue);
       expect(
         restored.graduatedAt!.isAtSameMomentAs(original.graduatedAt!),
         isTrue,
@@ -84,9 +83,24 @@ void main() {
           'routine',
           'reward',
           'created_at',
-          'paused_at',
           'graduated_at',
         ]),
+      );
+    });
+
+    test('does not serialise pausedAt — the pause ledger owns it', () {
+      // toJson is what a write is built from, so emitting paused_at would let
+      // a stale habit contradict the ledger. fromJson still reads it, because
+      // that is how the repository hands the derived value back.
+      final paused = habit(pausedAt: DateTime(2026, 2, 1, 8));
+
+      expect(paused.toJson().keys, isNot(contains('paused_at')));
+      expect(
+        Habit.fromJson(<String, Object?>{
+          ...paused.toJson(),
+          'paused_at': DateTime.utc(2026, 2, 1, 7).toIso8601String(),
+        }).pausedAt,
+        isNotNull,
       );
     });
 
