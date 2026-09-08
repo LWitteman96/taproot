@@ -1,6 +1,7 @@
 import 'package:meta/meta.dart';
 
 import 'package:taproot/core/engine/domain.dart';
+import 'package:taproot/core/utils/json_codec.dart';
 
 /// One evening check-in answer (reflection spec §5).
 ///
@@ -43,6 +44,36 @@ class Reflection {
   final FrictionType? frictionType;
 
   final bool wasNudged;
+
+  factory Reflection.fromJson(Map<String, Object?> json) => Reflection(
+    id: requireString(json, 'id'),
+    habitId: requireString(json, 'habit_id'),
+    createdAt: requireDateTime(json, 'created_at'),
+    occasion: requireEnum(json, 'occasion', Occasion.values),
+    framing: requireEnum(json, 'framing', Framing.values),
+    inputMode: requireEnum(json, 'input_mode', InputMode.values),
+    cueReported: readString(json, 'cue_reported'),
+    cueType: readEnum(json, 'cue_type', CueType.values) ?? CueType.unknown,
+    matchedDesignedCue: readNullableBool(json, 'matched_designed_cue'),
+    frictionReported: readString(json, 'friction_reported'),
+    frictionType: readEnum(json, 'friction_type', FrictionType.values),
+    wasNudged: readBool(json, 'was_nudged'),
+  );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'id': id,
+    'habit_id': habitId,
+    'created_at': encodeDateTime(createdAt),
+    'occasion': encodeEnum(occasion),
+    'framing': encodeEnum(framing),
+    'input_mode': encodeEnum(inputMode),
+    'cue_reported': cueReported,
+    'cue_type': encodeEnum(cueType),
+    'matched_designed_cue': matchedDesignedCue,
+    'friction_reported': frictionReported,
+    'friction_type': encodeEnum(frictionType),
+    'was_nudged': wasNudged,
+  };
 
   Reflection copyWith({
     String? id,

@@ -9,21 +9,22 @@ explicit object the user designs and refines. See [README.md](README.md) for the
 
 ## Current state — read this first
 
-**The app is early. Read [docs/progress-log.md](docs/progress-log.md) for what actually exists.**
+**The app is early. [docs/status.md](docs/status.md) says what exists; read it first.**
 
-At the time of writing: flavors, CI and the pre-commit hook are wired up, and the **growth engine is
-built and reviewed** — `lib/core/engine/` plus `lib/core/models/` and
-`lib/core/utils/local_dates.dart`, with 192 tests under `test/unit/`. There is no Supabase project, no local store, no repositories, and no
-features. `lib/app/` and `lib/features/` do not exist yet.
+This file deliberately does *not* restate what is built. That summary went stale on every branch and
+had to be edited in two places at once, which made it a merge conflict on every merge. One home:
+[docs/status.md](docs/status.md) for the current state,
+[docs/progress-log.md](docs/progress-log.md) for how it got there.
 
-Do not assume a directory exists because it appears below — the structure is the **target**, taken
-from [docs/infrastructure-guide.md](docs/infrastructure-guide.md) §15. Check the progress log, then
-check the disk.
+Two things follow from "early", and they hold whatever the status table says:
 
-The three gates — `flutter analyze`, `dart format --output=none --set-exit-if-changed .`, and
-`flutter test` — are currently green. **Keep them green from commit one.** The infrastructure guide
-(§17) notes that inkBlox let `flutter analyze` lapse in CI and it was far harder to restore than to
-maintain.
+- **Do not assume a directory exists because it appears below.** The structure here is the
+  **target**, taken from [docs/infrastructure-guide.md](docs/infrastructure-guide.md) §15. Check
+  status, then check the disk.
+- **Keep the three gates green from commit one** — `flutter analyze`,
+  `dart format --output=none --set-exit-if-changed .`, `flutter test`. The infrastructure guide
+  (§17) notes that inkBlox let `flutter analyze` lapse in CI and it was far harder to restore than
+  to maintain.
 
 ---
 
@@ -39,7 +40,8 @@ Before implementing anything, read the governing document.
 | [docs/reflection-logic.md](docs/reflection-logic.md) | Prompt scheduling, framings, cue and friction taxonomies, insight rules |
 | [docs/starter-chip-library.md](docs/starter-chip-library.md) | Chip content and the first-reflection surfacing rule |
 | [docs/infrastructure-guide.md](docs/infrastructure-guide.md) | Every stack and architecture decision, with rationale |
-| [docs/progress-log.md](docs/progress-log.md) | What is built, what it decided, what comes next |
+| [docs/status.md](docs/status.md) | Where the project stands right now — the one mutable summary |
+| [docs/progress-log.md](docs/progress-log.md) | How it got there: what landed, what it decided, in order |
 
 Two rules about the specs:
 

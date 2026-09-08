@@ -1,5 +1,7 @@
 import 'package:meta/meta.dart';
 
+import 'package:taproot/core/utils/json_codec.dart';
+
 /// One expected occasion in the nudge ledger.
 ///
 /// A row exists for every expected occasion **including the ones the engine
@@ -32,6 +34,26 @@ class NudgeRecord {
   final DateTime? scheduledFor;
   final bool confirmed;
   final bool declined;
+
+  factory NudgeRecord.fromJson(Map<String, Object?> json) => NudgeRecord(
+    id: requireString(json, 'id'),
+    habitId: requireString(json, 'habit_id'),
+    expectedOccasionAt: requireDateTime(json, 'expected_occasion_at'),
+    sent: readBool(json, 'sent'),
+    scheduledFor: readDateTime(json, 'scheduled_for'),
+    confirmed: readBool(json, 'confirmed'),
+    declined: readBool(json, 'declined'),
+  );
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    'id': id,
+    'habit_id': habitId,
+    'expected_occasion_at': encodeDateTime(expectedOccasionAt),
+    'scheduled_for': encodeDateTime(scheduledFor),
+    'sent': sent,
+    'confirmed': confirmed,
+    'declined': declined,
+  };
 
   NudgeRecord copyWith({
     String? id,

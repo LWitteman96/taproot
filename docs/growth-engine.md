@@ -250,6 +250,7 @@ Resist synthesizing insight before the data supports it. A fabricated "aha" is w
 - **Wilt-duration trigger (7 days)** — should probably be shorter at Sprout, where the user is newest and most likely to leave.
 - **Advisory root thresholds** — do they need to exist at all, or is the tall-and-shallow visual sufficient on its own?
 - **Does the clamp-collapse rule need to add *time*, or only rigour (§3)?** "Two consecutive passing windows" is implemented as the 84 days ending now, both scored at θ=0.80. Because the sequential-window rule already forces Bloom's own window to open after Mature was earned, the earlier of those two windows lies *before* Mature — so the rule re-scores pre-Mature history at the higher bar rather than demanding another 42 days after it. Both readings satisfy "hold the bar for twelve weeks rather than six" as written; the stricter one costs a weekly habit roughly six more weeks to bloom. Unresolved.
+- **The undo window's midnight edge.** A completion can be undone for the rest of the local day it falls on (see §10). Someone who taps at 23:58 and notices at 00:03 cannot undo it, which is the one case where the rule is plainly unhelpful. The alternatives — a short grace period past midnight, or "same local day *or* within N minutes, whichever is longer" — each add a second boundary to explain. Left at the simple rule until there is evidence the edge is hit.
 - **What the wilt freeze freezes at (§4).** "Vitality floors at droop-onset" reads literally as V = 1.0, since that *is* the value at onset — the plant stops looking unwell the moment the app decides the target is wrong. The alternative reading is that vitality holds at whatever it was when candidacy began, which for the wilted-7-days trigger means holding at 0. Implemented literally and isolated as `EngineConstants.wiltFreezeFloor`; the two readings say different things to a drowning user and this is untested.
 
 **Resolved by pressure-testing (see §1, §3, §4, §5, §6, §7):** convergence penalty on internal cues · root gates over-tightened on intermediate stages · responsive habits out of v1 scope · vacuous `c` on empty cue sets · renegotiation latency · clamp collapse at low `f` · pacing exemption dead at high `f` · nudge dependence invisible.
@@ -293,6 +294,22 @@ A window is a set of local dates, so `W_reps × 7 / f` is rounded up before clam
 ### Completions are counted, not completion-days
 
 `completions_in_window` counts events, so two waterings in one day count as two reps. The 1.0 cap is what bounds the effect; preventing accidental double-taps is the UI's job, not the engine's.
+
+### Stage is monotonic in time, but not under an undo
+
+"An earned stage is banked and never lost" (§0) holds as time moves forward: the replay above re-derives the same rung from the same history, so a user who disappears for two months keeps their tree. It does **not** hold when the history *shrinks*.
+
+A completion tap can be undone — an accidental tap on a plant while browsing the garden is a real and demoralising failure mode, and it is worse if the app makes it permanent. But because stage is a replay rather than a stored maximum, removing a completion re-runs the replay without it, and a completion that opened a gate takes its stage with it.
+
+Three ways out, and the one taken:
+
+1. **Store the earned stage as a floor.** Preserves the promise absolutely, at the cost of the rule that derivations are never stored — the floor would have to be keyed by the constants version, which is exactly the coupling `constants.dart` exists to avoid.
+2. **Refuse an undo that would un-earn a stage.** Nothing regresses and nothing is stored, but the user is told they may not correct a tap they know was wrong.
+3. **Bound the undo instead.** A completion is undoable only for the rest of its local calendar day, so a regression can only ever undo a stage earned that same day, seconds or hours after the mis-tap that caused it.
+
+**(3) is implemented.** The window is `isRetractable` in `lib/features/habits/domain/completion_retraction.dart`, and the regression is a tested consequence rather than an accident. Read plainly: the promise is that the app will not take away a plant you grew — not that it will keep crediting you for a tap you have just told it was a mistake.
+
+The storage shape matters here too. An undo is an **append-only retraction event**, not a delete and not a mutable flag, so the completions ledger and the retraction ledger merge across devices as a union in either order — a device replaying a completion it has not heard was undone cannot resurrect it. Autonomy needs no special handling: it matches completions against un-nudged occasions, so an undone completion drops out of the numerator on its own.
 
 ### A habit that has never been watered measures its gap from creation
 
