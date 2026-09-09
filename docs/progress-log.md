@@ -21,6 +21,140 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-09 — the completion tap
+
+Branch: `feature/completion-tap`, on top of the app skeleton.
+
+### Landed
+
+The first product loop: open the app, hold a plant, watch it grow, take it back if that was a
+mistake. It is also the first code that puts the engine, the store and a screen in the same sentence.
+
+```
+lib/app/runtime/            runtime_providers (clockProvider, newIdProvider)
+lib/app/theme/              app_motion — durations as design tokens
+lib/features/garden/
+  controllers/              garden_controller (water, undo, refresh)
+  domain/                   garden_state · garden_ticker · plant_descriptions
+  providers/                garden_selectors
+  widgets/                  watering_control · plant_card
+  pages/                    garden_page — rewritten from the placeholder
+lib/features/habits/services/  demo_habit_seed (dev flavor only)
+```
+
+42 new tests — 455 in total, all three gates green.
+
+### Decided
+
+- **The tap is optimistic, and the ordering is the feature.** `water()` re-runs `evaluateGrowth`
+  against the history already in memory with the new completion appended, sets state, and only then
+  writes. A completion tap must never fail, never spin and never be lost; awaiting a database before
+  the plant reacts breaks the first two of those. That is why `PlantState` holds each habit's
+  `HabitInputs` rather than re-reading four repositories per tap.
+
+- **A failed write is rolled back, not swallowed.** Showing growth that was not stored is worse than
+  showing the failure — the next launch would take it away again with no explanation. The two
+  expected-but-abnormal cases are separated out: `UnknownHabitException` (deleted on another device)
+  drops the plant from the garden with a sentence, and `CompletionNotRetractableException` (the undo
+  offer went stale across midnight) says the window closed. Neither is an error report.
+
+- **The gesture is a long-press recognizer, not a tap plus a timer.** Two reasons that both bite. Its
+  down callback fires on contact, so the pour starts when the finger lands rather than after the tap
+  arena's 100 ms deadline — a tap-based hold is silently 100 ms longer than its constant says. And it
+  is in the gesture arena, so a slow scroll with a finger resting on a plant hands the pointer to the
+  scrollable and cancels the hold, which is the accidental completion the whole decision exists to
+  prevent. There is a test for exactly that.
+
+- **`AppMotion.waterHoldDuration` is a design token, not an engine constant.** design-spec §6 says the
+  hold duration belongs "in constants.dart with everything else", but `EngineConstants` carries a
+  version stamp that cached derivations key off. Shortening an animation must not invalidate every
+  stored stage in the app, so interaction timing lives in `lib/app/theme/app_motion.dart` with the
+  other tokens. It is deliberately **not** scaled by `GardenTicker`: turning motion down must not make
+  the accident easier.
+
+- **`GardenTicker` has two dials, because ambient and transient motion fail differently.**
+  `ambientEnabled` governs the endless loops that hang `pumpAndSettle`; `motionScale` governs finite,
+  caused animation, and at 0 those resolve to their end state rather than being skipped. A platform
+  reduced-motion preference wins over the app's setting, folded in by `gardenTickerOf`.
+
+- **The accessible path changes the words, not just the wiring.** The control carries a semantics
+  action that waters on a plain activate, *and* renders as an ordinary button when the platform
+  reports assistive navigation — because telling a switch-control user to "hold to water" is worse
+  than not offering the gesture at all.
+
+- **Plant state is written out in words.** `plant_descriptions.dart` turns stage, vitality and root
+  depth into labels. That is the semantics layer the illustration will still need once it exists —
+  it hangs on the card, which is exactly where the art will go — and it is also what lets a widget
+  test assert on a plant at all. The watering button gets an *action* label instead, because a
+  control that repeats the description makes a screen reader read the plant twice before offering
+  the one thing there is to do.
+
+### Found
+
+**`SnackBar.persist` defaults to `action != null`.** Adding the undo action to the watering
+confirmation silently turned its `duration` off, so the offer sat over the garden until something
+else replaced it. `persist: false` is now passed explicitly, with a comment, and a test watches the
+offer expire. Worth remembering generally: a Flutter default that depends on another argument is not
+visible at the call site.
+
+**A `late final` `AnimationController` is a disposal bug waiting for the right branch.** The assistive
+path never touches the pour, so `dispose()` was the first thing to reach the field — constructing an
+`AnimationController` on an element that is already deactivated. It is built in `initState` now. The
+accessibility test is what found it, which is the argument for writing that test first rather than
+last.
+
+**A card that describes itself will swallow its own buttons.** Running the app on the simulator and
+reading the accessibility tree — not the widget tests — showed the plant's state announced twice,
+once as card text and once as the watering button's label. Fixing that by moving the description onto
+the card and giving the button an action label ("Water Morning walk") then exposed the real defect
+underneath: `Semantics(container: true)` merges its descendants by default, so after a watering the
+card was **one node carrying two tap actions**, of which a screen reader can only reach one — the
+undo would have been unreachable. `explicitChildNodes: true` keeps them separate, and a test now taps
+undo through the semantics tree rather than through the widget tree.
+
+The general lesson: a widget test can assert a label is present, but only the real accessibility tree
+shows what a screen reader actually *hears*. Run the app for this.
+
+### Left open
+
+- **Habit creation is still a placeholder**, so the only way to get a habit into the store is
+  `plantDemoHabit`, a dev-flavor button on the empty garden. It is scaffolding and is meant to be
+  deleted: writing a stand-in form now would front-run the designed flow — the two journeys, the
+  plant-type identity moment, the cue/routine/reward triple. Its flavor check is inside the function,
+  not only at the call site, so it cannot write to a production store from somewhere else later.
+- **The router's gate stays stubbed open.** `hasFirstHabit` could be read from the habit count now,
+  but sending a first launch to a placeholder creation page would strand it. The gate becomes real
+  with habit creation.
+- **The press-and-*swipe* is not built.** design-spec §6 asks for a hold "ideally a press-and-swipe
+  that tips a watering can"; what ships is the hold, with the pour as a fill. The watering can is part
+  of the same illustration work the plants are.
+- **`completion.wasNudged` is false everywhere**, because nothing writes the nudge ledger until the
+  notifications branch. That is honest rather than provisional — no nudge was sent, so none was. The
+  controller already reads the ledger for today's occasion, so it starts telling the truth the moment
+  rows exist. Autonomy does not depend on this flag; it matches the ledger against completions itself.
+- **Undo does not clear a nudge's `confirmed` flag** — unchanged from the store branch, and still
+  cross-aggregate work that belongs with notifications.
+- **The undo offer on a card can go stale across midnight.** `PlantState.undoableCompletion` is
+  evaluated, not live, so a garden left open overnight still shows the button. The repository
+  re-judges the window and the controller explains it — the affordance is optimistic, the boundary is
+  not.
+- **No `GardenTicker` consumer sways yet.** The abstraction exists and the pour sits behind it; the
+  ambient garden it was built for arrives with the rendering.
+
+### Verified on device
+
+Built and run on the simulator under the dev flavor, because the point of the hold is how it behaves
+and no widget test can report that: the seed plants a habit, the hold moves the plant Seed → Sprout in
+place, the control relabels to "Hold to water again", the card grows its standing Undo and the
+transient offer appears. The accessibility-tree read that found the merged-node bug above came from
+the same run.
+
+### Next
+
+Supabase sync: the project, the migrations mirroring this schema column for column, RLS, and a pusher
+over the `pending_sync` column the store already writes. The model `toJson` keys are already the
+intended Postgres column names.
+
 ## 2026-09-02 — the app skeleton
 
 Branch: `feature/app-skeleton`, stacked on `feature/local-store-and-repositories`.
