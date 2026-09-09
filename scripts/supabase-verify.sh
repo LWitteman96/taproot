@@ -38,7 +38,9 @@ elif [[ $# -gt 0 ]]; then
   exit 1
 fi
 
-TMP_SQL="$(mktemp -t taproot-verify)"
+# An explicit template, not `mktemp -t taproot-verify`: BSD mktemp appends
+# the random suffix itself, GNU mktemp rejects a template without XXXXXX.
+TMP_SQL="$(mktemp "${TMPDIR:-/tmp}/taproot-verify.XXXXXX")"
 trap 'rm -f "$TMP_SQL"' EXIT
 
 if ! command -v supabase &>/dev/null; then
