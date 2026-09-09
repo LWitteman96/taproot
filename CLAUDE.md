@@ -277,9 +277,13 @@ overridable in tests. Provide a `FakeHabitService` in `test/utils/`.
 
 ## Backend
 
+[supabase/README.md](supabase/README.md) covers how to run and verify it — local ports, the verify
+script, and what is deliberately absent.
+
 - Migrations are hand-written, timestamped SQL in `supabase/migrations/`. No ORM, no schema diffing.
-- **Migrations must be idempotent and re-runnable** — drop policies inside a
-  `DO $$ ... IF EXISTS ... END $$;` block before recreating, and use `CREATE INDEX IF NOT EXISTS`.
+- **Migrations must be idempotent and re-runnable** — `CREATE TABLE / INDEX IF NOT EXISTS`,
+  `DROP POLICY IF EXISTS` before every `CREATE POLICY`, `CREATE OR REPLACE FUNCTION`.
+  `scripts/supabase-verify.sh` applies every migration a second time and fails if one is not.
 - Every table has RLS enabled with explicit grants. Taproot's access matrix is trivial —
   **every table is `user_id = auth.uid()`, full stop** — because there is no social graph.
 - Wrap the auth call as `(SELECT auth.uid())`, which lets Postgres cache it per-statement rather than
@@ -287,6 +291,12 @@ overridable in tests. Provide a `FakeHabitService` in `test/utils/`.
 - Port the `delete-account` edge function early, not at submission time. App Store Review Guideline
   5.1.1(v) requires in-app account deletion, and it's the most common cause of a first-review
   rejection.
+- **No DELETE is granted to any client role**, on any table. Deleting a habit is `deleted_at`,
+  undoing a completion is a row in `completion_retractions`, and erasing an account is
+  `delete-account` running as `service_role`. Sync is a union, so rows must never go backwards.
+- Text enum columns carry the Dart `Enum.name` **verbatim** — camelCase (`nudgeConfirmation`,
+  `autonomyCompletion`, `cantRemember`), because `encodeEnum` is `value.name`. A value added to
+  `lib/core/engine/domain.dart` needs the matching `CHECK` widened in the same commit.
 
 ---
 

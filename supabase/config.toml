@@ -1,0 +1,160 @@
+# Taproot — Supabase local/remote configuration.
+#
+# Reference: https://supabase.com/docs/guides/local-development/cli/config
+#
+# This file is pushed to staging and production with `scripts/supabase-push.sh
+# <stg|prod>`, which is the only supported way to do it: `config push` resolves
+# the env() references below from the *active* `.env`, so pushing with the wrong
+# one silently breaks auth on that project.
+#
+# Only the settings Taproot actually decides are listed. Anything absent is the
+# CLI default on purpose — a copy of the full generated file goes stale against
+# the CLI every release and hides the handful of lines that are ours.
+
+project_id = "taproot"
+
+# Ports are the 5433x block, not the CLI's default 5432x. inkBlox runs a local
+# Supabase stack on the defaults, and one of the reasons for the bare+worktree
+# layout is that two projects can be worked on at once — a port clash there
+# means "stop the other project", which is exactly the thing not to have to do.
+# The dev SUPABASE_URL is therefore http://127.0.0.1:54331.
+
+[api]
+enabled = true
+port = 54331
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54332
+shadow_port = 54330
+major_version = 17
+
+[db.migrations]
+enabled = true
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+# Off. The device's SQLite is the primary store and sync is a one-way drain of
+# `pending_sync` rows (guide §8); a realtime subscription would be a second,
+# unordered path into the same rows, racing the drain it duplicates. Turn this
+# on only with a designed answer for that race.
+[realtime]
+enabled = false
+
+[studio]
+enabled = true
+port = 54333
+api_url = "http://127.0.0.1"
+
+# Local mail catcher — magic links and OTPs land here instead of being sent.
+[inbucket]
+enabled = true
+port = 54334
+
+# Off. Plant art ships in the app bundle (guide §9), so there is no bucket to
+# serve and nothing for `delete-account` to purge. Adding a bucket means turning
+# this on, creating it in a migration, and restoring the storage purge step in
+# `functions/delete-account/index.ts` — which is left in place, commented, for
+# exactly that reason.
+[storage]
+enabled = false
+
+[analytics]
+enabled = false
+
+[auth]
+enabled = true
+
+# Mobile-first: the PKCE flow returns to the app through this deep link, not to
+# a website. The scheme must match the one registered in Info.plist and
+# AndroidManifest.xml — that native half is NOT wired up yet (see
+# docs/status.md), so this is the target, not a tested path.
+site_url = "io.supabase.taproot://login-callback/"
+additional_redirect_urls = [
+  "io.supabase.taproot://login-callback/",
+  # Flutter web / `flutter run -d chrome` during development.
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+]
+
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+enable_signup = true
+
+# Off. "Continue without an account" is served by the local store — every read
+# and write already works with no session at all — so an anonymous auth user
+# would buy nothing and leave an orphan row behind on every install.
+enable_anonymous_sign_ins = false
+enable_manual_linking = false
+minimum_password_length = 8
+
+[auth.rate_limit]
+email_sent = 2
+sms_sent = 0
+token_refresh = 150
+sign_in_sign_ups = 30
+token_verifications = 30
+
+[auth.email]
+enable_signup = true
+# The email path is a magic link / OTP, so there is no separate confirmation
+# step to gate sign-in on: clicking the link *is* the confirmation.
+enable_confirmations = false
+double_confirm_changes = true
+max_frequency = "1s"
+otp_length = 6
+# One hour. Deliberately a literal and not env(OTP_EXPIRY): the CLI substitutes
+# env() into string fields, and this one is an integer.
+otp_expiry = 3600
+
+# No SMTP provider has been chosen yet, so this stays commented rather than
+# being half-wired. Local email goes to inbucket regardless; staging and
+# production will send nothing until this block is filled in and pushed.
+# [auth.email.smtp]
+# enabled = true
+# host = "smtp.example.com"
+# port = 587
+# user = "apikey"
+# pass = "env(SMTP_PASS)"
+# admin_email = "noreply@taproot.app"
+# sender_name = "Taproot"
+
+[auth.sms]
+enable_signup = false
+enable_confirmations = false
+
+# Apple sign-in is mandatory alongside any other third-party login on iOS, so
+# both providers are wired here and disabled together. Flip `enabled` to true
+# per provider once the credentials exist in `.secrets/.env.<flavor>`; the
+# env() names below are the keys to add. Enabling a provider whose secret
+# resolves to an empty string fails auth at runtime, not at start-up, so do the
+# two edits in one commit.
+[auth.external.apple]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_APPLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_APPLE_SECRET)"
+
+[auth.external.google]
+enabled = false
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+# Required for Google sign-in to succeed against the local stack.
+skip_nonce_check = true
+
+[edge_runtime]
+enabled = true
+policy = "per_worker"
+inspector_port = 8084
+deno_version = 2
+
+# App Store Review Guideline 5.1.1(v): an app with account creation must offer
+# in-app account deletion. `verify_jwt` is what makes the function's "resolve
+# the caller from their JWT, never the request body" rule enforceable.
+[functions.delete-account]
+enabled = true
+verify_jwt = true

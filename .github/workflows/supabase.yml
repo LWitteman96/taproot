@@ -1,0 +1,52 @@
+name: Supabase CI
+
+# Split from flutter.yml rather than added to it, and path-filtered: this job
+# pulls the whole local Supabase stack in Docker, which is minutes the Dart
+# gates should not have to wait behind on a branch that touches no SQL.
+on:
+  pull_request:
+    branches: [develop, main]
+    paths:
+      - 'supabase/**'
+      - 'scripts/supabase-verify.sh'
+      - '.github/workflows/supabase.yml'
+  push:
+    branches: [develop, main]
+    paths:
+      - 'supabase/**'
+      - 'scripts/supabase-verify.sh'
+      - '.github/workflows/supabase.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Migrations, RLS & delete-account
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          # Pinned rather than `latest`: the CLI ships the Postgres image and
+          # the config.toml schema together, so an unpinned bump can fail a
+          # branch that changed nothing. Raise it deliberately.
+          version: 2.105.0
+
+      - name: Start the local stack
+        run: supabase start
+
+      # Resets from the migrations, re-applies every one of them a second time
+      # to prove they are re-runnable, runs the pgTAP suite, and deletes an
+      # account through the edge function. Exactly what a developer runs.
+      - name: Verify the backend
+        run: scripts/supabase-verify.sh
+
+      - name: Container logs on failure
+        if: failure()
+        run: supabase status || docker ps -a
