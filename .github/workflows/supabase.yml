@@ -21,6 +21,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The job checks out and runs containers; it writes nothing back. On a public
+# repo the default token is worth narrowing, because `supabase start` hands the
+# environment to every image it pulls.
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Migrations, RLS & delete-account

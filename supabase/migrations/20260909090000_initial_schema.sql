@@ -28,6 +28,23 @@
 --     and is what an incremental pull ranges over. Conflating them means a
 --     device with a skewed clock can write rows a later pull never sees.
 --
+-- READ THIS BEFORE BUILDING THE PULL. `synced_at` is stamped when the row is
+-- written, and the row becomes visible when its transaction commits — which is
+-- later, by however long the rest of that transaction took. A pull that reads
+-- at T and stores `cursor = T` can therefore miss a row stamped before T that
+-- commits after it, permanently. Two ways out, and the sync branch has to pick
+-- one: overlap the window (pull from `cursor - slack`, and rely on the upsert
+-- being idempotent, which every table here is), or move the cursor off the
+-- clock entirely onto `xid8`/`pg_current_snapshot()`. What does *not* work is
+-- `synced_at > cursor` with the cursor set to the read time.
+--
+-- Two columns the client must supply that nothing here defaults: `user_id`,
+-- and `updated_at` on the mutable tables. `updated_at` deliberately has no
+-- `default now()` — it is the client's clock and the app compares it, so a
+-- server default would quietly invent a value the app then treats as the
+-- device's. A push that omits either gets a 23502, which is the intended
+-- failure: the local row has both.
+--
 -- House rule: migrations are idempotent and re-runnable, so the same file
 -- applies cleanly to local, staging and production at different points in
 -- their history. Everything below is `IF NOT EXISTS` / `CREATE OR REPLACE`.
@@ -49,7 +66,11 @@ language plpgsql
 set search_path = ''
 as $$
 begin
-  new.synced_at := now();
+  -- clock_timestamp(), not now(): now() is transaction_timestamp(), so every
+  -- row in a batched push would carry the moment the transaction *opened*.
+  -- See the warning on the column below — this narrows that window, it does
+  -- not close it.
+  new.synced_at := clock_timestamp();
   return new;
 end;
 $$;
@@ -72,6 +93,13 @@ comment on table public.profiles is
   'One row per auth user, created by the handle_new_user trigger. Deliberately '
   'near-empty: there is no social graph, and app settings live on-device until '
   'something needs them server-side.';
+
+create index if not exists idx_profiles_synced_at
+  on public.profiles (synced_at);
+
+drop trigger if exists set_synced_at on public.profiles;
+create trigger set_synced_at before insert or update on public.profiles
+  for each row execute function public.set_synced_at();
 
 -- ── habits ──────────────────────────────────────────────────────────────────
 
@@ -113,7 +141,33 @@ comment on constraint habits_designed_cue_type_schedulable on public.habits is
 
 comment on column public.habits.deleted_at is
   'Soft delete. Rows are never removed by the client, so a device that has not '
-  'yet heard about a deletion cannot resurrect one by re-pushing its copy.';
+  'yet heard about a deletion cannot resurrect one by re-pushing its copy — '
+  'see pin_soft_delete(), which is what actually enforces that.';
+
+-- Revoking DELETE is only half of "a deletion cannot be undone by a device
+-- that never heard about it". The other half is this: without it, an offline
+-- device pushing its stale copy of the row sets deleted_at back to null and
+-- the habit reappears, on every device, with all of its children still live.
+--
+-- The *first* deletion wins, so a second device pushing a later stamp cannot
+-- move it either. graduated_at is deliberately not pinned: graduation is
+-- derived from autonomy, which can fall, and whether it is one-way is the
+-- engine's question to answer rather than something to freeze here by
+-- analogy.
+create or replace function public.pin_soft_delete()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.deleted_at := coalesce(old.deleted_at, new.deleted_at);
+  return new;
+end;
+$$;
+
+comment on function public.pin_soft_delete() is
+  'Makes habits.deleted_at one-way and first-write-wins, so a stale push '
+  'cannot resurrect a deleted habit.';
 
 create index if not exists idx_habits_user_synced_at
   on public.habits (user_id, synced_at);
@@ -121,6 +175,10 @@ create index if not exists idx_habits_user_synced_at
 drop trigger if exists set_synced_at on public.habits;
 create trigger set_synced_at before insert or update on public.habits
   for each row execute function public.set_synced_at();
+
+drop trigger if exists pin_soft_delete on public.habits;
+create trigger pin_soft_delete before update on public.habits
+  for each row execute function public.pin_soft_delete();
 
 -- ── completions ─────────────────────────────────────────────────────────────
 

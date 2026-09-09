@@ -24,6 +24,10 @@ enabled = true
 port = 54331
 schemas = ["public", "graphql_public"]
 extra_search_path = ["public", "extensions"]
+# PostgREST caps every response at this and does not say it truncated. An
+# incremental pull must therefore page — on Range headers, or on the last
+# synced_at it actually received — and never treat one response as the whole
+# answer. A user with a year of completions is well past 1000 rows.
 max_rows = 1000
 
 [db]
@@ -102,9 +106,15 @@ token_verifications = 30
 
 [auth.email]
 enable_signup = true
-# The email path is a magic link / OTP, so there is no separate confirmation
-# step to gate sign-in on: clicking the link *is* the confirmation.
-enable_confirmations = false
+# On, and it has to be. The intended email path is a magic link, where clicking
+# the link *is* the confirmation — but enabling email sign-up enables the
+# password grant with it, and there is no switch here that separates the two.
+# With confirmations off, anyone can sign up as someone else's address, get a
+# session immediately, and keep a working password on the row that address's
+# real owner later signs into with a magic link. That is a permanent read/write
+# foothold in a stranger's habits, so the cost of one extra round trip in the
+# password flow is not a trade.
+enable_confirmations = true
 double_confirm_changes = true
 max_frequency = "1s"
 otp_length = 6

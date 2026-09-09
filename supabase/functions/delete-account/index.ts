@@ -32,6 +32,19 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
 
 Deno.serve(async (request: Request): Promise<Response> => {
+  // Every path out of here returns a Response with CORS headers on it. An
+  // exception escaping into Deno.serve produces a bare 500 the browser then
+  // reports as a CORS failure, which is the least debuggable way for the one
+  // screen the App Store checks to break.
+  try {
+    return await deleteAccount(request);
+  } catch (error) {
+    console.error('delete-account: unhandled', error);
+    return jsonResponse({ error: 'Account deletion failed' }, 500);
+  }
+});
+
+async function deleteAccount(request: Request): Promise<Response> {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
@@ -56,15 +69,32 @@ Deno.serve(async (request: Request): Promise<Response> => {
   });
 
   // ── 1. The caller, from their JWT ─────────────────────────────────────────
+  // A transient failure reaching the auth server throws rather than returning
+  // an error, and it is not the caller's session that is at fault, so the two
+  // cases get different answers: 401 for a token that was rejected, 503 for a
+  // token that could not be checked.
   const jwt = authorization.slice('Bearer '.length);
-  const { data: caller, error: callerError } = await admin.auth.getUser(jwt);
-  if (callerError || !caller?.user) {
-    return jsonResponse({ error: 'Invalid session' }, 401);
+  let userId: string;
+  try {
+    const { data: caller, error: callerError } = await admin.auth.getUser(jwt);
+    if (callerError || !caller?.user) {
+      return jsonResponse({ error: 'Invalid session' }, 401);
+    }
+    userId = caller.user.id;
+  } catch (error) {
+    console.error('delete-account: could not verify the session', error);
+    return jsonResponse({ error: 'Could not verify the session' }, 503);
   }
-  const userId = caller.user.id;
 
   // ── 2. Third-party grant, best-effort ─────────────────────────────────────
-  await revokeAppleGrant(userId);
+  // Best-effort is a promise this try/catch has to keep: a stale grant is a
+  // nuisance, a blocked deletion is a review rejection. The revoke below does
+  // nothing yet, but it is a network call the moment it is implemented.
+  try {
+    await revokeAppleGrant(userId);
+  } catch (error) {
+    console.error('delete-account: Apple revoke failed, continuing', error);
+  }
 
   // ── 3. Storage purge ──────────────────────────────────────────────────────
   // Taproot has no buckets: plant art ships in the app bundle, and storage is
@@ -88,7 +118,7 @@ Deno.serve(async (request: Request): Promise<Response> => {
 
   console.info(`delete-account: deleted ${userId}`);
   return jsonResponse({ success: true }, 200);
-});
+}
 
 /// Revokes the Sign in with Apple grant, best-effort.
 ///

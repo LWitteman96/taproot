@@ -62,6 +62,7 @@ status_value() { printf '%s\n' "$STATUS_ENV" | sed -n "s/^$1=\"\{0,1\}\([^\"]*\)
 DB_URL="$(status_value DB_URL)"
 API_URL="$(status_value API_URL)"
 ANON_KEY="$(status_value ANON_KEY)"
+SERVICE_ROLE_KEY="$(status_value SERVICE_ROLE_KEY)"
 
 # Prefer a psql on PATH; fall back to the one inside the database container so
 # this works on a machine with no libpq installed.
@@ -108,17 +109,34 @@ heading "Step 4/4 — delete-account, end to end"
 
 json_field() { python3 -c 'import sys, json; d = json.load(sys.stdin); print(d.get(sys.argv[1]) or (d.get("user") or {}).get(sys.argv[1]) or "")' "$1"; }
 
+# The user is created through the admin API rather than /signup, because email
+# confirmations are on (see config.toml) and /signup therefore returns no
+# session — the confirmation link would have to be fished out of the local mail
+# catcher first. This is a test fixture, not the app's path; what is under test
+# is what happens *after* a session exists.
 EMAIL="verify-$(date +%s)@example.com"
-SIGNUP="$(curl -sS -X POST "$API_URL/auth/v1/signup" \
+PASSWORD="correct-horse-battery"
+
+CREATED="$(curl -sS -X POST "$API_URL/auth/v1/admin/users" \
+  -H "apikey: $SERVICE_ROLE_KEY" \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\",\"email_confirm\":true}")"
+ACCOUNT="$(printf '%s' "$CREATED" | json_field id)"
+
+SESSION="$(curl -sS -X POST "$API_URL/auth/v1/token?grant_type=password" \
   -H "apikey: $ANON_KEY" -H "Content-Type: application/json" \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"correct-horse-battery\"}")"
+  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")"
+TOKEN="$(printf '%s' "$SESSION" | json_field access_token)"
 
-TOKEN="$(printf '%s' "$SIGNUP" | json_field access_token)"
-ACCOUNT="$(printf '%s' "$SIGNUP" | json_field id)"
-
-if [[ -z "$TOKEN" || -z "$ACCOUNT" ]]; then
-  error "Sign-up did not return a session. Response was:"
-  error "$SIGNUP"
+if [[ -z "$ACCOUNT" ]]; then
+  error "Could not create the test user. Response was:"
+  error "$CREATED"
+  exit 1
+fi
+if [[ -z "$TOKEN" ]]; then
+  error "Sign-in did not return a session. Response was:"
+  error "$SESSION"
   exit 1
 fi
 

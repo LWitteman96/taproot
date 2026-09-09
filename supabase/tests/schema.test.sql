@@ -11,7 +11,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(16);
+select plan(19);
 
 -- ── RLS is on, everywhere, with nothing reachable by anon ───────────────────
 
@@ -175,6 +175,56 @@ select ok(
      where id = 'eeeeeeee-0000-0000-0000-000000000001') > '2020-01-01T00:00:00Z',
   'a client-supplied synced_at is overwritten with the server clock — a skewed '
   'device must not be able to write a row a later pull will never see'
+);
+
+-- ── Every table with a cursor has a trigger to move it ──────────────────────
+
+select is(
+  (select count(*)::int
+     from information_schema.columns c
+     where c.table_schema = 'public'
+       and c.column_name = 'synced_at'
+       and not exists (
+         select 1 from pg_trigger t
+           join pg_class r on r.oid = t.tgrelid
+           join pg_namespace n on n.oid = r.relnamespace
+          where n.nspname = 'public'
+            and r.relname = c.table_name
+            and t.tgname = 'set_synced_at'
+            and not t.tgisinternal)),
+  0,
+  'every table carrying synced_at also has the trigger that moves it — a '
+  'cursor column frozen at its default is worse than no cursor at all'
+);
+
+update public.nudges
+   set confirmed = true
+ where id = 'eeeeeeee-0000-0000-0000-000000000001';
+
+select ok(
+  (select synced_at from public.nudges
+     where id = 'eeeeeeee-0000-0000-0000-000000000001')
+    >= (select updated_at from public.nudges
+          where id = 'eeeeeeee-0000-0000-0000-000000000001'),
+  'and moves it on update, not only on insert'
+);
+
+-- ── A soft delete is one-way ────────────────────────────────────────────────
+
+update public.habits
+   set deleted_at = now()
+ where id = 'bbbbbbbb-0000-0000-0000-000000000004';
+
+update public.habits
+   set deleted_at = null
+ where id = 'bbbbbbbb-0000-0000-0000-000000000004';
+
+select isnt(
+  (select deleted_at from public.habits
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'),
+  null,
+  'a stale push cannot clear deleted_at and resurrect a habit — revoking '
+  'DELETE is only half of that guarantee, pin_soft_delete() is the other half'
 );
 
 -- ── Deleting the auth user is the whole deletion ────────────────────────────

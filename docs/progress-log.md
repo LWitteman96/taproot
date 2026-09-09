@@ -78,6 +78,18 @@ rejection and it is not a thing to discover late.
   drains one way; storage has nothing to hold, since plant art ships in the bundle. The storage purge
   step stays in `delete-account` as a comment, in the position it belongs in, for the day a bucket
   exists.
+- **Email confirmations are on**, which the magic-link flow does not itself need. Enabling email
+  sign-up enables the password grant with it and there is no switch separating the two, so with
+  confirmations off anyone could sign up as someone else's address, get a session immediately, and
+  keep a working password on the row that address's real owner later signs into with a magic link.
+  One extra round trip is not worth a stranger's foothold in someone's habits. The auth branch can
+  revisit it if it removes the password grant.
+- **`habits.deleted_at` is pinned one-way by a trigger** (`pin_soft_delete`). Revoking `DELETE` is
+  only half of "a device that never heard about a deletion cannot undo it" — the other half is that
+  a stale whole-row push must not be able to set `deleted_at` back to null. First deletion wins, so
+  a second device cannot move the stamp either. `graduated_at` is deliberately *not* pinned:
+  graduation derives from autonomy, which can fall, and whether it is one-way is the engine's
+  question.
 - **Taproot runs on the 5433x port block, not the CLI defaults.** inkBlox holds 5432x, and "stop your
   other project" is exactly the thing the bare+worktree layout exists to avoid. `.env.dev` now points
   at `http://127.0.0.1:54331`.
@@ -101,9 +113,31 @@ rejection and it is not a thing to discover late.
   for that user at sign-in, and nothing captures one yet. The function logs that it skipped rather
   than pretending; the step keeps its slot, and it stays best-effort — nothing it does may block the
   deletion.
+- **The pull cursor has a commit-time gap, and the sync branch has to close it.** `synced_at` is
+  stamped when a row is written; the row becomes visible when its transaction commits, which is
+  later. A pull that reads at T and stores `cursor = T` can miss a row stamped before T that commits
+  after it — permanently. `clock_timestamp()` narrows the window to the write itself rather than the
+  transaction's start, but does not close it. The two real fixes are an overlap window
+  (`synced_at > cursor - slack`, safe because every upsert here is idempotent) or an `xid8` cursor.
+  The warning is written out at the top of the schema migration, where the branch that builds the
+  pull will read it.
+- **PostgREST's `max_rows = 1000` truncates silently.** A first-install pull of a year of
+  completions gets exactly one page and no signal that there is more, so the pull must page rather
+  than treat one response as the whole answer. Noted in `config.toml` next to the setting.
 - **Whether a habit should be hard-deletable** at all. Soft delete is what protects the union, but a
   user asking to erase one habit's history currently keeps its rows. If that changes it is an RPC, or
   a second edge function — not a `DELETE` grant.
+
+### Reviewed
+
+A review pass over the branch found eight things; six were fixed here and two became the "left open"
+notes above. The six: `profiles` carried a `synced_at` column with no trigger to move it (a cursor
+frozen at its default, which is worse than no cursor — there is now a test asserting *every* table
+with the column has the trigger); email confirmations; the `deleted_at` pin; `delete-account` had no
+`try`/`catch`, so the "best-effort" contract on the Apple revoke was a comment rather than a
+guarantee and an exception would have escaped as a CORS failure on the one screen App Store review
+checks; `now()` → `clock_timestamp()`; and the CI job had no `permissions:` block. The pgTAP suite
+went from 27 assertions to 30.
 
 ### Next
 
