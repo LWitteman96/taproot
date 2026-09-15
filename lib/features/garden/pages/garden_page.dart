@@ -10,7 +10,6 @@ import 'package:taproot/core/utils/flavor.dart';
 import 'package:taproot/features/garden/controllers/garden_controller.dart';
 import 'package:taproot/features/garden/providers/garden_selectors.dart';
 import 'package:taproot/features/garden/widgets/plant_card.dart';
-import 'package:taproot/features/habits/services/demo_habit_seed.dart';
 
 /// The home screen.
 ///
@@ -32,7 +31,6 @@ class GardenPage extends ConsumerWidget {
       'and what you get out of it.';
   static const String plantLabel = 'Plant something';
   static const String addLabel = 'Plant another';
-  static const String seedLabel = 'Plant a habit (dev)';
   static const String wateredMessage = 'Watered';
   static const String unreadableHeadline = 'Your garden could not be read';
   static const String unreadableBody =
@@ -226,11 +224,7 @@ class _UnreadableGarden extends ConsumerWidget {
 /// redirected into habit creation, so this is what shows in the frame before
 /// the gate resolves, and what a user would find if they ever got back here
 /// with nothing planted.
-///
-/// The seed button below it is dev-only scaffolding — see [plantDemoHabit]. It
-/// has been superseded by the flow the button above it opens, and is kept only
-/// because planting a habit in one tap is still faster than walking six steps
-/// when what you are testing is the watering.
+
 class _EmptyGarden extends ConsumerWidget {
   const _EmptyGarden();
 
@@ -238,7 +232,6 @@ class _EmptyGarden extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final flavor = getFlavor();
-    final canSeed = isDemoSeedEnabled();
 
     return Padding(
       padding: const EdgeInsets.symmetric(
@@ -265,16 +258,6 @@ class _EmptyGarden extends ConsumerWidget {
             onPressed: () => context.push(AppRoutes.habitCreation),
             child: const Text(GardenPage.plantLabel),
           ),
-          if (canSeed) ...[
-            const SizedBox(height: AppSpacing.medium),
-            FilledButton(
-              onPressed: () async {
-                await ref.read(demoHabitSeedProvider)();
-                await ref.read(gardenControllerProvider.notifier).refresh();
-              },
-              child: const Text(GardenPage.seedLabel),
-            ),
-          ],
           const SizedBox(height: AppSpacing.extraLarge),
           Text('flavor: ${flavor.name}', style: theme.textTheme.bodySmall),
         ],

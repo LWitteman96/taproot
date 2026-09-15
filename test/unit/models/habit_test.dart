@@ -205,6 +205,39 @@ void main() {
     });
   });
 
+  group('a category this build has not heard of', () {
+    Map<String, Object?> rowWithCategory(Object? category) => <String, Object?>{
+      ...habit().toJson(),
+      'category': category,
+    };
+
+    test('reads as null rather than failing the whole row', () {
+      // The set is open: no CHECK on either side, and it widens as the chip
+      // library is authored. A row naming a category this build has not heard
+      // of is an ordinary consequence of syncing with a newer device. Throwing
+      // would fail allHabits() and take the entire garden into its unreadable
+      // state over one optional field.
+      final restored = Habit.fromJson(rowWithCategory('woodworking'));
+
+      expect(restored.category, isNull);
+      expect(restored.name, 'Morning run');
+      expect(restored.journey, HabitJourney.design);
+    });
+
+    test('a category of the wrong type is still a FormatException', () {
+      // Leniency is about values, not about shapes. A number in this column
+      // means something wrote the row wrong, which is worth hearing about.
+      expect(() => Habit.fromJson(rowWithCategory(7)), throwsFormatException);
+    });
+
+    test('a known category still decodes', () {
+      expect(
+        Habit.fromJson(rowWithCategory('sleepRoutine')).category,
+        HabitCategory.sleepRoutine,
+      );
+    });
+  });
+
   group('the journey of a row written before the column existed', () {
     Map<String, Object?> rowWithoutJourney({String? designedCue}) {
       final json = habit(journey: HabitJourney.track).toJson()

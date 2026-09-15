@@ -332,7 +332,7 @@ void main() {
       expect(state.canSubmit, isTrue);
     });
 
-    test('a retry after a failure clears the error', () async {
+    test('a retry clears the last failure before it tries again', () async {
       final container = containerWith(repository: _UnwritableHabitService());
       final controller = controllerOf(container);
       fillDesignedLoop(controller);
@@ -340,10 +340,24 @@ void main() {
 
       expect(stateOf(container).errorMessage, isNotNull);
 
-      // The same failure again, but the message is cleared on the way in
-      // rather than left stale under a spinner.
-      final pending = controller.submit();
-      await pending;
+      final emitted = <HabitCreationState>[];
+      container.listen(
+        habitCreationControllerProvider,
+        (previous, next) => emitted.add(next),
+      );
+
+      await controller.submit();
+
+      // Asserted over the emitted sequence, not the end state. The clear
+      // happens on the way *in* and the second failure re-sets the message, so
+      // a before/after assertion holds just as well with the clear deleted —
+      // it pins nothing. What matters is the interim: a spinner sitting under
+      // the previous attempt's error reads as the retry having already failed.
+      expect(
+        emitted.any((state) => state.isSaving && state.errorMessage == null),
+        isTrue,
+        reason: 'the retry never cleared the previous failure',
+      );
       expect(stateOf(container).errorMessage, isNotNull);
     });
   });

@@ -39,9 +39,9 @@ hold no credentials, and `Supabase.initialize` on an empty URL throws at launch)
 renders its plants as words rather than art, which is waiting on the external illustrator.
 
 The router's gate is no longer stubbed — it reads the habit count, so a user with nothing planted is
-sent to plant something and only then gets a garden. The **debug-only dev-flavor seed button** on the
-empty garden is therefore superseded by the real flow and kept only for convenience while testing
-the watering; it is a deletion waiting for someone to want it.
+sent to plant something and only then gets a garden. The debug-only dev-flavor seed button that used
+to stand on the empty garden has been **removed**: the real flow supersedes it, and with the gate
+live the screen it sat on is only transiently reachable.
 
 ---
 

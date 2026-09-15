@@ -9,7 +9,9 @@
 ///
 /// Decoding is strict about *missing* and *unrecognised* values: a row that
 /// cannot be read is a [FormatException] naming the column, not a silently
-/// defaulted model.
+/// defaulted model. The one carve-out is [readOpenEnum], for the columns whose
+/// value set is deliberately open-ended — see its doc for why strictness is the
+/// wrong default there specifically.
 library;
 
 /// UTC ISO-8601 at millisecond precision — the one representation on the wire
@@ -78,6 +80,37 @@ T? readEnum<T extends Enum>(
   throw FormatException(
     '$key: "$value" is not one of ${values.map((v) => v.name).join(', ')}',
   );
+}
+
+/// As [readEnum], but an **unrecognised** value reads as null instead of
+/// throwing. A value of the wrong *type* is still a [FormatException].
+///
+/// For columns whose value set is deliberately open — ones that widen without a
+/// schema change and carry no `CHECK`. Strictness is right for a closed set,
+/// where an unknown value means the row is corrupt; it is wrong for an open
+/// one, where an unknown value most likely means this build is older than the
+/// device that wrote it, or the row came down from a server that has since
+/// learned a new value.
+///
+/// The failure being avoided is disproportionate: `fromJson` throwing takes
+/// `allHabits()` with it, which takes the whole garden into its unreadable
+/// state — over one optional field. Reading it as null degrades exactly as far
+/// as the field's own spec says it may.
+///
+/// **Not a general-purpose loosening.** Reach for [readEnum] unless the column
+/// is genuinely open, and say which in a comment at the call site.
+T? readOpenEnum<T extends Enum>(
+  Map<String, Object?> json,
+  String key,
+  List<T> values,
+) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is! String) throw _wrongType(key, value, 'an enum name');
+  for (final candidate in values) {
+    if (candidate.name == value) return candidate;
+  }
+  return null;
 }
 
 String requireString(Map<String, Object?> json, String key) {

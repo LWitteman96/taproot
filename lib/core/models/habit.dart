@@ -126,7 +126,18 @@ class Habit {
       journey:
           readEnum(json, 'journey', HabitJourney.values) ??
           (designedCue != null ? HabitJourney.design : HabitJourney.track),
-      category: readEnum(json, 'category', HabitCategory.values),
+      // Open set, so an unrecognised value reads as null rather than
+      // throwing (see [readOpenEnum]). `category` carries no CHECK on either
+      // side and widens as the chip library is authored, so a row naming a
+      // category this build has not heard of is an ordinary consequence of
+      // syncing with a newer device — not a corrupt row. Throwing here would
+      // fail `allHabits()` and put the entire garden into its unreadable state
+      // over a field whose own spec says null is a supported answer.
+      //
+      // `journey` above stays strict on purpose: its set is closed, it is
+      // CHECKed in the schema, and an unknown value there really would mean
+      // the row cannot be trusted.
+      category: readOpenEnum(json, 'category', HabitCategory.values),
       designedCue: designedCue,
       designedCueType: readEnum(json, 'designed_cue_type', CueType.values),
       routine: readString(json, 'routine'),

@@ -44,9 +44,14 @@ name → plant → rhythm → cue → loop → review, with the cue and loop ste
 habit. The entry gate is no longer stubbed: it reads the habit count, so a user with nothing planted
 is sent to plant something, and the garden gained a way to plant another.
 
-41 new tests — the controller over a `ProviderContainer`, the flow driven end to end through the
-real app so that planting a habit is shown to land back on the garden, and the migration exercised
-against a hand-built version-1 database. The suite reports 510 passing, all three gates green.
+`plantDemoHabit` went with it. Its own doc named habit creation as the trigger for deleting it, and
+with the gate live the empty garden it sat on is only transiently reachable — a dev-only button that
+almost nobody can now reach, standing next to a real one that does the same job properly.
+
+36 new tests on balance — the controller over a `ProviderContainer`, the flow driven end to end
+through the real app so that planting a habit is shown to land back on the garden, and the migration
+exercised against a hand-built version-1 database; less the five that went with the demo seed. The
+suite reports 505 passing, all three gates green.
 
 ### Decided
 
@@ -69,6 +74,47 @@ starter chip library filters the first reflection's chips by habit category (§0
 the only moment that can state one, and the alternative was a second migration and a second pass
 over the same six screens later. It is nullable — the library backfills from its global pools (§6.1)
 — so a habit that fits none of the twelve is not forced into one.
+
+### The two new columns, precisely
+
+Written out in full because the server side of these does not exist yet: the Supabase schema in
+PR [#4](https://github.com/LWitteman96/taproot/pull/4) predates both columns, so a sync push of a
+habits row would fail against the server table until a migration adds them. That migration belongs
+to the sync branch; this is its specification.
+
+| Column | Local (SQLite) | Nullable | Allowed values |
+|---|---|---|---|
+| `journey` | `TEXT NOT NULL CHECK (journey IN ('design', 'track'))` | no | `design`, `track` |
+| `category` | `TEXT` | **yes** | the twelve below, or NULL |
+
+`category` carries **no** `CHECK` locally and should not gain one server-side without the same list
+on both, because the value set widens as the chip library does — it is the twelve authored
+categories in starter-chip-library.md §7 and nothing else:
+
+```
+exercise · meditation · reading · journaling · hydration · tidying
+languagePractice · instrument · stretching · supplements · walking · sleepRoutine
+```
+
+**An unknown `category` reads as null on device, and does not fail the row.** `Habit.fromJson` uses
+`readOpenEnum` for this column: a value outside the twelve decodes to null rather than throwing, so
+a habit synced down from a build that knows a category this one does not still opens. The
+alternative was disproportionate — a `FormatException` here fails `allHabits()`, which puts the
+entire garden into its unreadable state over one optional field whose spec says null is a supported
+answer. **Sync reconciliation should assume the device may hand back null for a category the server
+still holds**, and must not treat that as the user clearing it. `journey` is strict and stays
+strict: closed set, CHECKed on both sides, and an unknown value there really does mean the row
+cannot be trusted.
+
+**Two of those are camelCase, and that is load-bearing.** `languagePractice` and `sleepRoutine` are
+`Enum.name` values written verbatim by `encodeEnum`, so a server column that snake_cases them by
+convention will not round-trip — `readEnum` throws a `FormatException` naming the column rather than
+silently defaulting, which is the behaviour that makes the mismatch findable, not a reason to relax
+it.
+
+On upgrade rather than create, `journey` arrives nullable and is backfilled; `ALTER TABLE ... ADD
+COLUMN ... NOT NULL` needs a default, and a default here would be the silent guess the column exists
+to stop making.
 
 **Journey B requires all three of cue, routine and reward.** §2 defines the journey as writing the
 loop down; a design flow that lets two thirds of it go blank is the bolted-on tracker again. The way
@@ -94,10 +140,6 @@ again instead of serving the fail-safe it cached.
 - **The cue step offers examples, not ranked chips.** The starter chip library's surfacing rule (§5)
   needs a completion and a time of day to rank against, and there is neither at creation. The
   examples come straight from the taxonomy table in reflection-logic §4.
-- **`plantDemoHabit` is now superseded.** Its own doc names habit creation as the trigger for
-  deleting it, and with the gate live the empty garden it sits on is only transiently reachable. It
-  is left in place — deleting it touches the garden page and two test files from a branch that
-  merged hours ago — and is a clean deletion whenever someone wants it.
 - Editing a habit after creation does not exist. `saveHabit` is an upsert, so the store is ready for
   it; the screen is not.
 
