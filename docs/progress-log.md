@@ -118,9 +118,38 @@ ios/Runner/AppDelegate.swift            the UNUserNotificationCenter delegate
   decided when they are planned and never re-decided, so a habit that climbs a rung today keeps the
   old rate on occasions already planned. Shortening the horizon trades that against how much of a
   quiet week survives a phone being off.
-- **`planHabit` has no caller.** It exists for "re-plan after a completion" and is tested, but
-  wiring it into the garden controller would have meant editing the completion-tap branch's code
-  while it was still moving.
+- **The backfill catches up its own rate.** Occasions nobody was around to nudge are recorded
+  un-nudged, which leaves the fade rule in debt and makes it nudge the next several occasions in a
+  row. Defensible as re-engagement after the phone was off for a fortnight; it is also not a
+  decision anyone made on purpose, and it is the other thing worth instrumenting alongside the fade
+  rates themselves.
+
+### Then, before review
+
+Three things landed after the branch was first pushed, in one follow-up.
+
+- **`planHabit` is wired.** `GardenController` re-plans after a watering and after an undo. Awaited
+  rather than fired and forgotten — the plant has already reacted by then, so what it delays is the
+  undo affordance, not the reward — and it can never fail a watering: a completion that was stored
+  is stored, and surfacing a scheduling problem as a failed tap would take back growth the user
+  earned. `nudgeSchedulerProvider` now takes its clock and id generator from `clockProvider` and
+  `newIdProvider`, so the scheduler runs on the same fake clock as the rest of the garden.
+- **The fade counters advance across the planning window, not just its past.** They were seeded from
+  rows before *now* and only advanced on occasions already in the past, so every occasion in one
+  horizon decided against the same numbers — a pass handed out seven sends or seven silences in a
+  row, and the rate was honoured between passes rather than across occasions. They are now seeded
+  from rows before the *window* and advanced occasion by occasion through it. **CI caught this and
+  local runs did not**: the test asserting that some coming occasions are silent passed in
+  Europe/Amsterdam only because a `DateTime.add(Duration(days: 60))` crossed a DST boundary and put
+  the fake clock at exactly 20:00 — the check-in slot — which suppressed one occasion for having
+  missed its evening. On a UTC runner it was 19:00, nothing was suppressed, and the assertion found
+  no silent rows. The test now builds every instant from calendar fields rather than by adding
+  durations, and forces the withhold through a seeded ledger instead of an accident of the clock.
+- **The cross-feature read contract is on the repository interface.** Reflection's priority scoring
+  reads these rows directly (repositories are per-aggregate and shared for reads); notifications
+  stays the only writer. Documented there because a raw read can misinterpret all three of: rows
+  that exist for occasions a week away, `sent` meaning *queued* rather than *seen*, and `confirmed`
+  being an answer to a notification rather than a fact about the habit.
 
 ### Next
 

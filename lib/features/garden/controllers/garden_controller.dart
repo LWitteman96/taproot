@@ -16,6 +16,8 @@ import 'package:taproot/features/habits/domain/completion_retraction.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/habits/services/habit_inputs_loader.dart';
+import 'package:taproot/features/notifications/providers/nudge_providers.dart';
+import 'package:taproot/features/notifications/services/nudge_scheduler.dart';
 
 /// The garden: every habit, and what the engine derives for it.
 ///
@@ -29,6 +31,7 @@ class GardenController extends Notifier<GardenState> {
   late final HabitRepository _habits;
   late final CompletionRepository _completions;
   late final HabitInputsLoader _loader;
+  late final NudgeScheduler _nudges;
   late final DateTime Function() _clock;
   late final String Function() _newId;
 
@@ -37,6 +40,7 @@ class GardenController extends Notifier<GardenState> {
     _habits = ref.read(habitServiceProvider);
     _completions = ref.read(completionServiceProvider);
     _loader = ref.read(habitInputsLoaderProvider);
+    _nudges = ref.read(nudgeSchedulerProvider);
     _clock = ref.read(clockProvider);
     _newId = ref.read(newIdProvider);
 
@@ -194,6 +198,7 @@ class GardenController extends Notifier<GardenState> {
 
     try {
       await _completions.recordCompletion(completion);
+      await _replanNudges(habitId);
       return completion;
     } on UnknownHabitException {
       // The habit was deleted on another device. Expected but abnormal — a
@@ -235,6 +240,7 @@ class GardenController extends Notifier<GardenState> {
 
     try {
       await _completions.retractCompletion(habitId, completionId);
+      await _replanNudges(habitId);
     } on CompletionNotRetractableException {
       if (!ref.mounted) return;
       // Normal: the garden was left open across midnight and the offer went
@@ -259,6 +265,32 @@ class GardenController extends Notifier<GardenState> {
       if (!ref.mounted) return;
       _restoreCompletion(habitId, retracted, _clock());
       state = state.copyWith(errorMessage: () => couldNotUndoMessage);
+    }
+  }
+
+  /// Re-plans the habit's upcoming occasions after its history changed.
+  ///
+  /// Awaited rather than fired and forgotten, because the plant has *already*
+  /// reacted — the state update happens before the write — so what this delays
+  /// is the undo affordance, not the reward. It is all local reads and writes,
+  /// and a planning pass that finds every occasion already in the ledger
+  /// writes nothing.
+  ///
+  /// **It can never fail a watering.** A completion that was stored is stored;
+  /// surfacing a scheduling problem as a failed tap would take back growth the
+  /// user earned. The failure is logged and the next launch re-plans anyway.
+  ///
+  /// Within the horizon this is usually a no-op by design: occasions already in
+  /// the ledger are never re-decided, so a stage climbed today does not rewrite
+  /// nudges already planned. What it does do is roll the horizon forward for a
+  /// garden left open across days, and catch up a habit whose occasions nobody
+  /// had planned yet.
+  Future<void> _replanNudges(String habitId) async {
+    try {
+      await _nudges.planHabit(habitId);
+    } catch (error, stackTrace) {
+      _log('replan', 'the nudges for $habitId were not re-planned: $error');
+      dev.log('$stackTrace', name: 'GardenController');
     }
   }
 

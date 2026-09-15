@@ -201,10 +201,11 @@ class NudgeScheduler {
         LocalDate.from(nudge.expectedOccasionAt): nudge,
     };
 
+    final windowStart = today.addDays(-EngineConstants.nudgeBackfillDays);
     final occasions = expectedOccasionsBetween(
       createdAt: habit.createdAt,
       targetFrequency: habit.targetFrequency,
-      from: today.addDays(-EngineConstants.nudgeBackfillDays),
+      from: windowStart,
       to: today.addDays(EngineConstants.nudgeHorizonDays),
       pauses: inputs.pauses,
     );
@@ -212,9 +213,19 @@ class NudgeScheduler {
     // The fade rule reads the whole history, not the window being planned: the
     // sent share it steers is a property of the habit's life, which is what
     // makes it self-correcting when the stage — and the rate — changes.
+    //
+    // Seeded from the rows *before* the window and then advanced occasion by
+    // occasion through it, so every decision sees the share as it stood at
+    // that occasion. Counting only rows in the past instead would have left
+    // every occasion in one horizon deciding against the same numbers — so a
+    // pass handed out seven sends or seven silences in a row, and the rate was
+    // only honoured between passes rather than across occasions.
     var priorOccasions = 0;
     var priorSent = 0;
-    for (final nudge in inputs.nudgesUpTo(now)) {
+    for (final nudge in inputs.nudges) {
+      if (!LocalDate.from(nudge.expectedOccasionAt).isBefore(windowStart)) {
+        continue;
+      }
       priorOccasions++;
       if (nudge.sent) priorSent++;
     }
@@ -248,6 +259,9 @@ class NudgeScheduler {
           );
           if (requeued) queued++;
         }
+
+        priorOccasions++;
+        if (known.sent) priorSent++;
         planned.add(
           PlannedOccasion(
             nudgeId: known.id,
@@ -314,10 +328,8 @@ class NudgeScheduler {
         ),
       );
 
-      if (!occasion.date.startOfDay.isAfter(now)) {
-        priorOccasions++;
-        if (sent) priorSent++;
-      }
+      priorOccasions++;
+      if (sent) priorSent++;
     }
 
     return planned;

@@ -13,9 +13,12 @@ import 'package:taproot/features/garden/domain/garden_state.dart';
 import 'package:taproot/features/garden/providers/garden_selectors.dart';
 import 'package:taproot/features/habits/domain/completion_repository.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
+import 'package:taproot/features/notifications/domain/notification_access.dart';
+import 'package:taproot/features/notifications/domain/notification_gateway.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 import 'package:taproot/features/reflection/providers/reflection_providers.dart';
 
+import '../../../utils/fake_notification_gateway.dart';
 import '../../../utils/fake_repositories.dart';
 import '../../../utils/store_fixtures.dart';
 
@@ -87,7 +90,9 @@ class ControllableCompletions implements CompletionRepository {
 }
 
 class Harness {
-  Harness({DateTime? now}) : clock = TestClock(now ?? DateTime(2026, 3, 4, 9)) {
+  Harness({DateTime? now, NotificationGateway? notifications})
+    : clock = TestClock(now ?? DateTime(2026, 3, 4, 9)) {
+    gateway = notifications ?? FakeNotificationGateway();
     habits = FakeHabitService(clock: clock.call);
     final realCompletions = FakeCompletionService(
       habits: habits,
@@ -103,6 +108,7 @@ class Harness {
         completionServiceProvider.overrideWithValue(completions),
         reflectionServiceProvider.overrideWithValue(reflections),
         nudgeServiceProvider.overrideWithValue(nudges),
+        notificationGatewayProvider.overrideWithValue(gateway),
         clockProvider.overrideWithValue(clock.call),
         newIdProvider.overrideWithValue(() => 'id-${_nextId++}'),
       ],
@@ -115,6 +121,7 @@ class Harness {
   late final ControllableCompletions completions;
   late final FakeReflectionService reflections;
   late final FakeNudgeService nudges;
+  late final NotificationGateway gateway;
   late final ProviderContainer container;
   int _nextId = 1;
 
@@ -470,5 +477,67 @@ void main() {
       harness.controller.clearError();
       expect(harness.state.errorMessage, isNull);
     });
+    group('nudges', () {
+      /// The habit has to be old enough that the occasion calendar has
+      /// something in the window, and young enough to still be at a rate of
+      /// 1.0 — which is every habit below Young.
+      Future<Harness> gardenWithHabit({
+        NotificationGateway? notifications,
+      }) async {
+        final harness = Harness(notifications: notifications);
+        await harness.habits.saveHabit(
+          testHabit(
+            id: 'a',
+            targetFrequency: 7,
+            createdAt: DateTime(2026, 3, 1),
+          ),
+        );
+        await harness.start();
+        return harness;
+      }
+
+      test('watering re-plans the habit it watered', () async {
+        // Without this the ledger only catches up at the next launch, and a
+        // habit created and watered in one session has no occasions recorded
+        // for the days it was expected on.
+        final harness = await gardenWithHabit();
+        expect(await harness.nudges.nudgesFor('a'), isEmpty);
+
+        await harness.controller.water('a');
+
+        expect(await harness.nudges.nudgesFor('a'), isNotEmpty);
+      });
+
+      test('undo re-plans too', () async {
+        final harness = await gardenWithHabit();
+        final completion = await harness.controller.water('a');
+        final afterWatering = (await harness.nudges.nudgesFor('a')).length;
+
+        await harness.controller.undo('a', completion!.id);
+
+        // Idempotent, so the count holds rather than doubling — the assertion
+        // is that the pass ran at all and did not duplicate the ledger.
+        expect(await harness.nudges.nudgesFor('a'), hasLength(afterWatering));
+      });
+
+      test('a scheduling failure never fails the watering', () async {
+        // A completion that was stored is stored. Surfacing a notification
+        // problem as a failed tap would take back growth the user earned.
+        final harness = await gardenWithHabit(notifications: _BrokenGateway());
+
+        final completion = await harness.controller.water('a');
+
+        expect(completion, isNotNull);
+        expect(harness.state.errorMessage, isNull);
+        expect(harness.state.plants['a']!.growth.stage, Stage.sprout);
+      });
+    });
   });
+}
+
+/// A notification platform that cannot even report what it is allowed to do.
+class _BrokenGateway extends FakeNotificationGateway {
+  @override
+  Future<NotificationAccess> currentAccess() async =>
+      throw StateError('no notification platform here');
 }

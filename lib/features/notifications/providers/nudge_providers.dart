@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
 
 import 'package:taproot/app/database/database_provider.dart';
+import 'package:taproot/app/runtime/runtime_providers.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/notifications/domain/evening_check_in.dart';
 import 'package:taproot/features/notifications/domain/notification_access.dart';
@@ -76,6 +77,8 @@ final nudgeSchedulerProvider = Provider<NudgeScheduler>(
     inputs: ref.watch(habitInputsLoaderProvider),
     gateway: ref.watch(notificationGatewayProvider),
     reflection: ref.watch(reflectionPromptComposerProvider),
+    clock: ref.watch(clockProvider),
+    newId: ref.watch(newIdProvider),
   ),
 );
 

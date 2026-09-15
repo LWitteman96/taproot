@@ -29,7 +29,20 @@ import '../../../../utils/store_fixtures.dart';
 /// visible.
 void main() {
   const habitId = 'habit-1';
-  final createdAt = DateTime(2026, 3, 2, 9);
+
+  /// Local wall-clock times built from calendar fields, never by adding a
+  /// `Duration` to a `DateTime`.
+  ///
+  /// Adding 60 days of *absolute* time to a local timestamp crosses a
+  /// daylight-saving boundary in some zones and not others, so the same line
+  /// produced 20:00 in Europe/Amsterdam and 19:00 on a UTC CI runner — and
+  /// 20:00 is the evening check-in slot, which flipped one occasion between
+  /// "still schedulable" and "its evening has passed". Calendar fields are the
+  /// same instant-of-day everywhere.
+  DateTime dayAfterCreation(int days, {int hour = 9}) =>
+      DateTime(2026, 3, 2 + days, hour);
+
+  final createdAt = dayAfterCreation(0);
 
   late TestClock clock;
   late TestStore store;
@@ -65,7 +78,7 @@ void main() {
     asked.clear();
     // Mid-morning on the habit's creation day: today's occasion has already
     // lost its evening slot, tomorrow's has not.
-    clock = TestClock(DateTime(2026, 3, 2, 10));
+    clock = TestClock(dayAfterCreation(0, hour: 10));
     store = await openFakeStore(clock);
     gateway = FakeNotificationGateway();
     await buildScheduler();
@@ -108,35 +121,56 @@ void main() {
     });
 
     test('records the occasions it deliberately stayed silent on', () async {
-      // A habit climbed to a faded stage: some of the coming occasions carry a
-      // notification and some do not, and *all* of them carry a row. This is
-      // the assertion the whole stage exists for — the silent rows are what
-      // autonomy is divided by, and they cannot be inferred later from the
-      // absence of a notification.
+      // The assertion the whole stage exists for. A faded habit whose recent
+      // occasions were all nudged is in debt to its own rate, so the coming
+      // ones are withheld — and every one of them still gets a row. Those rows
+      // are what autonomy is divided by, and they cannot be recovered later
+      // from the absence of a notification.
       await saveHabit();
-      await _climbTo(store, habitId, createdAt);
-      clock.now = createdAt.add(const Duration(days: 60, hours: 10));
+      await _climbTo(store, habitId);
+      clock.now = dayAfterCreation(60, hour: 10);
+      await _seedNudgedHistory(store, habitId, clock.now);
 
-      await scheduler.planAll();
+      final plan = await scheduler.planAll();
 
       final horizon = (await ledger())
           .where((row) => row.expectedOccasionAt.isAfter(clock.now))
           .toList();
 
+      expect(horizon, isNotEmpty, reason: 'the coming occasions are recorded');
       expect(
-        horizon.where((row) => row.sent),
-        isNotEmpty,
-        reason: 'the stage still nudges some occasions',
-      );
-      expect(
-        horizon.where((row) => !row.sent),
-        isNotEmpty,
-        reason: 'and stays deliberately silent on others',
-      );
-      expect(
-        horizon.every((row) => row.sent == (gateway.forNudge(row.id) != null)),
+        horizon.every((row) => !row.sent),
         isTrue,
-        reason: 'a row says sent exactly when a notification was queued',
+        reason: 'and every one of them was deliberately left silent',
+      );
+      expect(
+        horizon.every((row) => gateway.forNudge(row.id) == null),
+        isTrue,
+        reason: 'no notification was queued for any of them',
+      );
+      expect(
+        plan.withheld,
+        isNotEmpty,
+        reason:
+            'the silence is the engine choosing, not the app failing — '
+            'only that kind counts as a measurement',
+      );
+      expect(plan.suppressedBy(NudgeSuppression.noPermission), isEmpty);
+      expect(plan.suppressedBy(NudgeSuppression.overCap), isEmpty);
+    });
+
+    test('a habit that has earned every nudge gets every nudge', () async {
+      // The other end of the same rule, so the test above cannot pass by the
+      // scheduler simply never nudging: below Young the rate is 1.0 and no
+      // occasion is withheld.
+      await saveHabit();
+
+      final plan = await scheduler.planAll();
+
+      expect(plan.withheld, isEmpty);
+      expect(
+        plan.occasions.where((occasion) => occasion.decision.shouldSend),
+        isNotEmpty,
       );
     });
 
@@ -147,8 +181,8 @@ void main() {
       // improve as the app went quiet — the exact failure the ledger exists to
       // prevent.
       await saveHabit();
-      await _climbTo(store, habitId, createdAt);
-      clock.now = createdAt.add(const Duration(days: 60, hours: 10));
+      await _climbTo(store, habitId);
+      clock.now = dayAfterCreation(60, hour: 10);
 
       await scheduler.planAll();
 
@@ -166,7 +200,7 @@ void main() {
       expect(
         rows.where((row) => row.sent).length,
         lessThan(rows.length),
-        reason: 'some of them were deliberately silent',
+        reason: 'some of them carried no notification',
       );
     });
 
@@ -176,7 +210,7 @@ void main() {
       // leaving them out would hide two weeks of a habit standing or not
       // standing on its own.
       await saveHabit();
-      clock.now = createdAt.add(const Duration(days: 14));
+      clock.now = dayAfterCreation(14);
 
       await scheduler.planAll();
 
@@ -240,7 +274,7 @@ void main() {
       );
 
       // Climb the habit so the fade rate changes underneath the planned rows.
-      await _climbTo(store, habitId, createdAt);
+      await _climbTo(store, habitId);
       await scheduler.planAll();
 
       final after = await ledger();
@@ -395,9 +429,8 @@ void main() {
       createdAt,
       sent: 0,
       withheld: 4,
-      rate: 0.4,
     );
-    clock.now = createdAt.add(const Duration(days: 4, hours: 12));
+    clock.now = dayAfterCreation(4, hour: 12);
 
     final inputs = await HabitInputsLoader(
       habits: store.habits,
@@ -442,7 +475,6 @@ Future<void> _seedLedger(
   DateTime from, {
   required int sent,
   required int withheld,
-  required double rate,
 }) async {
   var day = 0;
   for (var index = 0; index < sent; index++, day++) {
@@ -451,7 +483,7 @@ Future<void> _seedLedger(
       NudgeRecord(
         id: id,
         habitId: habitId,
-        expectedOccasionAt: from.add(Duration(days: day)),
+        expectedOccasionAt: DateTime(from.year, from.month, from.day + day),
         sent: false,
       ),
     );
@@ -462,7 +494,7 @@ Future<void> _seedLedger(
       NudgeRecord(
         id: 'seed-silent-$habitId-$index',
         habitId: habitId,
-        expectedOccasionAt: from.add(Duration(days: day)),
+        expectedOccasionAt: DateTime(from.year, from.month, from.day + day),
         sent: false,
       ),
     );
@@ -471,23 +503,49 @@ Future<void> _seedLedger(
         Completion(
           id: 'seed-completion-$habitId-$index',
           habitId: habitId,
-          completedAt: from.add(Duration(days: day, hours: 7)),
+          completedAt: DateTime(from.year, from.month, from.day + day, 7),
         ),
       );
     }
   }
 }
 
-/// Completes the habit often enough to climb it off Sprout.
-Future<void> _climbTo(TestStore store, String habitId, DateTime from) async {
+/// Completes the habit every day for two months, which carries it well past
+/// Young — so its nudge rate is below 1.0 whatever rung it settles on.
+Future<void> _climbTo(TestStore store, String habitId) async {
   for (var day = 0; day < 60; day++) {
     await store.completions.recordCompletion(
       Completion(
         id: 'climb-$day',
         habitId: habitId,
-        completedAt: from.add(Duration(days: day, hours: 7)),
+        completedAt: DateTime(2026, 3, 2 + day, 7),
       ),
     );
+  }
+}
+
+/// Fills the whole backfill window with occasions that *were* nudged.
+///
+/// It leaves the fade rule with a sent share of 1.0 against a rate below it,
+/// so every occasion the pass then plans is withheld — deterministically, at
+/// any rate under 1.0, without the test having to pin the habit to one rung.
+Future<void> _seedNudgedHistory(
+  TestStore store,
+  String habitId,
+  DateTime now,
+) async {
+  final today = LocalDate.from(now);
+  for (var offset = -EngineConstants.nudgeBackfillDays; offset <= 0; offset++) {
+    final id = 'seeded-$offset';
+    await store.nudges.saveNudge(
+      NudgeRecord(
+        id: id,
+        habitId: habitId,
+        expectedOccasionAt: today.addDays(offset).startOfDay,
+        sent: false,
+      ),
+    );
+    await store.nudges.markSent(id);
   }
 }
 

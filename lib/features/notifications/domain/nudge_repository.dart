@@ -7,6 +7,26 @@ import 'package:taproot/core/models/nudge.dart';
 /// whether a habit stands on its own by withholding the nudge and writing down
 /// that it did. Their absence cannot be inferred from the absence of a
 /// notification, so nothing here is optional bookkeeping.
+/// **Reading this ledger from another feature.** Rows are per-aggregate and
+/// shared for reads — reflection's priority scoring needs occasion outcomes,
+/// including un-nudged completions (reflection spec §2). Three things a raw
+/// read can misinterpret, all of them consequences of the ledger being written
+/// by a *scheduler* rather than by events as they happen:
+///
+/// - **Rows exist for occasions that have not happened yet.** A planning pass
+///   records the whole horizon at once, up to a week ahead. Anything reading
+///   outcomes must filter to `expectedOccasionAt` at or before now — which is
+///   what `HabitInputs.nudgesUpTo` does, and why the engine uses it.
+/// - **`sent` means a notification was queued with the OS, not that the user
+///   saw one.** It is set when the nudge is scheduled, because delivery is not
+///   observable. For a future row it is a statement of intent.
+/// - **`confirmed` and `declined` are answers to the notification**, not facts
+///   about the habit. An unconfirmed row means "no button was pressed", which
+///   covers both a decline-by-silence and a user who simply did the thing. Only
+///   `completions` say whether the habit happened.
+///
+/// The notifications feature is the only **writer**; `markConfirmed`,
+/// `markDeclined` and `markSent` are the outcome columns and belong to it.
 abstract class NudgeRepository {
   /// Inserts or updates by id.
   ///
