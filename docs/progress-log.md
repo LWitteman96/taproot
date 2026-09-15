@@ -21,6 +21,433 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-15 — notification scheduling and the nudge ledger
+
+Branch: `feature/notifications`, off `develop`, with the completion tap (PR #5) merged in.
+
+### Landed
+
+The evening check-in, and the ledger that makes autonomy measurable.
+
+```
+lib/core/engine/constants.dart          + the notification block; version → 2
+lib/features/notifications/domain/      expected_occasions · nudge_decision ·
+                                        evening_check_in · notification_access ·
+                                        notification_gateway · nudge_payload
+lib/features/notifications/services/    nudge_scheduler · local_notification_gateway ·
+                                        disabled_notification_gateway ·
+                                        nudge_response_recorder
+lib/features/notifications/providers/   nudge_providers — gateway, scheduler, access,
+                                        and the startup pass
+lib/app/startup/app_startup.dart        step two: initialise the platform, then re-plan
+android/…/AndroidManifest.xml           POST_NOTIFICATIONS, boot + action receivers
+ios/Runner/AppDelegate.swift            the UNUserNotificationCenter delegate
+```
+
+58 new tests — 531 in total. Three gates green.
+
+### Decided
+
+- **A silent occasion is a row, and that is the invariant the whole branch is built around.**
+  `NudgeScheduler` writes the ledger row *before* it queues anything, for every expected occasion,
+  whatever it decided. The failure it is arranged against is the undetectable one: a missing row is
+  indistinguishable from a habit that had no occasion that day, so autonomy would keep returning a
+  confident answer computed over the wrong denominator. Tested as a row count that does not move
+  when the fade rate does.
+- **Occasion n falls on the creation date + `round(n × 7 / f)` days.** A habit carries `f` and
+  nothing else — no weekday set — but autonomy counts *occasions*, so something had to name the
+  days. Even spreading yields exactly `f` per rolling week at every `f`, never drifts over a year,
+  and needs no stored schedule, so two devices replaying one habit derive the same dates. **This is
+  an open calibration question, not a settled one** (see below).
+- **Fading is a deficit rule, not a coin flip:** send unless `priorSent ≥ rate × (priorOccasions + 1)`.
+  It makes Young's 0.70 exactly 7 in 10 rather than 7 on average, it is deterministic so a synced
+  ledger replays identically, it front-loads (a new habit is never silent first), and it absorbs a
+  stage change by withholding until the share falls to the new rate instead of restarting a counter.
+  A random draw at Bloom's 0.10 can go 30 occasions silent, which the user experiences as the app
+  having forgotten him.
+- **Exact alarms are not requested, and neither permission is declared.** Guide §14 asks for the
+  decision early: below Android 12 the app schedules exactly because nothing gates it; on 12+
+  `canScheduleExactNotifications()` reports false and it schedules `inexactAllowWhileIdle`. An
+  evening ritual slot does not need second-accuracy, `USE_EXACT_ALARM` would claim an
+  alarm-clock-class use Play does not grant this app, and `SCHEDULE_EXACT_ALARM` would spend a
+  full-screen settings trip on a few minutes of precision.
+- **Denied permission records occasions anyway**, and reports the silence as `noPermission` rather
+  than as a withhold. The rows are honest — no notification reached the user — and the plan
+  distinguishes *the engine choosing* silence from *the app failing* to nudge, because only the
+  first is a measurement.
+- **The fade decision is made before the permission check**, so a user who declines notifications
+  and later grants them does not resume mid-pattern at the wrong rate.
+- **Startup never fails on notifications.** Step two is wrapped: a platform that will not initialise
+  is a degraded mode, not an error screen in front of the garden. Off Android and iOS the gateway
+  resolves to `DisabledNotificationGateway`, so the desktop test host runs the real startup path in
+  the app's real denied mode rather than being a special case.
+- **Reflection attaches to the notification through `ReflectionPromptComposer`.** Reflection and the
+  next-day nudge are deliberately one notification (reflection spec §1) — look back at today, commit
+  to tomorrow — so the scheduler asks for the backward-looking half and composes it onto the front
+  of the body. `NoReflectionPrompt` answers null until that stage lands. The seam carries one real
+  constraint for it: the question is composed when the notification is *queued*, up to
+  `nudgeHorizonDays` before it fires.
+- **`EngineConstants.version` → 2.** The notification block is not decoration: the occasion cadence
+  decides which local dates autonomy is counted over, so it is a derivation input like any θ.
+- **Notification ids are `nudgeId.hashCode & 0x7fffffff`.** The platforms key by `int`, the ledger
+  by UUID, and re-planning has to replace a pending notification rather than duplicate it — so the
+  mapping is a pure function of the row id rather than a counter.
+- **A pending notification the OS lost is queued again.** A row that claims a nudge, for an occasion
+  still ahead, with nothing pending at its id, is a reinstall or a restore. Left alone it is a nudge
+  the ledger claims and the user never gets — the direction that corrupts the measurement rather
+  than just missing a reminder.
+
+### Left open
+
+- **The occasion calendar is a default, not a resolved question.** Neither spec picks one. Letting
+  the user choose weekdays at creation is better UX and worse measurement — someone who picks
+  Mon/Wed/Fri and runs on Tuesday reads as a miss *and* an un-nudged occasion he never had. Worth
+  instrumenting alongside the nudge-fade rates, which growth spec §9 already calls the single most
+  important thing to measure.
+- **Undo does not clear a nudge's `confirmed` flag.** Carried forward from the store branch and
+  deliberately not built against the completion-tap branch while it was in flight. Autonomy
+  self-corrects, but the column is stale and the insight surfaces that read confirms and declines
+  directly (growth spec §8) would read it. `TODO(notifications)` sits on `markConfirmed`.
+- **A schedule the platform refuses is not retried.** The occasion is recorded un-nudged, which is
+  honest, but a transient failure permanently converts a nudge into something that looks like a
+  deliberate withhold. Distinguishing the two needs a column the schema does not have — the same
+  column that would let denied-permission occasions be excluded from the denominator.
+- **Nothing calls `requestNotificationAccess` yet.** The permission prompt is a designed onboarding
+  moment and onboarding does not exist, so a real device runs in the denied mode until it does.
+  **For whoever builds that screen:** `notificationAccessProvider` is a one-shot read, and
+  permission can be revoked in system settings while the app is backgrounded — so the screen needs
+  to invalidate it on lifecycle resume rather than trust what it read on the way in. Scheduling
+  itself is unaffected: every planning pass asks the gateway for access afresh.
+- **A stage change takes up to a week to reach the notifications.** Rows inside the horizon are
+  decided when they are planned and never re-decided, so a habit that climbs a rung today keeps the
+  old rate on occasions already planned. Shortening the horizon trades that against how much of a
+  quiet week survives a phone being off.
+- **The backfill catches up its own rate.** Occasions nobody was around to nudge are recorded
+  un-nudged, which leaves the fade rule in debt and makes it nudge the next several occasions in a
+  row. Defensible as re-engagement after the phone was off for a fortnight; it is also not a
+  decision anyone made on purpose, and it is the other thing worth instrumenting alongside the fade
+  rates themselves.
+
+### Then, before review
+
+Three things landed after the branch was first pushed, in one follow-up.
+
+- **`planHabit` is wired.** `GardenController` re-plans after a watering and after an undo. Awaited
+  rather than fired and forgotten — the plant has already reacted by then, so what it delays is the
+  undo affordance, not the reward — and it can never fail a watering: a completion that was stored
+  is stored, and surfacing a scheduling problem as a failed tap would take back growth the user
+  earned. `nudgeSchedulerProvider` now takes its clock and id generator from `clockProvider` and
+  `newIdProvider`, so the scheduler runs on the same fake clock as the rest of the garden.
+- **The fade counters advance across the planning window, not just its past.** They were seeded from
+  rows before *now* and only advanced on occasions already in the past, so every occasion in one
+  horizon decided against the same numbers — a pass handed out seven sends or seven silences in a
+  row, and the rate was honoured between passes rather than across occasions. They are now seeded
+  from rows before the *window* and advanced occasion by occasion through it. **CI caught this and
+  local runs did not**: the test asserting that some coming occasions are silent passed in
+  Europe/Amsterdam only because a `DateTime.add(Duration(days: 60))` crossed a DST boundary and put
+  the fake clock at exactly 20:00 — the check-in slot — which suppressed one occasion for having
+  missed its evening. On a UTC runner it was 19:00, nothing was suppressed, and the assertion found
+  no silent rows. The test now builds every instant from calendar fields rather than by adding
+  durations, and forces the withhold through a seeded ledger instead of an accident of the clock.
+- **The cross-feature read contract is on the repository interface.** Reflection's priority scoring
+  reads these rows directly (repositories are per-aggregate and shared for reads); notifications
+  stays the only writer. Documented there because a raw read can misinterpret all three of: rows
+  that exist for occasions a week away, `sent` meaning *queued* rather than *seen*, and `confirmed`
+  being an answer to a notification rather than a fact about the habit.
+
+### Then, the background answer
+
+Found while auditing the feature's providers against the paused-provider trap the sync branch hit
+(a Riverpod 3 provider nobody listens to is paused, so it never hears the event it was built to
+hear). **No provider here has that shape** — the feature holds no subscriptions at all, and the one
+live callback belongs to the gateway, which the startup chain keeps listened for the app's
+lifetime. But looking for it surfaced a worse bug one layer down.
+
+**Shade answers were being dropped whenever the app was not in the foreground** — which, for a
+notification that arrives at 20:00, is nearly always. Both actions are declared
+`showsUserInterface: false` so that answering costs nothing, and that is exactly the flag that makes
+the platform deliver the response to a *background isolate*. Only `onDidReceiveNotificationResponse`
+was registered, so the answer went to an isolate nobody was listening on. Silent: no error, the
+ledger simply never recorded a confirm. Confirmed against the plugin's `callback_dispatcher.dart`
+rather than inferred from its README.
+
+- `backgroundNudgeResponseHandler` is now registered as the background callback. It is annotated
+  `@pragma('vm:entry-point')` — load-bearing, because the compiler strips a function nothing appears
+  to call, and the failure would show up only in release builds.
+- The isolate has no `ProviderContainer`, so it opens its own database handle, writes through the
+  same repository, and closes. **On two isolates writing one store:** SQLite serialises the writes,
+  so the row is safe; what is not shared is memory. The main isolate's `GardenController` will not
+  see the write until it next reads. That costs nothing today — `confirmed` feeds the insight
+  surfaces, which read the store — but it is now written on `NudgeRepository` alongside the other
+  misread risks, because anything that starts caching nudge rows has to re-read on resume.
+- A body tap opens no database at all. Opening the store to record that a notification was tapped,
+  and then doing nothing with it, would be the most expensive no-op in the app.
+- **The cold-start path is covered too.** An answer given to a notification that *launches* the app
+  reaches neither callback; it is only readable from `getNotificationAppLaunchDetails()`. Startup
+  now asks once, before planning, so the pass that follows sees the ledger the user just changed.
+- Tested over a real database **file** rather than the in-memory fixture. Every in-memory open
+  returns a private store, so a handler writing to one handle and a test reading from another would
+  both pass and prove nothing. Two isolates share a file, so the test does too.
+
+### Then, merging develop (habit creation and the backend)
+
+- **A habit is planned the moment it is planted.** `HabitCreationController` re-plans on a successful
+  save. Without it the ledger stayed empty until the next cold start, so a habit designed this
+  morning got no check-in tonight — the evening when the first one matters most, because it is the
+  first rehearsal of the cue the user has just finished writing.
+- **Both re-plan hooks resolve the scheduler lazily, inside the guard.** Reading it in `build()`
+  made every construction of the garden *and* the creation flow depend on the notification stack
+  being buildable — which took twenty habit-creation tests down the moment the hook landed, and on a
+  device would have meant a notification problem breaking the completion tap. That is the one thing
+  that must never happen, so the promise is now structural rather than a comment.
+- **A cue-less habit is a *tracked* habit.** The merge's `journey` assert caught the notification
+  copy building a Habit that could not exist: no designed cue means Journey A (design-spec §2). The
+  plain form — "Tomorrow, then — Morning run?" — is right for that user precisely because he
+  declined to design a loop, and the test now says so instead of reading as an oversight.
+- The planner assembles `HabitInputs` from all four repositories, so any test that reaches it needs
+  all four as fakes. Worth knowing before it presents as an empty ledger: the guard that stops a
+  scheduling failure from failing a save also swallows a half-wired test harness.
+
+### Then, the review of PR #7
+
+Nine inline findings, all fixed. The three worth recording beyond "fixed":
+
+- **The cap was consumed by history** (the serious one). `planAll` recounted each habit's decisions
+  afterwards — but the known-row branch reports `send` for every *historical* sent row, so a few
+  weeks of ledger exhausted the 60-notification ceiling on its own and every real future nudge was
+  suppressed as `overCap` and written to the ledger as un-nudged. Silent, and it corrupts the
+  measurement rather than just losing a reminder. There is now one counter, incremented only when
+  the OS actually took a notification, returned out of the per-habit pass instead of recounted.
+  **The regression test needed three habits to reproduce it** — the miscount compounds across
+  habits rather than within one, so the running total only passed the ceiling by the third — and
+  writing it surfaced a second bug in the test seeding itself: a shared row id meant each habit's
+  seeded history *updated* the previous habit's row and moved it across, so every caller but the
+  last silently had no history at all. Both versions of the accounting were run against the test to
+  confirm it fails on the old one; the first two attempts passed under both and were not regression
+  tests at all.
+- **`planAll` and `planHabit` had diverged** in how they seeded the cap. One `_plan` now serves
+  both, so the accounting cannot fork again and the next pass-wide step cannot land on one path
+  only.
+- **Two latency findings, same shape.** The first frame was blocking on a full re-plan, and the
+  permission screen was waiting on one after the dialog had already closed. Both now run unawaited
+  with their own failure logging. The launch pass stays inside the startup chain so it still sees a
+  cold-start answer already recorded. One consequence written down where it happens: a startup retry
+  closes the database handle and can land mid-pass, which surfaces as a logged failure and costs
+  nothing, because the ledger is rebuilt from the calendar on every pass.
+
+Also from the review: one access snapshot per pass rather than two platform round trips per
+notification (which had a split-snapshot hazard — the scheduler deciding `canPost` from one reading
+while the gateway scheduled against another); `requestAccess` now prompts and then re-reads rather
+than keeping a second copy of the mapping that had already drifted on iOS provisional grants; one
+`NudgeResponse.from` shared by the foreground callback, the background isolate and the cold-start
+path; `saveNudges` batching the silent majority into one transaction, with the write-then-queue
+ordering kept only for rows actually headed to the OS; a `loadFor(Habit)` entry point so the planner
+stops re-fetching habits it is already holding; and a write-only `isNew` field deleted.
+
+### Next
+
+Supabase sync — a pusher over the `pending_sync` column, which the `nudges` table already carries
+along with the other three.
+## 2026-09-15 — backend review and fixes
+
+Branch: `feature/supabase-backend`, on top of the entry below. PR [#4](https://github.com/LWitteman96/taproot/pull/4).
+
+### Corrected
+
+**The entry below says "same seven tables". The device has six.** `habits`, `completions`,
+`completion_retractions`, `reflections`, `nudges` and `habit_pauses` exist on both sides; the
+server's seventh, `profiles`, has no device counterpart at all. It is created by the
+`handle_new_user` trigger, keyed by the auth user id, and is **not drained through `pending_sync`**.
+Recorded here rather than by editing that line, per this file's append-only rule — and recorded at
+all because the sync branch is the reader it would have misled: table-symmetric drain-and-pull code
+written from "same seven tables, same keys" would try to sync a table the device does not have.
+
+### Found
+
+Ten things from the review. Two are latent correctness bugs, four are guarantees that were weaker
+than the prose around them claimed, and the rest are cost and accuracy.
+
+| Finding | Why it matters |
+|---|---|
+| The documented enum-widening process is a no-op on a deployed database | The CHECK lists live inside `create table if not exists`, and `db push` only applies *new* migrations. Editing the file goes green on every gate — `db reset` and CI both rebuild from scratch — and drifts only in the one environment nobody can reset |
+| `pin_soft_delete` coalesced `deleted_at` and reported success | A stale whole-row push half-applied (200, `deleted_at` kept, `name` and `updated_at` overwritten); a sanctioned undelete was a silent no-op with nothing to debug from, since triggers are not bypassed by `service_role` the way RLS is |
+| `default 'tap'` and `default 'unknown'` invented client-owned values | Contradicted the migration's own header rule. A serializer bug dropping `source` would have filed a `nudgeConfirmation` as a tap and miscounted autonomy on every device that later pulled it |
+| `delete-account`'s 503 branch was dead | auth-js does not throw on a transient failure — it returns `AuthRetryableFetchError` in the result — so an auth-server blip answered 401 "Invalid session" on the one screen App Store review checks |
+| The "moves it on update" pgTAP assertion was vacuous | It passes against a `before insert`-only trigger, so a pull cursor frozen at insert time would have shipped certified by the suite |
+| `json_field`'s `JSONDecodeError` outran its own diagnostics | Under `set -e` a non-JSON body killed the script before the `error "Response was:"` lines written for exactly that case, and `python3` was the one dependency never preflighted |
+| CLAUDE.md keyed the enum rule to `engine/domain.dart` only | `CompletionSource` lives in `models/completion.dart`, so a fourth source value got no prompt to widen its CHECK |
+| "same seven tables" | Corrected above |
+| CI applied every migration twice and booted Studio + inbucket | `supabase start` already applies them; the script's reset then did it again. Nothing opens either container — the test user is created pre-confirmed through the admin API |
+| Two indexes with no possible reader | `idx_profiles_synced_at` (every `profiles` statement is an RLS-scoped PK lookup) and `idx_completions_habit_completed_at` (duplicates the PK's leading column on the hottest write path) |
+
+### Fixed
+
+All ten. pgTAP went from 30 assertions to 35, and `scripts/supabase-verify.sh` gained a fourth
+end-to-end check. Both `supabase-verify.sh` and `supabase-verify.sh --no-reset` are green locally,
+as is `flutter test`.
+
+Three of the fixes are worth knowing about before touching this code:
+
+- **`pin_soft_delete` raises `PT409` rather than coalescing.** Clearing a set `deleted_at` is now a
+  visible failure, so the whole statement rolls back instead of half-applying, and the push comes
+  back 409 Conflict (`PT`-prefixed SQLSTATEs are how PostgREST is told the status). The benign race
+  is deliberately untouched: a second device deleting an already-deleted habit still succeeds, and
+  the first stamp still wins. **The sync branch should read a 409 on a habit push as "deleted
+  upstream — pull, do not retry."** An undelete, if it is ever wanted, needs a sanctioned RPC that
+  the trigger exempts — not a whole-row push that happens to carry a null.
+- **The enum drift gate is a Dart test**, `test/unit/backend/enum_checks_test.dart`. It reads every
+  migration in order, takes the *last* definition of each named CHECK — so a widening
+  `ALTER TABLE ... DROP CONSTRAINT / ADD CONSTRAINT` counts, exactly as it does in Postgres — and
+  compares against the Dart enums. It lives in the Flutter suite on purpose: the Supabase workflow
+  is path-filtered to `supabase/**` and never runs on the commit that adds an enum value. Verified
+  both ways before landing — it fails on a Dart-only widening, and passes once the migration exists.
+- **Dropping the two server defaults moved four test fixtures.** `NOT NULL` is checked before
+  `CHECK`, so inserts that omitted `source` or `cue_type` started failing 23502 *before* reaching
+  the 23505 and 23514 they were written to assert. Worth remembering when adding a fixture: the
+  column list has to be complete now.
+
+### Left open
+
+- **No remote project is provisioned**, unchanged. Nothing here has been deployed, which is what
+  made editing the migration in place the right fix for the indexes and the defaults rather than a
+  follow-up migration.
+- **The 503 branch still has no test.** The 401 half now does — the verify script re-POSTs the
+  token whose user it just deleted, which is the only way to reach the function's own `getUser`
+  rejection from outside, since `verify_jwt = true` means the gateway turns away anything
+  malformed. Reaching the 503 half needs the auth server to fail mid-request, which nothing local
+  can stage; it rests on the auth-js reading in the comment rather than on a green light.
+- **`nudges` still has no unique constraint on `(habit_id, expected_occasion_at)`**, unchanged, and
+  still the sync branch's question rather than this one's.
+
+---
+
+## 2026-09-09 — the Supabase backend
+
+Branch: `feature/supabase-backend`. Backend only — nothing under `lib/` changed.
+
+### Landed
+
+```
+supabase/config.toml                        local + remote configuration
+supabase/migrations/  20260909090000_initial_schema
+                      20260909090100_rls
+                      20260909090200_new_user_trigger
+supabase/functions/   _shared/cors · delete-account
+supabase/tests/       schema.test · rls.test        (pgTAP, 27 assertions)
+supabase/seed.sql                           deliberately empty
+scripts/supabase-verify.sh                  the backend's gate
+.github/workflows/supabase.yml              runs it, path-filtered on supabase/**
+supabase/README.md                          how to run and verify it
+```
+
+The schema is the device's SQLite schema (`lib/app/database/app_database.dart`) plus `user_id` and
+`synced_at` — same seven tables, same keys, same append-only ledgers, same absence of any stored
+engine value. `scripts/supabase-verify.sh` resets from the migrations, **re-applies every migration a
+second time**, runs pgTAP, and deletes an account through the edge function. All four steps are green
+locally and the same script is what CI runs.
+
+`delete-account` was written now rather than at submission time, and verified end to end against the
+local stack: sign up → plant a habit → POST with the session token → 200, and the auth user, its
+profile and its habits are gone. Guideline 5.1.1(v) is the most common cause of a first-review
+rejection and it is not a thing to discover late.
+
+### Decided
+
+- **No `DELETE` is granted to any client role, on any table.** Deleting a habit is `deleted_at`,
+  undoing a completion is a row in `completion_retractions`, and erasing an account is the edge
+  function running as `service_role`. Without this a device that has not yet heard about a row could
+  delete it and a second device could re-push it — sync stops being a union the moment rows can go
+  backwards. `completions` and `completion_retractions` have no `UPDATE` grant either: they are event
+  ledgers, and an edit to a past event is a different event.
+- **Child rows carry a composite `(habit_id, user_id)` foreign key** into
+  `habits (id, user_id)`, which is why `habits` has a redundant unique constraint on that pair. It
+  makes "this completion belongs to the same user as its habit" a foreign key rather than something
+  the RLS check has to be trusted to have got right. A test inserts a completion Ana owns onto a
+  habit Ben owns: RLS passes, the foreign key catches it.
+- **`synced_at` is a new column with no counterpart on the device** — the pull cursor, stamped by a
+  trigger off the *server's* clock. `updated_at` comes off the client's and is what the app compares.
+  Conflating them means a device with a skewed clock can write a row a later incremental pull never
+  sees. This is the one piece of schema here that the sync branch needs and the guide's schema sketch
+  does not have.
+- **Text enum columns carry the Dart `Enum.name` verbatim** — camelCase (`nudgeConfirmation`,
+  `autonomyCompletion`, `cantRemember`), because `encodeEnum` is `value.name`. `CHECK` lists spell
+  them out so a value the app could not decode fails at insert rather than sitting in the table.
+- **`DROP POLICY IF EXISTS` rather than the guide's `DO $$ ... EXECUTE 'DROP POLICY' ... $$`.** Same
+  idempotency guarantee, a third of the lines; the block form predates `DROP POLICY IF EXISTS`.
+- **Realtime and storage are off.** Realtime would be a second, unordered path into rows that sync
+  drains one way; storage has nothing to hold, since plant art ships in the bundle. The storage purge
+  step stays in `delete-account` as a comment, in the position it belongs in, for the day a bucket
+  exists.
+- **Email confirmations are on**, which the magic-link flow does not itself need. Enabling email
+  sign-up enables the password grant with it and there is no switch separating the two, so with
+  confirmations off anyone could sign up as someone else's address, get a session immediately, and
+  keep a working password on the row that address's real owner later signs into with a magic link.
+  One extra round trip is not worth a stranger's foothold in someone's habits. The auth branch can
+  revisit it if it removes the password grant.
+- **`habits.deleted_at` is pinned one-way by a trigger** (`pin_soft_delete`). Revoking `DELETE` is
+  only half of "a device that never heard about a deletion cannot undo it" — the other half is that
+  a stale whole-row push must not be able to set `deleted_at` back to null. First deletion wins, so
+  a second device cannot move the stamp either. `graduated_at` is deliberately *not* pinned:
+  graduation derives from autonomy, which can fall, and whether it is one-way is the engine's
+  question.
+- **Taproot runs on the 5433x port block, not the CLI defaults.** inkBlox holds 5432x, and "stop your
+  other project" is exactly the thing the bare+worktree layout exists to avoid. `.env.dev` now points
+  at `http://127.0.0.1:54331`.
+
+### Left open
+
+- **No remote project is provisioned.** The refs at the top of `scripts/supabase-push.sh` are still
+  empty and the script fails loudly on them. `.env.stg` and `.env.prod` are placeholders.
+- **Apple and Google sign-in are wired and disabled**, because the credentials do not exist. The
+  `env()` names are in `config.toml` and the empty keys are in `.secrets/.env.*`; enabling a provider
+  is one commit that flips `enabled` and fills its pair. The deep-link scheme
+  `io.supabase.taproot://login-callback/` is *declared* but not registered in `Info.plist` or
+  `AndroidManifest.xml` — the native half is untested.
+- **No SMTP provider is chosen**, so `[auth.email.smtp]` is commented out. Local mail goes to the
+  catcher on port 54334; staging and production would send nothing.
+- **`nudges` has no unique constraint on `(habit_id, expected_occasion_at)`**, matching the device.
+  Two devices can therefore each create a row for the same expected occasion and double-count
+  autonomy's denominator. Adding the constraint here would turn that into a failed sync push rather
+  than something the sync branch can reconcile, so it is a question for that branch, not this one.
+- **`delete-account` does not revoke the Apple grant.** Apple's `/auth/revoke` needs a token issued
+  for that user at sign-in, and nothing captures one yet. The function logs that it skipped rather
+  than pretending; the step keeps its slot, and it stays best-effort — nothing it does may block the
+  deletion.
+- **The pull cursor has a commit-time gap, and the sync branch has to close it.** `synced_at` is
+  stamped when a row is written; the row becomes visible when its transaction commits, which is
+  later. A pull that reads at T and stores `cursor = T` can miss a row stamped before T that commits
+  after it — permanently. `clock_timestamp()` narrows the window to the write itself rather than the
+  transaction's start, but does not close it. The two real fixes are an overlap window
+  (`synced_at > cursor - slack`, safe because every upsert here is idempotent) or an `xid8` cursor.
+  The warning is written out at the top of the schema migration, where the branch that builds the
+  pull will read it.
+- **PostgREST's `max_rows = 1000` truncates silently.** A first-install pull of a year of
+  completions gets exactly one page and no signal that there is more, so the pull must page rather
+  than treat one response as the whole answer. Noted in `config.toml` next to the setting.
+- **Whether a habit should be hard-deletable** at all. Soft delete is what protects the union, but a
+  user asking to erase one habit's history currently keeps its rows. If that changes it is an RPC, or
+  a second edge function — not a `DELETE` grant.
+
+### Reviewed
+
+A review pass over the branch found eight things; six were fixed here and two became the "left open"
+notes above. The six: `profiles` carried a `synced_at` column with no trigger to move it (a cursor
+frozen at its default, which is worse than no cursor — there is now a test asserting *every* table
+with the column has the trigger); email confirmations; the `deleted_at` pin; `delete-account` had no
+`try`/`catch`, so the "best-effort" contract on the Apple revoke was a comment rather than a
+guarantee and an exception would have escaped as a CORS failure on the one screen App Store review
+checks; `now()` → `clock_timestamp()`; and the CI job had no `permissions:` block. The pgTAP suite
+went from 27 assertions to 30.
+
+### Next
+
+Sync, and it is the completion tap's branch that unblocks it, not this one. What that branch needs
+from here: a three-line `supabaseClientProvider`, remote services behind the existing repository
+interfaces, and a `SyncService` that drains `pending_sync` on a false → true connectivity edge —
+treating a `null` previous value as "was offline", so the first `true` emission is not swallowed.
+`main()` also still has no `Supabase.initialize`; the `.env.dev` credentials now exist for it.
+
+---
 ## 2026-09-15 — habit creation
 
 Branch: `feature/habit-creation`, on top of the completion tap.

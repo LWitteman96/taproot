@@ -36,30 +36,48 @@ class LocalNudgeService implements NudgeRepository {
   @override
   Future<void> saveNudge(NudgeRecord nudge) =>
       guardStore(_log, 'saveNudge', () async {
+        await _database.transaction((transaction) => _save(transaction, nudge));
+      });
+
+  @override
+  Future<void> saveNudges(Iterable<NudgeRecord> nudges) =>
+      guardStore(_log, 'saveNudges', () async {
+        if (nudges.isEmpty) return;
+        // One transaction for the lot. The per-row rules are unchanged — this
+        // batches the round trips, not the checks — and a bad row rolls the
+        // whole window back, because a half-written window is harder to reason
+        // about than an unwritten one the next pass will write again.
         await _database.transaction((transaction) async {
-          await requireExistingHabit(transaction, nudge.habitId);
-
-          final clash = await _occasionOnSameLocalDate(transaction, nudge);
-          if (clash != null) {
-            throw DuplicateOccasionException(nudge.habitId, clash);
+          for (final nudge in nudges) {
+            await _save(transaction, nudge);
           }
-
-          final row = toRow(nudge.toJson())..addAll(_syncStamp());
-          final exists = await _exists(transaction, nudge.id);
-          if (!exists) {
-            await transaction.insert(AppSchema.nudges, row);
-            return;
-          }
-
-          row.removeWhere((column, _) => _outcomeColumns.contains(column));
-          await transaction.update(
-            AppSchema.nudges,
-            row,
-            where: 'id = ?',
-            whereArgs: <Object?>[nudge.id],
-          );
         });
       });
+
+  /// One row, inside a transaction the caller owns.
+  Future<void> _save(DatabaseExecutor transaction, NudgeRecord nudge) async {
+    await requireExistingHabit(transaction, nudge.habitId);
+
+    final clash = await _occasionOnSameLocalDate(transaction, nudge);
+    if (clash != null) {
+      throw DuplicateOccasionException(nudge.habitId, clash);
+    }
+
+    final row = toRow(nudge.toJson())..addAll(_syncStamp());
+    final exists = await _exists(transaction, nudge.id);
+    if (!exists) {
+      await transaction.insert(AppSchema.nudges, row);
+      return;
+    }
+
+    row.removeWhere((column, _) => _outcomeColumns.contains(column));
+    await transaction.update(
+      AppSchema.nudges,
+      row,
+      where: 'id = ?',
+      whereArgs: <Object?>[nudge.id],
+    );
+  }
 
   /// The id of another row already holding [nudge]'s local date, or null.
   ///
