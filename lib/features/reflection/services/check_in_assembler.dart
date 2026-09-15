@@ -109,7 +109,12 @@ class CheckInAssembler {
           occasion: occasionFor(
             habitId: habit.id,
             completions: inputs.completions,
-            nudges: inputs.nudges,
+            // The sanctioned filter, and the one the engine uses. A planning
+            // pass records the whole horizon at once, so the raw list holds
+            // occasions up to a week out; `occasionFor` guards against them
+            // too, but reading the ledger the same way the engine does keeps
+            // one definition of "an occasion that has happened".
+            nudges: inputs.nudgesUpTo(now),
             reflections: reflections,
             targetFrequency: habit.targetFrequency,
             at: now,

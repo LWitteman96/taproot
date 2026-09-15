@@ -55,7 +55,14 @@ List<RememberedCue> rememberedCues({
                 (reflection.cueReported?.trim().isNotEmpty ?? false),
           )
           .toList()
-        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        ..sort((a, b) {
+          // Newest first, with the id breaking exact ties. Two answers can
+          // share a timestamp — a backfill, or a device with a coarse clock —
+          // and without a second key the input order decides the ranking, so
+          // the same history offers different chips on different reads.
+          final byRecency = b.createdAt.compareTo(a.createdAt);
+          return byRecency != 0 ? byRecency : a.id.compareTo(b.id);
+        });
 
   final weights = <String, double>{};
   final firstSeen = <String, int>{};

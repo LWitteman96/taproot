@@ -10,6 +10,7 @@ import 'package:taproot/core/utils/flavor.dart';
 import 'package:taproot/features/garden/controllers/garden_controller.dart';
 import 'package:taproot/features/garden/providers/garden_selectors.dart';
 import 'package:taproot/features/garden/widgets/plant_card.dart';
+import 'package:taproot/features/reflection/providers/reflection_providers.dart';
 
 /// The home screen.
 ///
@@ -37,6 +38,7 @@ class GardenPage extends ConsumerWidget {
       'Nothing has been lost. This device could not open its store just now — '
       'trying again usually gets it.';
   static const String retryLabel = 'Try again';
+  static const String checkInInvitation = 'Got a moment?';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -121,12 +123,55 @@ class _PlantList extends StatelessWidget {
         if (index == 0) {
           return Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.large),
-            child: Text(GardenPage.title, style: theme.textTheme.headlineLarge),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(GardenPage.title, style: theme.textTheme.headlineLarge),
+                const _CheckInInvitation(),
+              ],
+            ),
           );
         }
         final habitId = habitIds[index - 1];
         return _WateringCard(habitId: habitId);
       },
+    );
+  }
+}
+
+/// The way into the evening check-in.
+///
+/// Shown **only when there is something worth asking**, which is most of the
+/// point: reflection-logic §2 expects no check-in on most days, and a standing
+/// button that usually opens a screen saying "nothing to ask" would teach the
+/// user to stop pressing it. While the offer is still resolving, and whenever
+/// it resolves to nothing, this is not there at all — the garden is a place you
+/// visit, not a place that owes you a task.
+class _CheckInInvitation extends ConsumerWidget {
+  const _CheckInInvitation();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final offer = ref.watch(checkInOfferProvider);
+
+    return offer.maybeWhen(
+      data: (value) => value == null
+          ? const SizedBox.shrink()
+          : Padding(
+              padding: const EdgeInsets.only(top: AppSpacing.medium),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: ActionChip(
+                  avatar: const Icon(Icons.eco_outlined),
+                  label: Text(
+                    '${GardenPage.checkInInvitation} '
+                    '${value.habit.name.toLowerCase()}',
+                  ),
+                  onPressed: () => context.push(AppRoutes.checkIn),
+                ),
+              ),
+            ),
+      orElse: () => const SizedBox.shrink(),
     );
   }
 }

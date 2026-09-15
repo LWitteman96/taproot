@@ -133,6 +133,20 @@ class CheckInController extends Notifier<CheckInState> {
     frictionType: chip.frictionType,
   );
 
+  /// The user typed their own friction.
+  ///
+  /// The type is left null rather than guessed. Friction *type* is what the
+  /// §6 routing keys off — forgetting is a cue failure, reluctance is a reward
+  /// failure, and they have opposite fixes — so mapping free text to one of
+  /// them on a keyword would route real users to the wrong intervention. An
+  /// untyped friction is honest, and the text is kept for when there is a
+  /// mapping worth trusting.
+  Future<void> answerWithTypedFriction(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return Future<void>.value();
+    return _record(inputMode: InputMode.typed, frictionReported: trimmed);
+  }
+
   /// A first-class answer, not a gap (reflection-logic §4).
   ///
   /// A rising can't-remember rate is itself the signal that a habit is running

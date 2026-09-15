@@ -375,4 +375,50 @@ void main() {
       handle.dispose();
     });
   });
+
+  group('the check-in invitation', () {
+    testWidgets('is absent when there is nothing worth asking', (tester) async {
+      // reflection-logic §2 expects no check-in on most days. A standing button
+      // that usually opens a screen saying "nothing to ask" would teach the
+      // user to stop pressing it.
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PlantCard), findsOneWidget);
+      expect(find.textContaining(GardenPage.checkInInvitation), findsNothing);
+    });
+
+    testWidgets('appears, named, once something is worth asking', (
+      tester,
+    ) async {
+      final harness = PageHarness();
+      await harness.store.saveHabit(
+        testHabit(
+          id: 'a',
+          name: 'Morning walk',
+          createdAt: DateTime(2026, 2, 1),
+        ),
+      );
+      await harness.completions.recordCompletion(
+        Completion(
+          id: 'c1',
+          habitId: 'a',
+          completedAt: DateTime(2026, 3, 4, 7),
+          source: CompletionSource.tap,
+        ),
+      );
+
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      // Named, so the invitation says what it is about rather than being a
+      // generic errand. Not tapped here: the destination is a route, and this
+      // harness deliberately has no router — the check-in page has its own
+      // tests.
+      expect(find.textContaining(GardenPage.checkInInvitation), findsOneWidget);
+      expect(find.textContaining('morning walk'), findsOneWidget);
+    });
+  });
 }
