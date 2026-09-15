@@ -3,12 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:taproot/app/runtime/runtime_providers.dart';
+import 'package:taproot/core/models/completion.dart';
+import 'package:taproot/core/models/habit.dart';
+import 'package:taproot/core/models/pause_interval.dart';
 import 'package:taproot/app/theme/app_motion.dart';
 import 'package:taproot/app/theme/themedata.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
 import 'package:taproot/features/garden/pages/garden_page.dart';
 import 'package:taproot/features/garden/widgets/plant_card.dart';
+import 'package:taproot/features/garden/controllers/garden_controller.dart';
 import 'package:taproot/features/garden/widgets/watering_control.dart';
+import 'package:taproot/features/habits/domain/completion_repository.dart';
+import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 import 'package:taproot/features/reflection/providers/reflection_providers.dart';
@@ -16,15 +22,100 @@ import 'package:taproot/features/reflection/providers/reflection_providers.dart'
 import '../../utils/fake_repositories.dart';
 import '../../utils/store_fixtures.dart';
 
+/// A habit store whose read can be broken, so the page's failure paths are
+/// reachable from a widget test.
+///
+/// Wrapping rather than reimplementing, for the same reason the controller test
+/// does: everything it does not intercept is the fake the SQLite services are
+/// contract-tested against.
+class BreakableHabits implements HabitRepository {
+  BreakableHabits(this.inner);
+
+  final FakeHabitService inner;
+
+  /// Thrown instead of listing.
+  Object? readFailure;
+
+  @override
+  Future<List<Habit>> allHabits() async {
+    if (readFailure case final failure?) throw failure;
+    return inner.allHabits();
+  }
+
+  @override
+  Future<Habit?> habitById(String habitId) => inner.habitById(habitId);
+
+  @override
+  Future<void> saveHabit(Habit habit) => inner.saveHabit(habit);
+
+  @override
+  Future<void> deleteHabit(String habitId) => inner.deleteHabit(habitId);
+
+  @override
+  Future<void> pauseHabit(String habitId) => inner.pauseHabit(habitId);
+
+  @override
+  Future<void> resumeHabit(String habitId) => inner.resumeHabit(habitId);
+
+  @override
+  Future<List<PauseInterval>> pausesFor(String habitId) =>
+      inner.pausesFor(habitId);
+}
+
+/// A completion store whose write can be broken.
+class BreakableCompletions implements CompletionRepository {
+  BreakableCompletions(this.inner);
+
+  final FakeCompletionService inner;
+
+  /// Thrown instead of recording.
+  Object? recordFailure;
+
+  @override
+  Future<void> recordCompletion(Completion completion) async {
+    if (recordFailure case final failure?) throw failure;
+    return inner.recordCompletion(completion);
+  }
+
+  @override
+  Future<void> retractCompletion(String habitId, String completionId) =>
+      inner.retractCompletion(habitId, completionId);
+
+  @override
+  Future<void> recordRetraction(
+    String habitId,
+    String completionId, {
+    required DateTime retractedAt,
+  }) => inner.recordRetraction(habitId, completionId, retractedAt: retractedAt);
+
+  @override
+  Future<List<Completion>> completionsFor(String habitId) =>
+      inner.completionsFor(habitId);
+
+  @override
+  Future<List<Completion>> completionsOnLocalDate(String habitId, date) =>
+      inner.completionsOnLocalDate(habitId, date);
+
+  @override
+  Future<Completion?> latestCompletion(String habitId) =>
+      inner.latestCompletion(habitId);
+}
+
 class PageHarness {
   PageHarness() {
-    habits = FakeHabitService(clock: clock.call);
-    completions = FakeCompletionService(habits: habits, clock: clock.call);
+    store = FakeHabitService(clock: clock.call);
+    habits = BreakableHabits(store);
+    completions = BreakableCompletions(
+      FakeCompletionService(habits: store, clock: clock.call),
+    );
   }
 
   final TestClock clock = TestClock(DateTime(2026, 3, 4, 9));
-  late final FakeHabitService habits;
-  late final FakeCompletionService completions;
+
+  /// The store to write fixtures into — [habits] is the breakable face of it.
+  late final FakeHabitService store;
+  late final BreakableHabits habits;
+  late final BreakableCompletions completions;
   int _nextId = 1;
 
   Widget get app => ProviderScope(
@@ -32,9 +123,9 @@ class PageHarness {
       habitServiceProvider.overrideWithValue(habits),
       completionServiceProvider.overrideWithValue(completions),
       reflectionServiceProvider.overrideWithValue(
-        FakeReflectionService(habits: habits, clock: clock.call),
+        FakeReflectionService(habits: store, clock: clock.call),
       ),
-      nudgeServiceProvider.overrideWithValue(FakeNudgeService(habits: habits)),
+      nudgeServiceProvider.overrideWithValue(FakeNudgeService(habits: store)),
       clockProvider.overrideWithValue(clock.call),
       newIdProvider.overrideWithValue(() => 'id-${_nextId++}'),
       // Widget tests run against a still garden: the ambient loops never
@@ -90,7 +181,7 @@ void main() {
       tester,
     ) async {
       final harness = PageHarness();
-      await harness.habits.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
       await tester.pumpWidget(harness.app);
       await tester.pumpAndSettle();
 
@@ -106,7 +197,7 @@ void main() {
       tester,
     ) async {
       final harness = PageHarness();
-      await harness.habits.saveHabit(testHabit(id: 'a'));
+      await harness.store.saveHabit(testHabit(id: 'a'));
       await tester.pumpWidget(harness.app);
       await tester.pumpAndSettle();
 
@@ -131,7 +222,7 @@ void main() {
       // The transient snack bar is the shortcut; the card carries the
       // correction for the rest of the day the watering happened on.
       final harness = PageHarness();
-      await harness.habits.saveHabit(testHabit(id: 'a'));
+      await harness.store.saveHabit(testHabit(id: 'a'));
       await tester.pumpWidget(harness.app);
       await tester.pumpAndSettle();
 
@@ -147,12 +238,104 @@ void main() {
       expect(await harness.completions.completionsFor('a'), isEmpty);
     });
 
+    testWidgets('a failed read says so, and does not claim the garden is '
+        'empty', (tester) async {
+      // A failed load leaves `plants` and `order` empty, which used to fall
+      // straight through to "Nothing planted yet" — the app telling someone
+      // whose store failed that their work is gone, as soon as the snack bar
+      // timed out.
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      harness.habits.readFailure = StateError('the disk is unreadable');
+
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      expect(find.text(couldNotReadGardenMessage), findsOneWidget);
+      expect(find.text(GardenPage.unreadableHeadline), findsOneWidget);
+      expect(find.text(GardenPage.emptyHeadline), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+
+      // And the offer of a retry is real, which the copy used not to be: it
+      // promised a pull-to-refresh that existed nowhere in the app.
+      harness.habits.readFailure = null;
+      await tester.tap(find.text(GardenPage.retryLabel));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(PlantCard), findsOneWidget);
+      expect(find.text('Morning walk'), findsOneWidget);
+    });
+
+    testWidgets('a failed watering shows its message and leaves the plant '
+        'where it was', (tester) async {
+      // The error paths were untested at widget level, which is what let the
+      // `ref.listen` double-rebuild survive: clearing the message inside the
+      // listener rebuilt `gardenErrorProvider` twice in one frame and the
+      // debug scheduler threw. An uncaught framework error fails this test.
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      harness.completions.recordFailure = StateError('the disk is full');
+      await holdToWater(tester);
+
+      expect(find.text(couldNotWaterMessage), findsOneWidget);
+      expect(find.textContaining('Seed'), findsOneWidget);
+      expect(await harness.completions.completionsFor('a'), isEmpty);
+    });
+
+    testWidgets('a second failure is announced again rather than swallowed', (
+      tester,
+    ) async {
+      // The deferred clear has to actually run, or the message stays set and
+      // the identical second failure never fires the listener.
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      harness.completions.recordFailure = StateError('the disk is full');
+      await holdToWater(tester);
+      expect(find.text(couldNotWaterMessage), findsOneWidget);
+
+      await tester.pump(AppMotion.undoOfferDuration);
+      await tester.pumpAndSettle();
+      expect(find.byType(SnackBar), findsNothing);
+
+      await holdToWater(tester);
+      expect(find.text(couldNotWaterMessage), findsOneWidget);
+    });
+
+    testWidgets('a stale undo offer explains the window rather than throwing', (
+      tester,
+    ) async {
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      await holdToWater(tester);
+      // Let the transient offer go, so the only Undo left is the card's.
+      await tester.pump(AppMotion.undoOfferDuration);
+      await tester.pumpAndSettle();
+      // The garden was left open across midnight, so the card's standing offer
+      // went stale.
+      harness.clock.advance(const Duration(days: 1));
+
+      await tester.tap(find.text(PlantCard.undoLabel));
+      await tester.pumpAndSettle();
+
+      expect(find.text(undoWindowClosedMessage), findsOneWidget);
+      expect(await harness.completions.completionsFor('a'), hasLength(1));
+    });
+
     testWidgets('a plant carries its whole state in one semantic label', (
       tester,
     ) async {
       final handle = tester.ensureSemantics();
       final harness = PageHarness();
-      await harness.habits.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
       await tester.pumpWidget(harness.app);
       await tester.pumpAndSettle();
 
@@ -176,7 +359,7 @@ void main() {
       // a screen reader would only ever get one of them.
       final handle = tester.ensureSemantics();
       final harness = PageHarness();
-      await harness.habits.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
       await tester.pumpWidget(harness.app);
       await tester.pumpAndSettle();
 

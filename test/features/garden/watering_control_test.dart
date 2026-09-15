@@ -28,6 +28,11 @@ Widget harness({
   ),
 );
 
+/// How far the pour has filled, 0 to 1.
+double fillWidth(WidgetTester tester) => tester
+    .widget<FractionallySizedBox>(find.byType(FractionallySizedBox))
+    .widthFactor!;
+
 void main() {
   group('WateringControl', () {
     testWidgets('a tap does not water', (tester) async {
@@ -134,6 +139,59 @@ void main() {
       expect(waterings, 1);
 
       await gesture.up();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('a hold begun after an aborted one starts the pour over', (
+      tester,
+    ) async {
+      // `forward()` resumes from wherever the fill got to, and an
+      // AnimationController scales its travel by the distance left — so a
+      // second hold would fill in a fraction of the hold duration and then sit
+      // there looking finished while the recognizer still had most of the
+      // gesture to run. A release in that window waters nothing, which is the
+      // "two clocks" bug the class doc rules out.
+      var waterings = 0;
+      await tester.pumpWidget(
+        harness(onWatered: () => waterings++, ticker: GardenTicker.calm),
+      );
+      final target = tester.getCenter(find.byType(WateringControl));
+
+      // An aborted hold, caught partway through its retreat. The bare pump is
+      // the pour's first frame — its ticker takes its start time from one.
+      final aborted = await tester.startGesture(target);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 320));
+      expect(fillWidth(tester), greaterThan(0.4));
+
+      await aborted.up();
+      await tester.pump(const Duration(milliseconds: 40));
+      expect(fillWidth(tester), greaterThan(0.2));
+
+      final second = await tester.startGesture(target);
+      await tester.pump();
+      expect(
+        fillWidth(tester),
+        lessThan(0.05),
+        reason: 'the pour restarts rather than resuming',
+      );
+
+      // A hundred milliseconds short of the hold: nothing has been watered, so
+      // the fill must not be showing a finished gesture.
+      await tester.pump(
+        AppMotion.waterHoldDuration - const Duration(milliseconds: 100),
+      );
+      expect(waterings, 0);
+      expect(
+        fillWidth(tester),
+        lessThan(1),
+        reason: 'the picture does not finish before the gesture does',
+      );
+
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(waterings, 1);
+
+      await second.up();
       await tester.pumpAndSettle();
     });
 

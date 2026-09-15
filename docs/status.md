@@ -36,9 +36,9 @@ schema already carries.
 What is deliberately *not* built yet: Supabase and Sentry are still uninitialised (the `.env` files
 hold no credentials, and `Supabase.initialize` on an empty URL throws at launch); the router's gate
 is stubbed open with only its fail-safe path implemented; `HabitCreationPage` is still a placeholder
-shell, so the only way to get a habit into the store is the **dev-flavor seed button** on the empty
-garden; and the garden renders its plants as words rather than art, which is waiting on the external
-illustrator.
+shell, so the only way to get a habit into the store is the **debug-only dev-flavor seed button** on
+the empty garden; and the garden renders its plants as words rather than art, which is waiting on
+the external illustrator.
 
 ---
 

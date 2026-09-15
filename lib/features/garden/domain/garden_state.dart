@@ -71,6 +71,7 @@ class GardenState {
     this.plants = const <String, PlantState>{},
     this.order = const <String>[],
     this.isLoading = true,
+    this.loadFailed = false,
     this.errorMessage,
   });
 
@@ -83,6 +84,15 @@ class GardenState {
   /// the tap must never spin.
   final bool isLoading;
 
+  /// True when the last read of the store failed.
+  ///
+  /// Held separately from [errorMessage], which is transient by design — it is
+  /// shown once and then cleared. This one persists, because an empty [order]
+  /// after a failed read means "we could not look", not "there is nothing
+  /// there", and a screen that cannot tell the two apart tells the user their
+  /// garden is empty as soon as the snack bar times out.
+  final bool loadFailed;
+
   /// A sentence for the user about something that did not work. Errors reach
   /// the UI as state rather than as an exception, so no screen has to decide
   /// what a failure means mid-gesture.
@@ -94,11 +104,13 @@ class GardenState {
     Map<String, PlantState>? plants,
     List<String>? order,
     bool? isLoading,
+    bool? loadFailed,
     String? Function()? errorMessage,
   }) => GardenState(
     plants: plants ?? this.plants,
     order: order ?? this.order,
     isLoading: isLoading ?? this.isLoading,
+    loadFailed: loadFailed ?? this.loadFailed,
     errorMessage: errorMessage != null ? errorMessage() : this.errorMessage,
   );
 

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:taproot/app/runtime/runtime_providers.dart';
@@ -20,15 +21,17 @@ import 'package:taproot/features/habits/providers/habit_providers.dart';
 /// history — the plant starts at Seed with no completions, which makes the
 /// first watering visibly move it a rung, which is the thing worth watching.
 ///
-/// The flavor check is here rather than only at the call site so this cannot
-/// write to a production store by being called from the wrong place later.
+/// The guard is here rather than only at the call site so this cannot write to
+/// a production store by being called from the wrong place later — see
+/// [isDemoSeedEnabled] for why the flavor alone is not enough to do that job.
 Future<Habit?> plantDemoHabit({
   required HabitRepository habits,
   required String Function() newId,
   required DateTime Function() clock,
   Flavor Function() flavor = getFlavor,
+  bool isDebug = kDebugMode,
 }) async {
-  if (flavor() != Flavor.dev) return null;
+  if (!isDemoSeedEnabled(flavor: flavor, isDebug: isDebug)) return null;
 
   final habit = Habit(
     id: newId(),
@@ -46,7 +49,26 @@ Future<Habit?> plantDemoHabit({
   return habit;
 }
 
-/// The seed, wired. Returns null on any flavor but dev.
+/// Whether the demo seed is allowed to run at all.
+///
+/// The flavor on its own is not a guard, and the doc above used to claim more
+/// than it delivered. [getFlavor] falls back to [Flavor.dev] whenever
+/// `appFlavor` is unset, which is every build not launched with `--flavor` —
+/// so "dev" currently means "nobody said", not "this is the dev build", and a
+/// release build made without the flag would have shipped the seed button on
+/// the empty garden.
+///
+/// [kDebugMode] is the half that cannot be got wrong by a forgotten flag: it is
+/// a compile-time constant the release build sets to false, and it tree-shakes
+/// the seed out of the binary entirely. The flavor check stays alongside it, so
+/// that once the flavors are genuinely wired a *debug* stg or prod build is
+/// excluded too.
+bool isDemoSeedEnabled({
+  Flavor Function() flavor = getFlavor,
+  bool isDebug = kDebugMode,
+}) => isDebug && flavor() == Flavor.dev;
+
+/// The seed, wired. Returns null anywhere [isDemoSeedEnabled] is false.
 final demoHabitSeedProvider = Provider<Future<Habit?> Function()>(
   (ref) =>
       () => plantDemoHabit(

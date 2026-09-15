@@ -35,16 +35,35 @@ class ControllableCompletions implements CompletionRepository {
   /// Thrown instead of recording.
   Object? recordFailure;
 
+  /// When set, [gate] and [recordFailure] apply to this completion only.
+  ///
+  /// That is what lets a test stall and fail one watering while a second one
+  /// goes through underneath it — the interleaving the rollback has to survive.
+  String? onlyCompletionId;
+
+  /// Completed by the test to let a retraction finish.
+  Completer<void>? retractGate;
+
+  /// Thrown instead of retracting.
+  Object? retractFailure;
+
+  bool _applies(Completion completion) =>
+      onlyCompletionId == null || completion.id == onlyCompletionId;
+
   @override
   Future<void> recordCompletion(Completion completion) async {
+    if (!_applies(completion)) return _inner.recordCompletion(completion);
     if (gate != null) await gate!.future;
     if (recordFailure case final failure?) throw failure;
     return _inner.recordCompletion(completion);
   }
 
   @override
-  Future<void> retractCompletion(String habitId, String completionId) =>
-      _inner.retractCompletion(habitId, completionId);
+  Future<void> retractCompletion(String habitId, String completionId) async {
+    if (retractGate != null) await retractGate!.future;
+    if (retractFailure case final failure?) throw failure;
+    return _inner.retractCompletion(habitId, completionId);
+  }
 
   @override
   Future<void> recordRetraction(
@@ -185,6 +204,44 @@ void main() {
         },
       );
 
+      test(
+        'a watering made while a failing write was in flight is kept',
+        () async {
+          // The rollback used to restore the PlantState snapshot taken before
+          // the await, which threw away everything that happened during it.
+          // Two quick holds: A stalls and fails, B is taken from the
+          // already-updated state and stores cleanly. Restoring the snapshot
+          // would show zero completions while the store held B — the plant
+          // falls back to Seed even though the watering is on disk, and only
+          // comes back on the next cold start.
+          final harness = Harness();
+          await harness.habits.saveHabit(testHabit(id: 'a'));
+          await harness.start();
+
+          harness.completions.onlyCompletionId = 'id-1';
+          harness.completions.gate = Completer<void>();
+          harness.completions.recordFailure = StateError('the disk is full');
+          final stalled = harness.controller.water('a');
+
+          final second = await harness.controller.water('a');
+          expect(second, isNotNull, reason: 'the second write is not gated');
+
+          harness.completions.gate!.complete();
+          expect(await stalled, isNull);
+
+          expect(
+            harness.state.plants['a']!.inputs.completions
+                .map((completion) => completion.id)
+                .toList(),
+            <String>['id-2'],
+          );
+          expect(await harness.completions.completionsFor('a'), hasLength(1));
+          expect(harness.state.errorMessage, couldNotWaterMessage);
+          // The store and the garden agree, which is the whole point.
+          expect(harness.state.plants['a']!.growth.stage, Stage.sprout);
+        },
+      );
+
       test('a habit deleted on another device leaves the garden', () async {
         final harness = Harness();
         await harness.habits.saveHabit(
@@ -284,6 +341,67 @@ void main() {
           expect(harness.state.plants['a']!.growth.stage, Stage.sprout);
         },
       );
+
+      test(
+        'a watering made while a failing retraction was in flight is kept',
+        () async {
+          // The mirror of the watering case. Restoring the pre-undo snapshot
+          // resurrects the retracted completion *and* drops anything recorded
+          // while the retraction was in flight.
+          final harness = Harness();
+          await harness.habits.saveHabit(testHabit(id: 'a'));
+          await harness.start();
+
+          final first = await harness.controller.water('a');
+
+          harness.completions.retractGate = Completer<void>();
+          harness.completions.retractFailure = StateError('the disk is full');
+          final stalled = harness.controller.undo('a', first!.id);
+
+          final second = await harness.controller.water('a');
+          expect(second, isNotNull);
+
+          harness.completions.retractGate!.complete();
+          await stalled;
+
+          expect(
+            harness.state.plants['a']!.inputs.completions
+                .map((completion) => completion.id)
+                .toList(),
+            <String>['id-1', 'id-2'],
+          );
+          expect(await harness.completions.completionsFor('a'), hasLength(2));
+          expect(harness.state.errorMessage, couldNotUndoMessage);
+        },
+      );
+
+      test('a closed window puts back only the watering it took', () async {
+        // Same rollback, the expected-but-abnormal path: the offer went stale
+        // across midnight. The one it could not retract comes back; the one
+        // made today stays.
+        final harness = Harness();
+        await harness.habits.saveHabit(testHabit(id: 'a'));
+        await harness.start();
+
+        final yesterday = await harness.controller.water('a');
+        harness.clock.advance(const Duration(days: 1));
+
+        // Stalled so today's watering lands while the doomed retraction is in
+        // flight — the snapshot the rollback used to restore does not have it.
+        harness.completions.retractGate = Completer<void>();
+        final stalled = harness.controller.undo('a', yesterday!.id);
+        final today = await harness.controller.water('a');
+        harness.completions.retractGate!.complete();
+        await stalled;
+
+        expect(harness.state.errorMessage, undoWindowClosedMessage);
+        expect(
+          harness.state.plants['a']!.inputs.completions
+              .map((completion) => completion.id)
+              .toList(),
+          <String>[yesterday.id, today!.id],
+        );
+      });
 
       test('undoing something already gone says nothing', () async {
         final harness = Harness();

@@ -21,6 +21,58 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-15 — completion tap review and fixes
+
+Branch: `feature/completion-tap`, on top of the entry below. PR [#5](https://github.com/LWitteman96/taproot/pull/5).
+
+### Found
+
+Six defects from the review of the completion tap. Two are correctness, and both hide behind the same
+gap: **the error paths had no widget-level test at all**, so the suite could not see either of them.
+
+| Defect | Symptom |
+|---|---|
+| `clearError()` called synchronously inside `ref.listen` | `gardenErrorProvider` rebuilds twice in one frame; the debug scheduler throws `StateError: Tried to rebuild ... multiple times in the same frame` on *every* error path, in every dev run and every widget test |
+| Rollbacks restore a `PlantState` snapshot taken before the await | Two quick holds, the first write stalls and fails: the rollback puts back the pre-first-tap plant and discards the second watering, which is on disk. The plant falls back to Seed and only recovers on the next cold start. Same shape on both undo rollbacks |
+| `_pour.forward()` resumes instead of restarting | After an aborted hold, the fill reaches full 368ms into a 600ms gesture — the control looks finished while nothing has happened, and a release in that window waters nothing |
+| A failed load falls through to the empty state | Someone whose store read failed is told "Nothing planted yet" as soon as the snack bar times out, and the copy promised a pull-to-refresh that existed nowhere in `lib/` |
+| `ref` and the page's `BuildContext` used after the write's await | A card disposed mid-write — scrolled out of the `ListView.builder`, or dropped from `order` — throws from both `ScaffoldMessenger.of` and `ref.read` |
+| The demo seed's flavor guard is inert | `getFlavor()` falls back to `Flavor.dev` whenever `appFlavor` is unset, so "dev" meant "nobody said" and a release build without `--flavor` would have shipped the seed button |
+
+### Fixed
+
+All six, with a test each — 469 tests, all three gates green. Three of the new tests were verified to
+*fail* against the old code before the fix went back in: the `StateError` reproduces on three separate
+error-path widget tests, and both rollback tests show the lost watering.
+
+Two of the fixes are structural rather than local:
+
+- **Rollback is surgical, not a restore.** `_dropCompletion` and `_restoreCompletion` work by
+  completion id against *current* state. The rule generalises past this branch: any optimistic write
+  that awaits must undo itself by identity, because a snapshot taken before an await is a claim that
+  nothing else happened during it, and on the garden that claim is false by design — the tap is
+  meant to be re-enterable.
+- **"Could not read" is now a state, not just a message.** `GardenState.loadFailed` persists where
+  `errorMessage` is transient by design, because an empty `order` after a failed read means "we could
+  not look", not "there is nothing there". The page renders a distinct `_UnreadableGarden` with a real
+  retry, and `couldNotReadGardenMessage` no longer promises a gesture that does not exist. A failed
+  *refresh* with plants already on screen keeps the plants — the snack bar is enough there.
+
+The seed guard is now `kDebugMode && flavor == Flavor.dev`. `kDebugMode` is the half that cannot be
+got wrong by a forgotten flag — a compile-time constant that tree-shakes the seed out of a release
+binary — and the flavor check stays alongside it so a *debug* stg or prod build is excluded once the
+flavors are genuinely wired.
+
+### Left open
+
+The undo offer can still go stale across midnight; that is unchanged and still deliberate, and the
+rollback fix makes the stale path more precise rather than removing it — a closed window now puts back
+only the watering it could not retract.
+
+The seed button itself is still scaffolding waiting on the designed habit-creation flow.
+
+---
+
 ## 2026-09-09 — the completion tap
 
 Branch: `feature/completion-tap`, on top of the app skeleton.

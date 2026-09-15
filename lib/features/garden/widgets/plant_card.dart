@@ -42,6 +42,7 @@ class PlantCard extends ConsumerWidget {
     final theme = Theme.of(context);
     final growth = plant.growth;
     final ticker = gardenTickerOf(context, ref);
+    final controller = ref.read(gardenControllerProvider.notifier);
 
     return Card(
       margin: const EdgeInsets.only(bottom: AppSpacing.medium),
@@ -121,10 +122,16 @@ class PlantCard extends ConsumerWidget {
                         plant.habit.name,
                         again: plant.canUndo,
                       ),
+                      // The notifier is read before the await and the
+                      // callback is guarded after it: a card can be disposed
+                      // while its write is in flight — scrolled out of the
+                      // `ListView.builder`, or dropped from `order` by a
+                      // change from another device — and both `ref.read` on a
+                      // disposed ref and the page's `ScaffoldMessenger` on a
+                      // defunct element throw.
                       onWatered: () async {
-                        final completion = await ref
-                            .read(gardenControllerProvider.notifier)
-                            .water(habitId);
+                        final completion = await controller.water(habitId);
+                        if (!context.mounted) return;
                         onWatered(completion?.id);
                       },
                     ),
@@ -135,9 +142,7 @@ class PlantCard extends ConsumerWidget {
                   if (plant.undoableCompletion case final completion?) ...[
                     const SizedBox(width: AppSpacing.small),
                     TextButton(
-                      onPressed: () => ref
-                          .read(gardenControllerProvider.notifier)
-                          .undo(habitId, completion.id),
+                      onPressed: () => controller.undo(habitId, completion.id),
                       child: Text(
                         undoLabel,
                         semanticsLabel: 'Undo watering ${plant.habit.name}',

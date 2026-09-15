@@ -1,5 +1,6 @@
 import 'dart:developer' as dev;
 
+import 'package:collection/collection.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:taproot/app/database/store_exceptions.dart';
@@ -79,6 +80,7 @@ class GardenController extends Notifier<GardenState> {
       if (!ref.mounted) return;
       state = state.copyWith(
         isLoading: false,
+        loadFailed: true,
         errorMessage: () => couldNotReadGardenMessage,
       );
     }
@@ -119,6 +121,48 @@ class GardenController extends Notifier<GardenState> {
     state = state.copyWith(
       plants: <String, PlantState>{...state.plants, plant.habit.id: plant},
     );
+  }
+
+  /// Takes one completion back out of a plant, against the state as it is
+  /// **now** rather than a snapshot taken before an await.
+  ///
+  /// The snapshot is the bug this exists to avoid. Two quick holds: the first
+  /// write stalls, the second is taken from the already-updated state and
+  /// stores cleanly. Putting the whole pre-first-tap [PlantState] back when the
+  /// first one fails would discard the second — a watering that is on disk
+  /// would vanish from the garden until the next cold start.
+  void _dropCompletion(String habitId, String completionId, DateTime at) {
+    final plant = state.plants[habitId];
+    if (plant == null) return;
+
+    final remaining = plant.inputs.completions
+        .where((completion) => completion.id != completionId)
+        .toList();
+    if (remaining.length == plant.inputs.completions.length) return;
+
+    _put(_withCompletions(plant, remaining, at));
+  }
+
+  /// Puts one completion back, in the order the store would have returned it.
+  ///
+  /// The counterpart of [_dropCompletion], and surgical for the same reason: a
+  /// retraction that fails must resurrect only the completion it removed, not
+  /// everything else that happened while it was in flight.
+  void _restoreCompletion(String habitId, Completion completion, DateTime at) {
+    final plant = state.plants[habitId];
+    if (plant == null) return;
+    // Already back — the load, or another device, got there first.
+    if (plant.inputs.completions.any((other) => other.id == completion.id)) {
+      return;
+    }
+
+    final restored = <Completion>[...plant.inputs.completions, completion]
+      ..sort((a, b) {
+        final byTime = a.completedAt.compareTo(b.completedAt);
+        return byTime != 0 ? byTime : a.id.compareTo(b.id);
+      });
+
+    _put(_withCompletions(plant, restored, at));
   }
 
   /// Waters a plant.
@@ -165,10 +209,11 @@ class GardenController extends Notifier<GardenState> {
       _log('water', 'the completion could not be stored: $error');
       dev.log('$stackTrace', name: 'GardenController');
       if (!ref.mounted) return null;
-      // Put the plant back the way it was. Showing growth that was not stored
-      // is worse than showing the failure: the next launch would take it away
-      // again with no explanation.
-      _put(plant);
+      // Take this watering back out. Showing growth that was not stored is
+      // worse than showing the failure: the next launch would take it away
+      // again with no explanation. By id against current state, not by
+      // restoring `plant` — see [_dropCompletion].
+      _dropCompletion(habitId, completion.id, _clock());
       state = state.copyWith(errorMessage: () => couldNotWaterMessage);
       return null;
     }
@@ -180,12 +225,13 @@ class GardenController extends Notifier<GardenState> {
     if (plant == null) return;
 
     final at = _clock();
-    final remaining = plant.inputs.completions
-        .where((completion) => completion.id != completionId)
-        .toList();
-    if (remaining.length == plant.inputs.completions.length) return;
+    // Held so a failure can put back exactly this completion and nothing else.
+    final retracted = plant.inputs.completions.firstWhereOrNull(
+      (completion) => completion.id == completionId,
+    );
+    if (retracted == null) return;
 
-    _put(_withCompletions(plant, remaining, at));
+    _dropCompletion(habitId, completionId, at);
 
     try {
       await _completions.retractCompletion(habitId, completionId);
@@ -194,7 +240,7 @@ class GardenController extends Notifier<GardenState> {
       // Normal: the garden was left open across midnight and the offer went
       // stale. The window closed, so the completion stands.
       _log('undo', 'the window closed on $completionId');
-      _put(plant);
+      _restoreCompletion(habitId, retracted, _clock());
       state = state.copyWith(errorMessage: () => undoWindowClosedMessage);
     } on UnknownCompletionException {
       // Already retracted, here or on another device. The optimistic removal
@@ -211,7 +257,7 @@ class GardenController extends Notifier<GardenState> {
       _log('undo', 'the retraction could not be stored: $error');
       dev.log('$stackTrace', name: 'GardenController');
       if (!ref.mounted) return;
-      _put(plant);
+      _restoreCompletion(habitId, retracted, _clock());
       state = state.copyWith(errorMessage: () => couldNotUndoMessage);
     }
   }
@@ -261,8 +307,8 @@ class GardenController extends Notifier<GardenState> {
 /// The app's voice for the states above. Kept out of the widgets so a test can
 /// name them without matching a string literal twice.
 const String couldNotReadGardenMessage =
-    'Your garden could not be read just now. Nothing has been lost — pull down '
-    'to try again.';
+    'Your garden could not be read just now. Nothing has been lost — try '
+    'again.';
 
 const String couldNotWaterMessage =
     'That watering could not be saved to this device, so it has been undone. '

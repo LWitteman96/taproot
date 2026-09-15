@@ -106,7 +106,13 @@ class _WateringControlState extends State<WateringControl>
   void _beginHold() {
     if (_isHeld) return;
     setState(() => _isHeld = true);
-    _pour.forward();
+    // `from: 0`, not a bare `forward()`. Plain `forward()` resumes from
+    // wherever the fill got to, and an `AnimationController` scales its travel
+    // by the distance left — so a hold begun while an aborted one was still
+    // retreating would fill in a fraction of the hold duration and sit there
+    // looking finished while the recognizer still had most of the gesture to
+    // run. The two clocks have to start together or the picture lies.
+    _pour.forward(from: 0);
   }
 
   /// The hold made it. The finger is usually still down; [_releaseHold] follows

@@ -58,3 +58,11 @@ final gardenErrorProvider = Provider<String?>(
   (ref) =>
       ref.watch(gardenControllerProvider.select((state) => state.errorMessage)),
 );
+
+/// True when the last read of the store failed. The empty garden and the
+/// unreadable garden look nothing alike to a user, so the page has to be able
+/// to tell them apart.
+final gardenLoadFailedProvider = Provider<bool>(
+  (ref) =>
+      ref.watch(gardenControllerProvider.select((state) => state.loadFailed)),
+);
