@@ -46,11 +46,29 @@ class FakeRemoteSyncStore implements RemoteSyncStore {
     };
   }
 
+  /// Enforces the same last-write-wins rule the `reject_stale_update` trigger
+  /// does, so a test exercises what the server actually answers rather than a
+  /// fake that is more forgiving than production.
+  ///
+  /// All-or-nothing, like the real upsert: one stale row fails the batch.
   @override
   Future<void> push(SyncTable table, List<Map<String, Object?>> rows) async {
     if (pushFailure case final failure?) throw failure;
     if (rows.isEmpty) return;
     pushOrder.add(table.name);
+
+    if (table.isMutable) {
+      for (final row in rows) {
+        final existing = _tableOf(table)[table.keyOf(row)];
+        if (existing == null) continue;
+        final incomingAt = requireDateTime(row, 'updated_at');
+        // Strictly older only — an equal replay is what sync does all day.
+        if (incomingAt.isBefore(requireDateTime(existing, 'updated_at'))) {
+          throw StaleRowRejected(table.name, 'stale write to ${table.name}');
+        }
+      }
+    }
+
     for (final row in rows) {
       _tableOf(table)[table.keyOf(row)] = <String, Object?>{
         ...row,
@@ -394,6 +412,97 @@ void main() {
         (await database.query(AppSchema.habits)).single['name'],
         'edited here, later',
       );
+    });
+
+    test('a row overtaken between the pull and the push is not sent', () async {
+      // The window the ordering cannot close, which is why the server enforces
+      // the rule too. The push is what discovers it, and the answer is 409.
+      remote.seed(
+        habits,
+        habitRow(
+          id: 'habit-1',
+          name: 'from the other device',
+          updatedAt: DateTime.utc(2026, 3, 6),
+        ),
+        // Behind the cursor this drain will end up with, so the pull does not
+        // see it and cannot reconcile it away first.
+        syncedAt: DateTime.utc(2020),
+      );
+      await insertLocalHabit(
+        id: 'habit-1',
+        name: 'stale, pushed anyway',
+        updatedAt: DateTime.utc(2026, 3, 4),
+      );
+
+      await drain.drain();
+
+      expect(
+        remote.tables[AppSchema.habits]!.values.single['name'],
+        'from the other device',
+        reason: 'the server refused the stale row rather than taking it',
+      );
+      expect(
+        await local.pendingRows(habits),
+        isEmpty,
+        reason: 'and it is off the queue, not retried on every drain forever',
+      );
+    });
+
+    test('one overtaken row does not cost the rest of its batch', () async {
+      // An upsert is all-or-nothing, so a single loser fails the whole page.
+      // The others are perfectly good writes that happened to travel with it.
+      remote.seed(
+        habits,
+        habitRow(
+          id: 'habit-1',
+          name: 'from the other device',
+          updatedAt: DateTime.utc(2026, 3, 6),
+        ),
+        syncedAt: DateTime.utc(2020),
+      );
+      await insertLocalHabit(
+        id: 'habit-1',
+        name: 'stale',
+        updatedAt: DateTime.utc(2026, 3, 4),
+      );
+      await insertLocalHabit(
+        id: 'habit-2',
+        name: 'perfectly good',
+        updatedAt: DateTime.utc(2026, 3, 4),
+      );
+
+      await drain.drain();
+
+      expect(
+        remote.tables[AppSchema.habits]!['habit-2']!['name'],
+        'perfectly good',
+        reason: 'the innocent row in the batch still got through',
+      );
+      expect(
+        remote.tables[AppSchema.habits]!['habit-1']!['name'],
+        'from the other device',
+      );
+    });
+
+    test('an equal replay is accepted rather than rejected', () async {
+      // The overlap window re-reads covered ground and a retried push resends
+      // a batch verbatim, so an identical row arriving again is the normal
+      // case, not an anomaly.
+      await insertLocalHabit(
+        id: 'habit-1',
+        updatedAt: DateTime.utc(2026, 3, 4),
+      );
+      await drain.drain();
+
+      await database.update(
+        AppSchema.habits,
+        <String, Object?>{'pending_sync': 1},
+        where: 'id = ?',
+        whereArgs: <Object?>['habit-1'],
+      );
+
+      await expectLater(drain.drain(), completes);
+      expect(await local.pendingRows(habits), isEmpty);
     });
 
     test('an append-only event is unaffected by the ordering', () async {

@@ -32,6 +32,33 @@ const int syncPageSize = 500;
 /// those are single-row upserts.
 const Duration syncOverlapWindow = Duration(seconds: 30);
 
+/// The SQLSTATE the server raises when a write has lost.
+///
+/// `PT`-prefixed codes are how PostgREST is told which HTTP status to answer
+/// with, so this arrives as a 409 Conflict. Two triggers raise it, and they
+/// mean the same thing to a caller: `reject_stale_update` when an `updated_at`
+/// goes backwards, and `pin_soft_delete` when a push tries to clear a
+/// `deleted_at`. Both say *this row has moved on without you* — pull, do not
+/// retry.
+const String staleWriteCode = 'PT409';
+
+/// A row the server refused because it has a newer version.
+///
+/// Typed rather than left as a `PostgrestException` because it is not an error
+/// in the sense the rest of the error handling means: nothing is broken, the
+/// write simply lost a race it was always going to lose. It is an expected
+/// state with a designed response, which is exactly the kind CLAUDE.md asks be
+/// kept out of the error budget.
+class StaleRowRejected implements Exception {
+  const StaleRowRejected(this.table, this.message);
+
+  final String table;
+  final String message;
+
+  @override
+  String toString() => 'StaleRowRejected($table: $message)';
+}
+
 /// The server, as sync sees it.
 ///
 /// Two operations, because sync performs exactly two: push a batch of rows, and
@@ -73,11 +100,18 @@ class SupabaseRemoteSyncStore implements RemoteSyncStore {
     if (rows.isEmpty) return;
     _log.fine('pushing ${rows.length} rows to ${table.name}');
 
-    // On the primary key, so a row this device has already pushed — or one
-    // another device pushed first — is an update rather than a duplicate.
-    await _client
-        .from(table.name)
-        .upsert(rows, onConflict: table.keyColumns.join(','));
+    try {
+      // On the primary key, so a row this device has already pushed — or one
+      // another device pushed first — is an update rather than a duplicate.
+      await _client
+          .from(table.name)
+          .upsert(rows, onConflict: table.keyColumns.join(','));
+    } on PostgrestException catch (error) {
+      if (error.code == staleWriteCode) {
+        throw StaleRowRejected(table.name, error.message);
+      }
+      rethrow;
+    }
   }
 
   @override

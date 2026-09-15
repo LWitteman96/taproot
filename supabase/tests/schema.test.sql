@@ -11,7 +11,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(29);
+select plan(34);
 
 -- ── RLS is on, everywhere, with nothing reachable by anon ───────────────────
 
@@ -340,6 +340,67 @@ select ok(
      where id = 'bbbbbbbb-0000-0000-0000-000000000004') < now() + interval '1 hour',
   'a second device deleting an already-deleted habit keeps the first stamp '
   'rather than failing — first deletion wins, and it is still a union'
+);
+
+-- ── Last write wins, enforced rather than trusted ───────────────────────────
+--
+-- The sync drain pulls before it pushes so a stale row is reconciled away
+-- before it can be sent. These pin the same rule in the database, because the
+-- failure the ordering guards against — a stale push overwriting a newer edit
+-- from another device — is silent on both devices afterwards.
+
+insert into public.habits
+  (id, user_id, name, plant_type, target_frequency, created_at, updated_at)
+values ('bbbbbbbb-0000-0000-0000-000000000005',
+        'aaaaaaaa-0000-0000-0000-000000000001',
+        'Stretch', 'fern', 3, now(), '2026-03-05T00:00:00Z');
+
+select throws_ok(
+  $$update public.habits
+       set name = 'overwritten by a stale device',
+           updated_at = '2026-03-04T00:00:00Z'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000005'$$,
+  'PT409',
+  null,
+  'an update whose updated_at goes backwards is refused — the caller doing it '
+  'in the right order is a convention, and this is the constraint'
+);
+
+select is(
+  (select name from public.habits
+     where id = 'bbbbbbbb-0000-0000-0000-000000000005'),
+  'Stretch',
+  'and the newer row is still there, whole: the statement rolled back rather '
+  'than half-applying'
+);
+
+select lives_ok(
+  $$update public.habits
+       set name = 'an identical replay',
+           updated_at = '2026-03-05T00:00:00Z'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000005'$$,
+  'an equal updated_at is accepted — the overlap window re-reads covered '
+  'ground and a retried push resends a batch verbatim, so a replay is what '
+  'sync does all day rather than an anomaly'
+);
+
+select lives_ok(
+  $$update public.habits
+       set name = 'a genuinely newer edit',
+           updated_at = '2026-03-06T00:00:00Z'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000005'$$,
+  'and a newer one is what the rule exists to let through'
+);
+
+-- nudges is deliberately exempt: its cross-device story is OR''d flags with a
+-- read-time collapse of duplicate occasions, not whole-row last-write-wins, so
+-- a strict gate would reject a legitimate flag write from the device that did
+-- not create the row.
+select lives_ok(
+  $$update public.nudges
+       set confirmed = true, updated_at = '1999-01-01T00:00:00Z'
+     where id = 'eeeeeeee-0000-0000-0000-000000000001'$$,
+  'the nudge ledger is exempt, because its merge rule is not last-write-wins'
 );
 
 -- ── Deleting the auth user is the whole deletion ────────────────────────────

@@ -76,9 +76,25 @@ class TwoWaySyncDrain implements SyncDrain {
       // `user_id` is the one column the device does not carry and the server
       // cannot do without: RLS is `user_id = auth.uid()` on every table, so a
       // row without it is rejected rather than misfiled.
-      await _remote.push(table, <Map<String, Object?>>[
+      final stamped = <Map<String, Object?>>[
         for (final row in rows) <String, Object?>{...row, 'user_id': userId},
-      ]);
+      ];
+
+      try {
+        await _remote.push(table, stamped);
+      } on StaleRowRejected {
+        // One row in the batch has been overtaken, and an upsert is all-or-
+        // nothing, so the whole page failed for one loser. Retry them
+        // individually to find it rather than giving up on the rest — the
+        // others are perfectly good writes that happened to travel with it.
+        await _pushOneByOne(table, stamped);
+      }
+
+      // Losers included. A row that lost last-write-wins has nothing to gain
+      // from being sent again, and leaving it queued would retry it on every
+      // drain forever. The winning version arrives on the next pull: the row
+      // that beat it was written after this device last pulled — that is what
+      // made it a loser — so its `synced_at` is ahead of the cursor.
       await _local.clearPending(table, rows);
 
       if (rows.length < syncPageSize) return;
@@ -88,6 +104,33 @@ class TwoWaySyncDrain implements SyncDrain {
       'stopped pushing ${table.name} after $_maximumPages pages; the next '
       'drain will continue',
     );
+  }
+
+  /// Sends [rows] one at a time, so that one loser does not cost the rest.
+  ///
+  /// Only reached after a batch came back `PT409`, which the ordering makes
+  /// rare: a row that had already lost would have been replaced by the pull and
+  /// taken off the queue before the push ran. Getting here means the row was
+  /// overtaken in the window between this drain's pull and its push.
+  Future<void> _pushOneByOne(
+    SyncTable table,
+    List<Map<String, Object?>> rows,
+  ) async {
+    var lost = 0;
+    for (final row in rows) {
+      try {
+        await _remote.push(table, <Map<String, Object?>>[row]);
+      } on StaleRowRejected {
+        lost++;
+      }
+    }
+
+    if (lost > 0) {
+      _log.info(
+        '$lost ${table.name} row(s) were overtaken and not sent; the pull '
+        'brings the version that won',
+      );
+    }
   }
 
   /// Reads everything new for one table.

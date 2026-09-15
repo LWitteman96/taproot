@@ -1,7 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-export 'package:supabase_flutter/supabase_flutter.dart' show SupabaseClient;
+export 'package:supabase_flutter/supabase_flutter.dart'
+    show PostgrestException, SupabaseClient;
 
 /// The Supabase client, behind a provider whose only job is to be overridable.
 ///
