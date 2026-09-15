@@ -7,6 +7,7 @@ import 'package:taproot/core/models/nudge.dart';
 import 'package:taproot/core/utils/json_codec.dart';
 import 'package:taproot/core/utils/local_dates.dart';
 import 'package:taproot/features/notifications/domain/nudge_repository.dart';
+import 'package:taproot/features/notifications/domain/occasion_collapse.dart';
 
 /// SQLite-backed nudge ledger.
 class LocalNudgeService implements NudgeRepository {
@@ -127,7 +128,13 @@ class LocalNudgeService implements NudgeRepository {
           whereArgs: <Object?>[habitId],
           orderBy: 'expected_occasion_at ASC, id ASC',
         );
-        return rows.map(NudgeRecord.fromJson).toList();
+        // Collapsed here rather than left to every caller. Two devices can each
+        // have planned the same occasion, and sync writes rows by key without
+        // going through the duplicate check `saveNudge` enforces — so the
+        // ledger can hold two rows for one occasion, which is two entries in
+        // autonomy's denominator for an occasion that happened once. See
+        // [collapseDuplicateOccasions] for why it is a read and not a delete.
+        return collapseDuplicateOccasions(rows.map(NudgeRecord.fromJson));
       });
 
   @override

@@ -84,14 +84,14 @@ else
 fi
 
 if [[ "$RESET_DB" == "1" ]]; then
-  heading "Step 1/4 — Resetting the local database from migrations"
+  heading "Step 1/5 — Resetting the local database from migrations"
   supabase db reset
   info "Migrations applied from scratch"
 else
-  heading "Step 1/4 — Skipped (--no-reset)"
+  heading "Step 1/5 — Skipped (--no-reset)"
 fi
 
-heading "Step 2/4 — Re-applying every migration, to prove it is re-runnable"
+heading "Step 2/5 — Re-applying every migration, to prove it is re-runnable"
 for migration in supabase/migrations/*.sql; do
   if run_sql "$migration"; then
     info "re-applied $(basename "$migration")"
@@ -103,7 +103,7 @@ for migration in supabase/migrations/*.sql; do
   fi
 done
 
-heading "Step 3/4 — pgTAP suite"
+heading "Step 3/5 — pgTAP suite"
 supabase test db
 
 # ── Step 4: the one thing pgTAP cannot reach ────────────────────────────────
@@ -112,7 +112,7 @@ supabase test db
 # request body — only exists above the database. So it is exercised the way the
 # app will: sign up, plant a row, POST with the session token, and check that
 # the cascade took everything with it.
-heading "Step 4/4 — delete-account, end to end"
+heading "Step 4/5 — delete-account, end to end"
 
 # jq rather than a python3 one-liner, for two reasons that both bit. Under
 # `set -euo pipefail` a JSONDecodeError on a non-JSON body — Kong answering 502
@@ -213,6 +213,75 @@ if [[ "$ORPHAN_STATUS" != "401" ]]; then
   exit 1
 fi
 info "a token whose user no longer exists is 401, not 503"
+
+# ── Step 5: the grant the sync push depends on ──────────────────────────────
+# The device pushes with two different conflict resolutions, and which one goes
+# where is a *permission* rather than a preference. A merging upsert is
+# `ON CONFLICT DO UPDATE`, so PostgREST asks for the UPDATE privilege — and the
+# append-only ledgers deliberately have none, because an edit to a past event is
+# a different event. Send `merge-duplicates` at `completions` and every
+# completion the device has ever recorded is a flat 403.
+#
+# pgTAP pins the grants themselves; this pins what PostgREST *does* with them,
+# which is the half a Dart test against a fake cannot see. It was a real bug,
+# found by probing the running stack rather than by reasoning about it.
+heading "Step 5/5 — the conflict resolutions the sync push relies on"
+
+SYNC_EMAIL="verify-sync-$(date +%s)@example.com"
+SYNC_USER="$(curl -sS -X POST "$API_URL/auth/v1/admin/users" \
+  -H "apikey: $SERVICE_ROLE_KEY" \
+  -H "Authorization: Bearer $SERVICE_ROLE_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"email\":\"$SYNC_EMAIL\",\"password\":\"$PASSWORD\",\"email_confirm\":true}" \
+  | json_field id)"
+SYNC_TOKEN="$(curl -sS -X POST "$API_URL/auth/v1/token?grant_type=password" \
+  -H "apikey: $ANON_KEY" -H "Content-Type: application/json" \
+  -d "{\"email\":\"$SYNC_EMAIL\",\"password\":\"$PASSWORD\"}" | json_field access_token)"
+
+if [[ -z "$SYNC_USER" || -z "$SYNC_TOKEN" ]]; then
+  error "Could not create the sync test user."
+  exit 1
+fi
+
+HABIT_ID="aaaaaaaa-9999-9999-9999-999999999999"
+COMPLETION_ID="cccccccc-9999-9999-9999-999999999999"
+
+rest_post() {
+  curl -sS -o /dev/null -w '%{http_code}' -X POST "$API_URL/rest/v1/$1" \
+    -H "apikey: $ANON_KEY" -H "Authorization: Bearer $SYNC_TOKEN" \
+    -H "Content-Type: application/json" -H "Prefer: $3" -d "$2"
+}
+
+HABIT_ROW="{\"id\":\"$HABIT_ID\",\"user_id\":\"$SYNC_USER\",\"name\":\"Verify\",\"plant_type\":\"fern\",\"target_frequency\":3,\"journey\":\"design\",\"designed_cue\":\"kettle\",\"designed_cue_type\":\"event\",\"created_at\":\"2026-03-01T00:00:00Z\",\"updated_at\":\"2026-03-05T00:00:00Z\"}"
+# was_nudged as an integer on purpose: SQLite has no boolean type, so this is
+# the shape the device's rows actually arrive in.
+COMPLETION_ROW="{\"habit_id\":\"$HABIT_ID\",\"id\":\"$COMPLETION_ID\",\"user_id\":\"$SYNC_USER\",\"completed_at\":\"2026-03-05T09:00:00Z\",\"was_nudged\":0,\"source\":\"tap\"}"
+
+STATUS="$(rest_post "habits?on_conflict=id" "$HABIT_ROW" 'resolution=merge-duplicates')"
+[[ "$STATUS" == "201" ]] || { error "a mutable table rejected a merging upsert: $STATUS"; exit 1; }
+STATUS="$(rest_post "habits?on_conflict=id" "$HABIT_ROW" 'resolution=merge-duplicates')"
+[[ "$STATUS" == "200" ]] || { error "re-upserting a habit was not idempotent: $STATUS"; exit 1; }
+info "a mutable table takes a merging upsert, twice"
+
+STATUS="$(rest_post "completions?on_conflict=habit_id,id" "$COMPLETION_ROW" 'resolution=merge-duplicates')"
+[[ "$STATUS" == "403" ]] || {
+  error "an append-only ledger accepted a merging upsert ($STATUS), which it"
+  error "should not: that needs UPDATE, and these tables grant none. If this"
+  error "changed deliberately, RemoteSyncStore.push can stop special-casing"
+  error "them — but it must not keep relying on a grant that moved."
+  exit 1
+}
+info "an append-only ledger refuses a merging upsert — it grants no UPDATE"
+
+STATUS="$(rest_post "completions?on_conflict=habit_id,id" "$COMPLETION_ROW" 'resolution=ignore-duplicates')"
+[[ "$STATUS" == "201" ]] || { error "an append-only insert was refused: $STATUS"; exit 1; }
+STATUS="$(rest_post "completions?on_conflict=habit_id,id" "$COMPLETION_ROW" 'resolution=ignore-duplicates')"
+[[ "$STATUS" == "201" ]] || { error "replaying an event was not accepted: $STATUS"; exit 1; }
+
+STORED="$(curl -sS "$API_URL/rest/v1/completions?select=was_nudged&habit_id=eq.$HABIT_ID" \
+  -H "apikey: $ANON_KEY" -H "Authorization: Bearer $SYNC_TOKEN" | jq -r 'length')"
+[[ "$STORED" == "1" ]] || { error "a replayed event was stored twice ($STORED rows)"; exit 1; }
+info "and takes an ignoring one, where a replay is a union rather than a row"
 
 echo ""
 echo -e "${GREEN}${BOLD}✓ Backend green.${RESET} Migrations apply from scratch, re-apply cleanly, the tests pass, and an account can delete itself."

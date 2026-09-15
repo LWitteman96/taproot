@@ -10,6 +10,7 @@ import 'package:taproot/features/habits/domain/completion_repository.dart';
 import 'package:taproot/features/habits/domain/completion_retraction.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/notifications/domain/nudge_repository.dart';
+import 'package:taproot/features/notifications/domain/occasion_collapse.dart';
 import 'package:taproot/features/reflection/domain/reflection_repository.dart';
 
 import 'store_contract.dart';
@@ -295,11 +296,11 @@ class FakeNudgeService implements NudgeRepository {
 
   @override
   Future<List<NudgeRecord>> nudgesFor(String habitId) async =>
-      _nudges.values.where((nudge) => nudge.habitId == habitId).toList()
-        ..sort((a, b) {
-          final byTime = a.expectedOccasionAt.compareTo(b.expectedOccasionAt);
-          return byTime != 0 ? byTime : a.id.compareTo(b.id);
-        });
+      // Collapsed like the SQLite service: a fake that is more forgiving than
+      // the real one is a test that passes where the app does not.
+      collapseDuplicateOccasions(
+        _nudges.values.where((nudge) => nudge.habitId == habitId),
+      );
 
   @override
   Future<void> markSent(String nudgeId) async =>

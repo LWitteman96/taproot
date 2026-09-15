@@ -23,6 +23,7 @@ Update this file in the same commit as the work it describes.
 | **Completion tap** (`lib/features/garden/`) | **Built — garden controller, press-and-hold watering, undo** |
 | **Habit creation** (`lib/features/habits/`) | **Built — the design flow, the tracking opt-out, plant choice, and a live entry gate** |
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
+| **Supabase sync** (`lib/app/sync/`) | **Built — connectivity trigger, paged pull with an overlap cursor, push, last-write-wins** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
 | Reflection check-in and chips | Not started |
 | Garden rendering | Not started (blocked on external illustrator) |
@@ -32,13 +33,15 @@ Build order from the infrastructure guide (§16): engine → local store and rep
 tap → Supabase sync → notifications and the nudge ledger → reflection check-in → garden → insights.
 The first four are done, and two stages have landed on top of them: habit creation — a prerequisite
 the build order does not name, since every stage after it needs habits a user actually made — and
-notifications, taken ahead of Supabase sync because the two share no code. So **Supabase sync is
-next**: a pusher over the `pending_sync` column the schema already carries. The backend now exists
-ahead of that order, but only as a schema: nothing in `lib/` talks to it yet.
+notifications, taken ahead of Supabase sync because the two share no code. With sync now built, the
+whole of that order up to insights is done bar the reflection check-in, so **the reflection check-in
+is next**.
 
-What is deliberately *not* built yet: Supabase and Sentry are still uninitialised (the `.env` files
-hold no credentials, and `Supabase.initialize` on an empty URL throws at launch), and the garden
-renders its plants as words rather than art, which is waiting on the external illustrator.
+What is deliberately *not* built yet: Sentry is still uninitialised, no remote Supabase project is
+provisioned — `.env.dev` points at the local stack and stg and prod are placeholders, so those two
+flavors start without a backend and say so as `SyncStatus.unavailable` — nothing signs a user in, so
+sync has nobody to sync for, and the garden renders its plants as words rather than art, which is
+waiting on the external illustrator.
 
 The router's gate is no longer stubbed — it reads the habit count, so a user with nothing planted is
 sent to plant something and only then gets a garden. The debug-only dev-flavor seed button that used
