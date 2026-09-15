@@ -21,6 +21,115 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-15 — the reflection check-in
+
+Branch: `feature/reflection`, on top of notifications.
+
+### Landed
+
+The evening check-in, end to end — which question, about what, with what to tap, and where the
+answer goes:
+
+```
+lib/features/reflection/
+  domain/     daypart · starter_chip · starter_chip_library · chip_surfacing
+              friction_surfacing · framing_selection · reflection_priority
+              check_in_scheduler · occasion_detection · remembered_chips
+              cue_families · check_in_question
+  services/   check_in_assembler
+  controllers/check_in_controller
+  pages/      check_in_page
+  widgets/    cue_answers · friction_answers
+```
+
+The authored library from starter-chip-library.md §6–§7 is in as data: 144 cue chips, 94 friction
+chips, twelve categories. Everything that decides anything is a pure function over values, so the
+only part that touches a repository is the assembler.
+
+119 new tests. **The spec's 24 worked examples are a test file**, for the same reason the engine has
+one: they were computed by hand from the rule, so they are a specification and a test suite at once,
+and every guard in §5.3 is exercised by at least one of them.
+
+### Decided
+
+**Chip scores are compared at the precision the library is authored to, not as raw doubles.** Every
+prior and bonus in §5.1 is given to two decimals and exact ties are common — `packed my bag` and
+`first thing up` both reach 0.65, `10pm hit` and `eyes got heavy` both reach 0.60. In binary those
+pairs land a few ulps apart, so comparing raw doubles resolves a *documented* tie by representation
+error and the authored tie-break never runs. Four of the worked examples come out in the wrong order
+without the tolerance. **This is not a rounding nicety to be cleaned up later** — deleting it
+silently changes which chips users are offered.
+
+**§5.3's two degradations have different triggers, and reading both the same way breaks the type
+ceiling.** Backfill fires "if fewer than *n* chips **clear the floor**" — a statement about the
+*pool*. Relaxation fires "if still short" — a statement about the *selection*. Reading both off the
+selection is the obvious simplification and it is wrong: any time the ceiling binds, the set is
+short, so a backfill fires and pulls in another chip of the very type the ceiling was limiting.
+Reading logged in the afternoon is the worked case — five chips clear the floor, the ceiling holds
+three events, and the backfill would add `got home`, a fourth. The ceiling becomes a no-op that
+looks like it is working.
+
+Because both degradations are permitted, the result object reports **which** fired
+(`backfilledFromGlobalPool`, `relaxedTypeCeiling`, `nonEventFloorUnmet`). §9 says the floors
+"currently produce sensible behavior on the 24 worked examples, which is not the same as being
+right", so whoever tunes them needs to see which step ran — and a test needs to tell "the ceiling
+held" from "the ceiling was lifted".
+
+**`cue_families.dart` closes half of an open question, and only half.** §9 says conditional unlock
+"needs a text→family mapping ... a small keyword table per family is probably enough to start; it
+does not need to be a model." This is that table. It was needed here for a second reason §9 does not
+mention: without a family for the *designed* cue, filter §5.2.2 never fires and a first reflection
+can offer the pinned cue twice — which the spec itself calls a wasted slot that looks like a bug.
+The table is **deliberately partial** — exact label matches first, then keywords for the families a
+user is most likely to phrase themselves — and the unlock half of §9's question stays open: nothing
+yet *uses* a typed answer to unlock a conditional chip. A wrong match costs one chip slot.
+
+**Three reconciliations where the specs name two shapes.** The early bonus is "+0.4 while n < 5,
+decaying", which is both a flat step and a taper; implemented as a linear taper, because a flat step
+drops the whole bonus at once and can silence a habit exactly when the user has started answering.
+"First completion after droop" is not a third anomaly beside "unusual gap" — a droop is what a long
+gap produces, so counting both double-counts one event. And the once-a-day rule is **app-wide** while
+the weekly budget is **per habit**: §1 gives the app "one consistent conversational slot" in the
+user's day, and §2 fades the budget by *stage*, which is a property of a habit.
+
+**Remembered chips decay with a half-life of eight reflections.** §4 asks for "recency-weighted
+frequency" without giving a decay. Eight is the window convergence already measures over, so
+"recent" means the same span in both places. Frequency still counts: a cue named a dozen times
+outranks something said once last night, which is correct — that *is* the user's cue.
+
+### Left open
+
+- **There are no reward-side chips, and that stays true here.** §9 names it: the design spec makes
+  reward an explicit half of the loop, reflection-logic only ever asks about cues and friction, and
+  the `motivation` friction routing — "revisit what follows the routine" — has nothing to offer when
+  it fires. Not built, deliberately. That routing is an **insight-surfacing** concern (§6), which is
+  its own build-order stage; building a reward-revisit affordance here would front-run it the way a
+  stand-in creation form would have front-run habit creation. What this stage contributes instead is
+  recording `frictionType` faithfully, including the authored mappings that only make sense as
+  routing signals — `didn't feel thirsty` → motivation, `skipped my workout` → forgot.
+- **The check-in is not wired to the evening notification.** Scheduling composes its question through
+  `ReflectionPromptComposer`; the stand-in `NoReflectionPrompt` is still installed, so notifications
+  fire without a question. `check_in_question.dart` is a pure function precisely so the same sentence
+  can be composed on screen and into a notification queued seven days earlier. Follow-up.
+- **Two authoring gaps in the library are now visible at run time.** Reading logged mid-morning
+  cannot meet the non-event floor — §8 names it — and early-morning journaling has one event anchor.
+  The rule reports falling short rather than falling short quietly; the fix is authoring 2–3 more
+  chips into each, not ranking.
+- **Insight surfacing (§6) is untouched.** Every detection rule there reads reflections this stage
+  writes, so the data is now there; nothing reads it yet.
+- `Reflection.wasNudged` is recorded faithfully but nothing consumes it. Kept honest because the
+  question it answers later — do people reflect differently when asked? — cannot be reconstructed
+  once the rows are written.
+
+### Next
+
+Supabase sync, per the build order. The reflection rows this stage writes carry `pending_sync` like
+everything else and need no special handling; the enum `CHECK` lists in the backend already cover
+every `Framing`, `Occasion`, `InputMode`, `CueType` and `FrictionType` value used here, because none
+were added.
+
+---
+
 ## 2026-09-15 — notification scheduling and the nudge ledger
 
 Branch: `feature/notifications`, off `develop`, with the completion tap (PR #5) merged in.
