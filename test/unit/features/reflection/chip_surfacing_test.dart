@@ -4,6 +4,7 @@ import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/models/habit_category.dart';
 import 'package:taproot/features/reflection/domain/chip_surfacing.dart';
 import 'package:taproot/features/reflection/domain/daypart.dart';
+import 'package:taproot/features/reflection/domain/friction_surfacing.dart';
 import 'package:taproot/features/reflection/domain/starter_chip.dart';
 import 'package:taproot/features/reflection/domain/starter_chip_library.dart';
 
@@ -384,6 +385,82 @@ void main() {
             chip.label.length,
             lessThanOrEqualTo(24),
             reason: '${entry.key.name}: ${chip.label}',
+          );
+        }
+      }
+    });
+  });
+
+  group('friction chips — §6.3', () {
+    test('every category can always name both forgetting and reluctance', () {
+      // The claim reflection-logic §4 makes about diagnosis only pays off if
+      // both are tappable every single time. If a category's top five happened
+      // to be four environment chips and a time chip, the app would have
+      // quietly lost the distinction it says is its edge.
+      for (final category in <HabitCategory?>[null, ...HabitCategory.values]) {
+        final surfaced = surfaceFrictionChips(category);
+        final types = surfaced.map((chip) => chip.frictionType).toSet();
+
+        expect(
+          types,
+          contains(FrictionType.forgot),
+          reason: '${category?.name}: $surfaced',
+        );
+        expect(
+          types,
+          contains(FrictionType.motivation),
+          reason: '${category?.name}: $surfaced',
+        );
+      }
+    });
+
+    test('offers five, capped at two of any one type', () {
+      for (final category in <HabitCategory?>[null, ...HabitCategory.values]) {
+        final surfaced = surfaceFrictionChips(category);
+        expect(surfaced, hasLength(5), reason: '${category?.name}');
+
+        final counts = <FrictionType, int>{};
+        for (final chip in surfaced) {
+          counts.update(
+            chip.frictionType,
+            (count) => count + 1,
+            ifAbsent: () => 1,
+          );
+        }
+        for (final entry in counts.entries) {
+          expect(
+            entry.value,
+            lessThanOrEqualTo(2),
+            reason: '${category?.name}: ${entry.key.name}',
+          );
+        }
+      }
+    });
+
+    test('never offers the same chip twice', () {
+      for (final category in <HabitCategory?>[null, ...HabitCategory.values]) {
+        final labels = surfaceFrictionChips(
+          category,
+        ).map((chip) => chip.label).toList();
+        expect(labels.toSet(), hasLength(labels.length));
+      }
+    });
+
+    test('weather is only ever offered to a category that goes outdoors', () {
+      // Enforced by the authoring rather than by a filter, so it is pinned
+      // here: a weather chip in the sleep-routine set would be nonsense.
+      const outdoorCapable = <HabitCategory>{
+        HabitCategory.exercise,
+        HabitCategory.walking,
+      };
+
+      for (final category in HabitCategory.values) {
+        if (outdoorCapable.contains(category)) continue;
+        for (final chip in surfaceFrictionChips(category)) {
+          expect(
+            chip.label.toLowerCase(),
+            isNot(contains('weather')),
+            reason: category.name,
           );
         }
       }
