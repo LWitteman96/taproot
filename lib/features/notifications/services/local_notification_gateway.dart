@@ -9,6 +9,7 @@ import 'package:timezone/timezone.dart' as timezone;
 import 'package:taproot/features/notifications/domain/notification_access.dart';
 import 'package:taproot/features/notifications/domain/notification_gateway.dart';
 import 'package:taproot/features/notifications/domain/nudge_payload.dart';
+import 'package:taproot/features/notifications/services/background_nudge_response.dart';
 
 /// `flutter_local_notifications` + `timezone`, behind [NotificationGateway].
 ///
@@ -86,6 +87,13 @@ class LocalNotificationGateway implements NotificationGateway {
         ),
       ),
       onDidReceiveNotificationResponse: _handleResponse,
+      // The one that matters most, and the easiest to leave out. Both actions
+      // are `showsUserInterface: false`, so the platform delivers them to a
+      // background isolate whenever the app is not in the foreground — which
+      // at 20:00 is nearly always. Without this the answer is dropped and
+      // nothing reports it.
+      onDidReceiveBackgroundNotificationResponse:
+          backgroundNudgeResponseHandler,
     );
 
     await _plugin
@@ -233,6 +241,20 @@ class LocalNotificationGateway implements NotificationGateway {
         ),
       ),
     );
+  }
+
+  @override
+  Future<NudgeResponse?> launchResponse() async {
+    // The cold-start path: an answer given to a notification that started the
+    // app is never delivered to either callback, it is only readable here.
+    final details = await _plugin.getNotificationAppLaunchDetails();
+    if (details == null || !details.didNotificationLaunchApp) return null;
+
+    final raw = details.notificationResponse;
+    final payload = NudgePayload.decode(raw?.payload);
+    final action = NudgeActionIds.actionFor(raw?.actionId);
+    if (payload == null || action == null) return null;
+    return NudgeResponse(payload: payload, action: action);
   }
 
   @override

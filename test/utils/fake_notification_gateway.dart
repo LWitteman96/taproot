@@ -21,6 +21,9 @@ class FakeNotificationGateway implements NotificationGateway {
   /// notification mid-pass.
   bool failNextSchedule = false;
 
+  /// The answer the app was launched by, if any.
+  NudgeResponse? launchedBy;
+
   int initializeCalls = 0;
 
   final Map<int, ScheduledNudge> queued = <int, ScheduledNudge>{};
@@ -51,6 +54,9 @@ class FakeNotificationGateway implements NotificationGateway {
     everyScheduleCall.add(nudge);
     queued[nudge.notificationId] = nudge;
   }
+
+  @override
+  Future<NudgeResponse?> launchResponse() async => launchedBy;
 
   @override
   Future<void> cancel(int notificationId) async {

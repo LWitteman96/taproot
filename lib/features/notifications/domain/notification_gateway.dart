@@ -69,6 +69,13 @@ abstract class NotificationGateway {
 
   Future<void> schedule(ScheduledNudge nudge);
 
+  /// The notification that launched the app, if one did.
+  ///
+  /// Neither response callback fires for it: an answer given to a notification
+  /// that cold-starts the app is only readable by asking, once, on startup.
+  /// Null when the app was opened any other way.
+  Future<NudgeResponse?> launchResponse();
+
   Future<void> cancel(int notificationId);
 
   /// Ids the OS is still holding. Used to reconcile the ledger against the

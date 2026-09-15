@@ -114,6 +114,10 @@ ios/Runner/AppDelegate.swift            the UNUserNotificationCenter delegate
   column that would let denied-permission occasions be excluded from the denominator.
 - **Nothing calls `requestNotificationAccess` yet.** The permission prompt is a designed onboarding
   moment and onboarding does not exist, so a real device runs in the denied mode until it does.
+  **For whoever builds that screen:** `notificationAccessProvider` is a one-shot read, and
+  permission can be revoked in system settings while the app is backgrounded — so the screen needs
+  to invalidate it on lifecycle resume rather than trust what it read on the way in. Scheduling
+  itself is unaffected: every planning pass asks the gateway for access afresh.
 - **A stage change takes up to a week to reach the notifications.** Rows inside the horizon are
   decided when they are planned and never re-decided, so a habit that climbs a rung today keeps the
   old rate on occasions already planned. Shortening the horizon trades that against how much of a
@@ -150,6 +154,40 @@ Three things landed after the branch was first pushed, in one follow-up.
   stays the only writer. Documented there because a raw read can misinterpret all three of: rows
   that exist for occasions a week away, `sent` meaning *queued* rather than *seen*, and `confirmed`
   being an answer to a notification rather than a fact about the habit.
+
+### Then, the background answer
+
+Found while auditing the feature's providers against the paused-provider trap the sync branch hit
+(a Riverpod 3 provider nobody listens to is paused, so it never hears the event it was built to
+hear). **No provider here has that shape** — the feature holds no subscriptions at all, and the one
+live callback belongs to the gateway, which the startup chain keeps listened for the app's
+lifetime. But looking for it surfaced a worse bug one layer down.
+
+**Shade answers were being dropped whenever the app was not in the foreground** — which, for a
+notification that arrives at 20:00, is nearly always. Both actions are declared
+`showsUserInterface: false` so that answering costs nothing, and that is exactly the flag that makes
+the platform deliver the response to a *background isolate*. Only `onDidReceiveNotificationResponse`
+was registered, so the answer went to an isolate nobody was listening on. Silent: no error, the
+ledger simply never recorded a confirm. Confirmed against the plugin's `callback_dispatcher.dart`
+rather than inferred from its README.
+
+- `backgroundNudgeResponseHandler` is now registered as the background callback. It is annotated
+  `@pragma('vm:entry-point')` — load-bearing, because the compiler strips a function nothing appears
+  to call, and the failure would show up only in release builds.
+- The isolate has no `ProviderContainer`, so it opens its own database handle, writes through the
+  same repository, and closes. **On two isolates writing one store:** SQLite serialises the writes,
+  so the row is safe; what is not shared is memory. The main isolate's `GardenController` will not
+  see the write until it next reads. That costs nothing today — `confirmed` feeds the insight
+  surfaces, which read the store — but it is now written on `NudgeRepository` alongside the other
+  misread risks, because anything that starts caching nudge rows has to re-read on resume.
+- A body tap opens no database at all. Opening the store to record that a notification was tapped,
+  and then doing nothing with it, would be the most expensive no-op in the app.
+- **The cold-start path is covered too.** An answer given to a notification that *launches* the app
+  reaches neither callback; it is only readable from `getNotificationAppLaunchDetails()`. Startup
+  now asks once, before planning, so the pass that follows sees the ledger the user just changed.
+- Tested over a real database **file** rather than the in-memory fixture. Every in-memory open
+  returns a private store, so a handler writing to one handle and a test reading from another would
+  both pass and prove nothing. Two isolates share a file, so the test does too.
 
 ### Next
 

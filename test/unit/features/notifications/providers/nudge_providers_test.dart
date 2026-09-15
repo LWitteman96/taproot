@@ -2,8 +2,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:taproot/app/database/database_provider.dart';
 import 'package:taproot/app/startup/app_startup.dart';
+import 'package:taproot/core/models/nudge.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/notifications/domain/notification_access.dart';
+import 'package:taproot/features/notifications/domain/notification_gateway.dart';
+import 'package:taproot/features/notifications/domain/nudge_payload.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 
 import '../../../../utils/fake_notification_gateway.dart';
@@ -58,6 +61,75 @@ void main() {
       gateway.queued.length,
       reason: 'the ledger and the OS queue agree about what was nudged',
     );
+  });
+
+  group('a notification that started the app', () {
+    // Neither response callback fires for it — the answer is only readable by
+    // asking once, on startup — so an unasked-for question means the answer is
+    // simply lost.
+    Future<ProviderContainer> launchedBy(NudgeResponseAction action) async {
+      final container = containerWith(gateway);
+      await container.read(appStartupProvider.future);
+
+      await container.read(habitServiceProvider).saveHabit(testHabit());
+      await container
+          .read(nudgeServiceProvider)
+          .saveNudge(
+            NudgeRecord(
+              id: 'nudge-1',
+              habitId: 'habit-1',
+              expectedOccasionAt: DateTime.now(),
+              sent: false,
+            ),
+          );
+
+      gateway.launchedBy = NudgeResponse(
+        payload: const NudgePayload(nudgeId: 'nudge-1', habitId: 'habit-1'),
+        action: action,
+      );
+      container.invalidate(notificationStartupProvider);
+      await container.read(appStartupProvider.future);
+      return container;
+    }
+
+    Future<NudgeRecord> row(ProviderContainer container) async =>
+        (await container.read(nudgeServiceProvider).nudgesFor('habit-1'))
+            .firstWhere((nudge) => nudge.id == 'nudge-1');
+
+    test('is recorded on the way in', () async {
+      final container = await launchedBy(NudgeResponseAction.confirmed);
+
+      expect((await row(container)).confirmed, isTrue);
+    });
+
+    test('a decline lands the same way', () async {
+      final container = await launchedBy(NudgeResponseAction.declined);
+
+      expect((await row(container)).declined, isTrue);
+    });
+
+    test('an ordinary launch records nothing', () async {
+      final container = containerWith(gateway);
+      await container.read(appStartupProvider.future);
+
+      await container.read(habitServiceProvider).saveHabit(testHabit());
+      await container
+          .read(nudgeServiceProvider)
+          .saveNudge(
+            NudgeRecord(
+              id: 'nudge-1',
+              habitId: 'habit-1',
+              expectedOccasionAt: DateTime.now(),
+              sent: false,
+            ),
+          );
+
+      container.invalidate(notificationStartupProvider);
+      await container.read(appStartupProvider.future);
+
+      expect((await row(container)).confirmed, isFalse);
+      expect((await row(container)).declined, isFalse);
+    });
   });
 
   test('startup survives a platform that will not initialise', () async {

@@ -25,6 +25,13 @@ import 'package:taproot/core/models/nudge.dart';
 ///   covers both a decline-by-silence and a user who simply did the thing. Only
 ///   `completions` say whether the habit happened.
 ///
+/// - **`confirmed` and `declined` may be written by a background isolate**,
+///   with no widget tree and no `ProviderContainer`, while the app is not
+///   running — that is the normal path for an answer given from the shade.
+///   SQLite serialises the write, so the row is safe, but nothing in the main
+///   isolate is notified: anything holding nudge rows in memory has to re-read
+///   on resume rather than trust what it is holding.
+///
 /// The notifications feature is the only **writer**; `markConfirmed`,
 /// `markDeclined` and `markSent` are the outcome columns and belong to it.
 abstract class NudgeRepository {

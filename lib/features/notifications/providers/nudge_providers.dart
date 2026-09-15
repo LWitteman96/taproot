@@ -50,7 +50,17 @@ final notificationGatewayProvider = Provider<NotificationGateway>((ref) {
 /// already handles.
 final notificationStartupProvider = FutureProvider<void>((ref) async {
   try {
-    await ref.watch(notificationGatewayProvider).initialize();
+    final gateway = ref.watch(notificationGatewayProvider);
+    await gateway.initialize();
+
+    // Before planning: an answer that cold-started the app reaches neither
+    // response callback, so this is the only moment it can be recorded. Ask
+    // first, so the plan that follows sees the ledger the user just changed.
+    final launch = await gateway.launchResponse();
+    if (launch != null) {
+      await ref.read(nudgeResponseRecorderProvider).record(launch);
+    }
+
     await ref.watch(nudgeSchedulerProvider).planAll();
   } catch (error, stackTrace) {
     Logger('notificationStartup').severe(

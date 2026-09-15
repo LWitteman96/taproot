@@ -27,6 +27,9 @@ class DisabledNotificationGateway implements NotificationGateway {
   Future<void> schedule(ScheduledNudge nudge) async {}
 
   @override
+  Future<NudgeResponse?> launchResponse() async => null;
+
+  @override
   Future<void> cancel(int notificationId) async {}
 
   @override
