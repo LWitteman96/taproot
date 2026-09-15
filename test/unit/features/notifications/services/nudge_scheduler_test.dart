@@ -423,13 +423,7 @@ void main() {
     // End to end: plan a faded habit, complete on some of the silent days,
     // and read the engine's own autonomy off the ledger the scheduler wrote.
     await saveHabit();
-    await _seedLedger(
-      store,
-      habitId,
-      createdAt,
-      sent: 0,
-      withheld: 4,
-    );
+    await _seedLedger(store, habitId, createdAt, sent: 0, withheld: 4);
     clock.now = dayAfterCreation(4, hour: 12);
 
     final inputs = await HabitInputsLoader(
