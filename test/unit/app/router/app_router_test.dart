@@ -3,6 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:taproot/app/router/app_router.dart';
 
+import '../../../utils/fake_repositories.dart';
+import '../../../utils/store_fixtures.dart';
+
 void main() {
   group('the entry gate', () {
     ProviderContainer containerWith(Future<AppGate> Function() resolver) {
@@ -13,11 +16,23 @@ void main() {
       return container;
     }
 
-    test('is open while there is nothing to gate on', () async {
-      final container = ProviderContainer();
-      addTearDown(container.dispose);
+    test('is shut until something has been planted', () async {
+      // One habit is the whole question: the garden leads with accumulated
+      // progress, and an empty one has none to lead with.
+      final habits = FakeHabitService();
 
-      expect(await container.read(appGateProvider.future), openAppGate);
+      expect((await resolveAppGate(habits)).hasFirstHabit, isFalse);
+
+      await habits.saveHabit(testHabit());
+      expect((await resolveAppGate(habits)).hasFirstHabit, isTrue);
+    });
+
+    test('a deleted last habit shuts it again', () async {
+      final habits = FakeHabitService();
+      await habits.saveHabit(testHabit());
+      await habits.deleteHabit('habit-1');
+
+      expect((await resolveAppGate(habits)).hasFirstHabit, isFalse);
     });
 
     test('falls back to the safe gate when the resolver throws', () async {

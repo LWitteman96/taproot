@@ -2,6 +2,8 @@ import 'package:meta/meta.dart';
 
 import 'package:taproot/core/engine/constants.dart';
 import 'package:taproot/core/engine/domain.dart';
+import 'package:taproot/core/models/habit_category.dart';
+import 'package:taproot/core/models/habit_journey.dart';
 import 'package:taproot/core/utils/json_codec.dart';
 
 /// One habit — one plant.
@@ -21,7 +23,9 @@ class Habit {
     required this.name,
     required this.plantType,
     required this.targetFrequency,
+    required this.journey,
     required this.createdAt,
+    this.category,
     this.identityStatement,
     this.designedCue,
     this.designedCueType,
@@ -34,6 +38,15 @@ class Habit {
          'A designed cue must be externally schedulable — the engine cannot '
          'schedule, nudge or fairly measure a habit hung on a mood. Internal '
          'cues are still valid as cues *discovered* through reflection.',
+       ),
+       assert(
+         journey != HabitJourney.design || designedCue != null,
+         'A designed habit carries the cue it was designed around. The reverse '
+         'does not hold: a tracked habit that discovers a reliable cue through '
+         'reflection may have one locked in later, and stays Journey A. The '
+         'cue *type* is required by the creation flow rather than here, '
+         'because a persisted cue whose type was never recorded is a row this '
+         'model still has to be able to read.',
        ),
        assert(
          targetFrequency >= EngineConstants.minimumTargetFrequency &&
@@ -57,6 +70,15 @@ class Habit {
 
   /// f — the user-declared weekly target. The engine's anchor.
   final int targetFrequency;
+
+  /// Which route this habit took into the garden — designed, or tracked
+  /// (design-spec §2). Recorded rather than inferred; see [HabitJourney].
+  final HabitJourney journey;
+
+  /// What kind of habit this is, for seeding the first reflection's chips
+  /// (starter-chip-library.md §0). Null is a supported answer — see
+  /// [HabitCategory].
+  final HabitCategory? category;
 
   final String? designedCue;
 
@@ -84,20 +106,47 @@ class Habit {
 
   bool get hasGraduated => graduatedAt != null;
 
-  factory Habit.fromJson(Map<String, Object?> json) => Habit(
-    id: requireString(json, 'id'),
-    name: requireString(json, 'name'),
-    identityStatement: readString(json, 'identity_statement'),
-    plantType: requireString(json, 'plant_type'),
-    targetFrequency: requireInt(json, 'target_frequency'),
-    designedCue: readString(json, 'designed_cue'),
-    designedCueType: readEnum(json, 'designed_cue_type', CueType.values),
-    routine: readString(json, 'routine'),
-    reward: readString(json, 'reward'),
-    createdAt: requireDateTime(json, 'created_at'),
-    pausedAt: readDateTime(json, 'paused_at'),
-    graduatedAt: readDateTime(json, 'graduated_at'),
-  );
+  /// Whether the loop this habit was designed around is on record.
+  bool get hasDesignedLoop => designedCue != null && designedCueType != null;
+
+  factory Habit.fromJson(Map<String, Object?> json) {
+    final designedCue = readString(json, 'designed_cue');
+
+    return Habit(
+      id: requireString(json, 'id'),
+      name: requireString(json, 'name'),
+      identityStatement: readString(json, 'identity_statement'),
+      plantType: requireString(json, 'plant_type'),
+      targetFrequency: requireInt(json, 'target_frequency'),
+      // Not `requireEnum`: rows written before schema version 2 have no
+      // journey, and the one defensible reading of such a row is the inference
+      // the column exists to replace — a cue present at creation means the loop
+      // was designed. The upgrade step backfills exactly this, so in practice
+      // the fallback only fires for a row that skipped the migration.
+      journey:
+          readEnum(json, 'journey', HabitJourney.values) ??
+          (designedCue != null ? HabitJourney.design : HabitJourney.track),
+      // Open set, so an unrecognised value reads as null rather than
+      // throwing (see [readOpenEnum]). `category` carries no CHECK on either
+      // side and widens as the chip library is authored, so a row naming a
+      // category this build has not heard of is an ordinary consequence of
+      // syncing with a newer device — not a corrupt row. Throwing here would
+      // fail `allHabits()` and put the entire garden into its unreadable state
+      // over a field whose own spec says null is a supported answer.
+      //
+      // `journey` above stays strict on purpose: its set is closed, it is
+      // CHECKed in the schema, and an unknown value there really would mean
+      // the row cannot be trusted.
+      category: readOpenEnum(json, 'category', HabitCategory.values),
+      designedCue: designedCue,
+      designedCueType: readEnum(json, 'designed_cue_type', CueType.values),
+      routine: readString(json, 'routine'),
+      reward: readString(json, 'reward'),
+      createdAt: requireDateTime(json, 'created_at'),
+      pausedAt: readDateTime(json, 'paused_at'),
+      graduatedAt: readDateTime(json, 'graduated_at'),
+    );
+  }
 
   Map<String, Object?> toJson() => <String, Object?>{
     'id': id,
@@ -105,6 +154,8 @@ class Habit {
     'identity_statement': identityStatement,
     'plant_type': plantType,
     'target_frequency': targetFrequency,
+    'journey': encodeEnum(journey),
+    'category': encodeEnum(category),
     'designed_cue': designedCue,
     'designed_cue_type': encodeEnum(designedCueType),
     'routine': routine,
@@ -120,6 +171,8 @@ class Habit {
     String? Function()? identityStatement,
     String? plantType,
     int? targetFrequency,
+    HabitJourney? journey,
+    HabitCategory? Function()? category,
     String? Function()? designedCue,
     CueType? Function()? designedCueType,
     String? Function()? routine,
@@ -135,6 +188,8 @@ class Habit {
         : this.identityStatement,
     plantType: plantType ?? this.plantType,
     targetFrequency: targetFrequency ?? this.targetFrequency,
+    journey: journey ?? this.journey,
+    category: category != null ? category() : this.category,
     designedCue: designedCue != null ? designedCue() : this.designedCue,
     designedCueType: designedCueType != null
         ? designedCueType()

@@ -21,7 +21,7 @@ Update this file in the same commit as the work it describes.
 | **Local SQLite store + repositories** | **Built — schema, four repositories, engine inputs loader** |
 | **App skeleton** (`lib/app/`) | **Built — startup, logging, theme, router** |
 | **Completion tap** (`lib/features/garden/`) | **Built — garden controller, press-and-hold watering, undo** |
-| Habit creation | Not started — the page is a placeholder shell |
+| **Habit creation** (`lib/features/habits/`) | **Built — the design flow, the tracking opt-out, plant choice, and a live entry gate** |
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | Notification scheduling + nudge ledger | Not started |
 | Reflection check-in and chips | Not started |
@@ -30,16 +30,19 @@ Update this file in the same commit as the work it describes.
 
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
 tap → Supabase sync → notifications and the nudge ledger → reflection check-in → garden → insights.
-The first four are done, so **Supabase sync is next** — a pusher over the `pending_sync` column the
-schema already carries. The backend now exists ahead of that order, but only as a schema: nothing in
-`lib/` talks to it yet.
+The first four are done, and habit creation — a prerequisite the build order does not name, since
+every stage after it needs habits that a user actually made — has landed on top of them. So
+**Supabase sync is next**: a pusher over the `pending_sync` column the schema already carries. The
+backend now exists ahead of that order, but only as a schema: nothing in `lib/` talks to it yet.
 
 What is deliberately *not* built yet: Supabase and Sentry are still uninitialised (the `.env` files
-hold no credentials, and `Supabase.initialize` on an empty URL throws at launch); the router's gate
-is stubbed open with only its fail-safe path implemented; `HabitCreationPage` is still a placeholder
-shell, so the only way to get a habit into the store is the **debug-only dev-flavor seed button** on
-the empty garden; and the garden renders its plants as words rather than art, which is waiting on
-the external illustrator.
+hold no credentials, and `Supabase.initialize` on an empty URL throws at launch), and the garden
+renders its plants as words rather than art, which is waiting on the external illustrator.
+
+The router's gate is no longer stubbed — it reads the habit count, so a user with nothing planted is
+sent to plant something and only then gets a garden. The debug-only dev-flavor seed button that used
+to stand on the empty garden has been **removed**: the real flow supersedes it, and with the gate
+live the screen it sat on is only transiently reachable.
 
 What the **backend** does not include, deliberately: any Dart that talks to it. There is no
 `supabaseClientProvider`, no remote service behind the repository interfaces and no sync — that is
