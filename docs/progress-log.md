@@ -108,6 +108,14 @@ Three smaller ones:
   read for the push and the push returning, which re-queues it; clearing by key alone wipes that
   flag and the edit is never sent. A silent lost write, and a slower network makes it likelier.
 
+**A fake is only as strict as you make it, and one bug got through anyway.** The push used a merging
+upsert for every table — and every completion this device had ever recorded would have come back
+403, because a merging upsert is `ON CONFLICT DO UPDATE` and the append-only ledgers deliberately
+grant no UPDATE. No Dart test could see it: the fake remote accepted both resolutions. It was found
+by pointing curl at the running stack and watching the real answer. `scripts/supabase-verify.sh`
+gained a fifth step so the invariant is executable in the one CI job that has a database, and its
+failure message says what to do if the grants ever move on purpose.
+
 ### Left open
 
 - **Duplicate nudge occasions are not yet collapsed.** Two devices can each write a `nudges` row for
