@@ -101,11 +101,28 @@ class SupabaseRemoteSyncStore implements RemoteSyncStore {
     _log.fine('pushing ${rows.length} rows to ${table.name}');
 
     try {
-      // On the primary key, so a row this device has already pushed — or one
-      // another device pushed first — is an update rather than a duplicate.
+      // Both forms conflict on the primary key; they differ in what happens
+      // when it hits, and the difference is a **permission**, not a taste.
+      //
+      // A merging upsert is `ON CONFLICT DO UPDATE`, so PostgREST requires the
+      // UPDATE privilege — and the append-only ledgers deliberately have no
+      // UPDATE grant at all, because an edit to a past event is a different
+      // event. Sending `resolution=merge-duplicates` at `completions` is a flat
+      // 403 for every completion this device has ever recorded, which is the
+      // whole feature. `ignore-duplicates` is `ON CONFLICT DO NOTHING` and
+      // needs only INSERT.
+      //
+      // It is also the right semantics rather than a way around the grant: the
+      // first write of an event wins, exactly as `ConflictAlgorithm.ignore`
+      // makes it win on the device, which is what keeps a replay a union
+      // instead of an overwrite.
       await _client
           .from(table.name)
-          .upsert(rows, onConflict: table.keyColumns.join(','));
+          .upsert(
+            rows,
+            onConflict: table.keyColumns.join(','),
+            ignoreDuplicates: !table.isMutable,
+          );
     } on PostgrestException catch (error) {
       if (error.code == staleWriteCode) {
         throw StaleRowRejected(table.name, error.message);
