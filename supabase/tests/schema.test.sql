@@ -11,7 +11,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(24);
+select plan(29);
 
 -- ── RLS is on, everywhere, with nothing reachable by anon ───────────────────
 
@@ -109,6 +109,50 @@ select lives_ok(
             'aaaaaaaa-0000-0000-0000-000000000001',
             'Run', 'fern', 3, 'event', now(), now())$$,
   'an event cue is admissible as a designed cue'
+);
+
+-- ── journey is closed, category is open ─────────────────────────────────────
+--
+-- The asymmetry is the point, and it is not an oversight on either side: the
+-- journey's two values are fixed by design-spec §2, while the categories are
+-- authored against the starter chip library and that set grows.
+
+select lives_ok(
+  $$update public.habits set journey = 'track'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  'journey accepts the camelCase wire values design-spec §2 fixes'
+);
+
+select throws_ok(
+  $$update public.habits set journey = 'Design'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  '23514',
+  null,
+  'and rejects anything else — the set is closed, so a value the app could '
+  'not decode must fail at write time'
+);
+
+select lives_ok(
+  $$update public.habits set journey = null
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  'journey is nullable, unlike the device''s fresh schema: a row that somehow '
+  'arrives without one has to land and be reconciled on the way back, rather '
+  'than becoming a 23502 the device retries forever'
+);
+
+select lives_ok(
+  $$update public.habits set category = 'languagePractice'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  'category carries Enum.name verbatim — camelCase, not snake_case, because '
+  'encodeEnum is value.name and a mismatch is a FormatException on pull'
+);
+
+select lives_ok(
+  $$update public.habits set category = 'aCategoryAuthoredLater'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  'and has no CHECK on purpose: the chip library widens the set, and a '
+  'constraint here would make the next authored category a failed push on '
+  'every device running the newer build'
 );
 
 -- ── Enum columns carry the Dart Enum.name verbatim ──────────────────────────
