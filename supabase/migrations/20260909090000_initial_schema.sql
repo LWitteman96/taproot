@@ -53,10 +53,33 @@
 -- Text enum columns carry the Dart `Enum.name` verbatim — `encodeEnum` in
 -- lib/core/utils/json_codec.dart is `value.name`, so the wire format is
 -- camelCase ('nudgeConfirmation', 'autonomyCompletion', 'cantRemember') and
--- not snake_case. The CHECK lists below must stay in step with
--- lib/core/engine/domain.dart; a value added there and not here is a sync
--- failure at insert time, which is the failure mode we want over a silently
--- accepted string the app can no longer decode.
+-- not snake_case. The CHECK lists below must stay in step with the Dart enums
+-- they mirror, which live in lib/core/engine/domain.dart *and*
+-- lib/core/models/completion.dart (`CompletionSource`). A value added there
+-- and not here is a sync failure at insert time, which is the failure mode we
+-- want over a silently accepted string the app can no longer decode.
+--
+-- HOW TO WIDEN ONE, because the obvious way does not work. Editing a CHECK
+-- below changes nothing on a database that has already run this file: the
+-- constraints are inside `create table if not exists`, so a second apply skips
+-- the whole statement, and `supabase db push` only ever applies migrations it
+-- has not seen. `supabase db reset` and CI rebuild from scratch and therefore
+-- go green either way — the drift shows up only as a 23514 on the first push
+-- carrying the new value, in the one environment nobody can reset.
+--
+-- Widening is a NEW migration, and this is the whole pattern:
+--
+--   alter table public.completions
+--     drop constraint if exists completions_source_known;
+--   alter table public.completions
+--     add constraint completions_source_known
+--       check (source in ('tap', 'nudgeConfirmation', 'backfill', 'import'));
+--
+-- Edit the list below in the same commit as well, so a from-scratch build and
+-- a migrated one end up identical. `test/unit/backend/enum_checks_test.dart`
+-- is the gate: it reads these CHECK lists and fails if they and the Dart enums
+-- have drifted. It runs in the Flutter suite, which — unlike the Supabase
+-- workflow — is not path-filtered away by a change under lib/.
 
 -- ── Sync cursor ─────────────────────────────────────────────────────────────
 
@@ -93,9 +116,6 @@ comment on table public.profiles is
   'One row per auth user, created by the handle_new_user trigger. Deliberately '
   'near-empty: there is no social graph, and app settings live on-device until '
   'something needs them server-side.';
-
-create index if not exists idx_profiles_synced_at
-  on public.profiles (synced_at);
 
 drop trigger if exists set_synced_at on public.profiles;
 create trigger set_synced_at before insert or update on public.profiles
@@ -154,20 +174,59 @@ comment on column public.habits.deleted_at is
 -- derived from autonomy, which can fall, and whether it is one-way is the
 -- engine's question to answer rather than something to freeze here by
 -- analogy.
+-- It raises rather than quietly coalescing, which it used to do. Silently
+-- dropping the deleted_at half of an UPDATE while applying every other column
+-- and answering 200 has two bad ends. A stale device that never heard about
+-- the deletion pushes its whole row, is told the push landed, and has in fact
+-- had only some of its columns written. And a sanctioned undelete — a "Deleted
+-- — Undo" affordance, or support restoring a habit — looks like it worked,
+-- reappears locally, and vanishes again on the next pull with no error
+-- anywhere to debug from. Triggers are not bypassed by service_role the way
+-- RLS is, so that second one is not hypothetical.
+--
+-- If an undelete is ever wanted it needs a sanctioned path that clears the
+-- stamp deliberately — a `security definer` RPC that this trigger exempts —
+-- rather than a whole-row push that happens to carry a null.
+--
+-- PT409 is PostgREST's convention for choosing the HTTP status: the push comes
+-- back 409 Conflict, which is what it is. The sync branch should read a 409 on
+-- a habit push as "this habit is deleted upstream — pull, do not retry".
 create or replace function public.pin_soft_delete()
 returns trigger
 language plpgsql
 set search_path = ''
 as $$
 begin
-  new.deleted_at := coalesce(old.deleted_at, new.deleted_at);
-  return new;
+  -- A live habit, including the update that performs the deletion.
+  if old.deleted_at is null then
+    return new;
+  end if;
+
+  -- The same deletion again, which sync replays constantly.
+  if new.deleted_at is not distinct from old.deleted_at then
+    return new;
+  end if;
+
+  -- A second device deleting a habit already deleted: first deletion wins, and
+  -- nothing is being resurrected, so this stays a quiet no-op on that column.
+  if new.deleted_at is not null then
+    new.deleted_at := old.deleted_at;
+    return new;
+  end if;
+
+  raise exception
+    'habit % is deleted (deleted_at = %); deleted_at is one-way',
+    old.id, old.deleted_at
+    using errcode = 'PT409',
+          hint = 'Pull rather than retrying. Undeleting needs a sanctioned '
+                 'RPC, not a whole-row push carrying a null deleted_at.';
 end;
 $$;
 
 comment on function public.pin_soft_delete() is
-  'Makes habits.deleted_at one-way and first-write-wins, so a stale push '
-  'cannot resurrect a deleted habit.';
+  'Makes habits.deleted_at one-way and first-write-wins. Clearing a set stamp '
+  'raises PT409 rather than being ignored: a blocked write that reports '
+  'success is how an undelete looks fixed and then vanishes on the next pull.';
 
 create index if not exists idx_habits_user_synced_at
   on public.habits (user_id, synced_at);
@@ -190,7 +249,12 @@ create table if not exists public.completions (
   user_id uuid not null,
   completed_at timestamptz not null,
   was_nudged boolean not null default false,
-  source text not null default 'tap'
+  -- No default, matching the device (app_database.dart: `source TEXT NOT
+  -- NULL`). A push that omits it gets a 23502, per the header rule above: a
+  -- serializer bug that drops the column must fail rather than have the server
+  -- record a nudgeConfirmation as a tap and miscount autonomy on every device
+  -- that later pulls it.
+  source text not null
     constraint completions_source_known
       check (source in ('tap', 'nudgeConfirmation', 'backfill')),
   synced_at timestamptz not null default now(),
@@ -204,8 +268,13 @@ comment on constraint completions_habit_id_user_id_fkey on public.completions is
   'its habit" a foreign key rather than a policy the RLS check has to be '
   'trusted to have got right.';
 
-create index if not exists idx_completions_habit_completed_at
-  on public.completions (habit_id, completed_at);
+-- No (habit_id, completed_at) index here, deliberately, though the sibling
+-- tables below all have their habit_id-leading one. Those serve the ON DELETE
+-- CASCADE from habits; completions gets that for free from its primary key,
+-- whose leading column is already habit_id. A second index on the same leading
+-- column would be pure write cost on the hottest insert path in the schema —
+-- and nothing server-side orders completions by completed_at, because every
+-- engine read runs against the device's SQLite.
 create index if not exists idx_completions_user_synced_at
   on public.completions (user_id, synced_at);
 
@@ -254,7 +323,9 @@ create table if not exists public.reflections (
     constraint reflections_input_mode_known
       check (input_mode in ('chip', 'typed', 'cantRemember', 'skipped')),
   cue_reported text,
-  cue_type text not null default 'unknown'
+  -- No default, for the reason given on completions.source: 'unknown' is a
+  -- real CueType the engine treats specially, not a safe filler.
+  cue_type text not null
     constraint reflections_cue_type_known
       check (cue_type in ('event', 'time', 'location', 'internal',
                           'social', 'unknown')),

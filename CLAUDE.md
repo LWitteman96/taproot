@@ -295,8 +295,15 @@ script, and what is deliberately absent.
   undoing a completion is a row in `completion_retractions`, and erasing an account is
   `delete-account` running as `service_role`. Sync is a union, so rows must never go backwards.
 - Text enum columns carry the Dart `Enum.name` **verbatim** — camelCase (`nudgeConfirmation`,
-  `autonomyCompletion`, `cantRemember`), because `encodeEnum` is `value.name`. A value added to
-  `lib/core/engine/domain.dart` needs the matching `CHECK` widened in the same commit.
+  `autonomyCompletion`, `cantRemember`), because `encodeEnum` is `value.name`. **A value added to
+  any Dart enum a `CHECK` mirrors** needs that `CHECK` widened. Two files feed them, not one:
+  `lib/core/engine/domain.dart` (`CueType`, `Occasion`, `Framing`, `InputMode`, `FrictionType`) and
+  `lib/core/models/completion.dart` (`CompletionSource`). Widening is a **new migration** —
+  `ALTER TABLE ... DROP CONSTRAINT IF EXISTS ... / ADD CONSTRAINT ...` — because the lists live
+  inside `create table if not exists` and editing that file does nothing to a database that has
+  already run it. Edit the list there too, so a from-scratch build and a migrated one agree.
+  `test/unit/backend/enum_checks_test.dart` fails if they drift; it runs in the Flutter suite,
+  which the Supabase workflow's `supabase/**` path filter does not cover.
 
 ---
 

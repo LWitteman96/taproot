@@ -21,6 +21,79 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-15 — backend review and fixes
+
+Branch: `feature/supabase-backend`, on top of the entry below. PR [#4](https://github.com/LWitteman96/taproot/pull/4).
+
+### Corrected
+
+**The entry below says "same seven tables". The device has six.** `habits`, `completions`,
+`completion_retractions`, `reflections`, `nudges` and `habit_pauses` exist on both sides; the
+server's seventh, `profiles`, has no device counterpart at all. It is created by the
+`handle_new_user` trigger, keyed by the auth user id, and is **not drained through `pending_sync`**.
+Recorded here rather than by editing that line, per this file's append-only rule — and recorded at
+all because the sync branch is the reader it would have misled: table-symmetric drain-and-pull code
+written from "same seven tables, same keys" would try to sync a table the device does not have.
+
+### Found
+
+Ten things from the review. Two are latent correctness bugs, four are guarantees that were weaker
+than the prose around them claimed, and the rest are cost and accuracy.
+
+| Finding | Why it matters |
+|---|---|
+| The documented enum-widening process is a no-op on a deployed database | The CHECK lists live inside `create table if not exists`, and `db push` only applies *new* migrations. Editing the file goes green on every gate — `db reset` and CI both rebuild from scratch — and drifts only in the one environment nobody can reset |
+| `pin_soft_delete` coalesced `deleted_at` and reported success | A stale whole-row push half-applied (200, `deleted_at` kept, `name` and `updated_at` overwritten); a sanctioned undelete was a silent no-op with nothing to debug from, since triggers are not bypassed by `service_role` the way RLS is |
+| `default 'tap'` and `default 'unknown'` invented client-owned values | Contradicted the migration's own header rule. A serializer bug dropping `source` would have filed a `nudgeConfirmation` as a tap and miscounted autonomy on every device that later pulled it |
+| `delete-account`'s 503 branch was dead | auth-js does not throw on a transient failure — it returns `AuthRetryableFetchError` in the result — so an auth-server blip answered 401 "Invalid session" on the one screen App Store review checks |
+| The "moves it on update" pgTAP assertion was vacuous | It passes against a `before insert`-only trigger, so a pull cursor frozen at insert time would have shipped certified by the suite |
+| `json_field`'s `JSONDecodeError` outran its own diagnostics | Under `set -e` a non-JSON body killed the script before the `error "Response was:"` lines written for exactly that case, and `python3` was the one dependency never preflighted |
+| CLAUDE.md keyed the enum rule to `engine/domain.dart` only | `CompletionSource` lives in `models/completion.dart`, so a fourth source value got no prompt to widen its CHECK |
+| "same seven tables" | Corrected above |
+| CI applied every migration twice and booted Studio + inbucket | `supabase start` already applies them; the script's reset then did it again. Nothing opens either container — the test user is created pre-confirmed through the admin API |
+| Two indexes with no possible reader | `idx_profiles_synced_at` (every `profiles` statement is an RLS-scoped PK lookup) and `idx_completions_habit_completed_at` (duplicates the PK's leading column on the hottest write path) |
+
+### Fixed
+
+All ten. pgTAP went from 30 assertions to 35, and `scripts/supabase-verify.sh` gained a fourth
+end-to-end check. Both `supabase-verify.sh` and `supabase-verify.sh --no-reset` are green locally,
+as is `flutter test`.
+
+Three of the fixes are worth knowing about before touching this code:
+
+- **`pin_soft_delete` raises `PT409` rather than coalescing.** Clearing a set `deleted_at` is now a
+  visible failure, so the whole statement rolls back instead of half-applying, and the push comes
+  back 409 Conflict (`PT`-prefixed SQLSTATEs are how PostgREST is told the status). The benign race
+  is deliberately untouched: a second device deleting an already-deleted habit still succeeds, and
+  the first stamp still wins. **The sync branch should read a 409 on a habit push as "deleted
+  upstream — pull, do not retry."** An undelete, if it is ever wanted, needs a sanctioned RPC that
+  the trigger exempts — not a whole-row push that happens to carry a null.
+- **The enum drift gate is a Dart test**, `test/unit/backend/enum_checks_test.dart`. It reads every
+  migration in order, takes the *last* definition of each named CHECK — so a widening
+  `ALTER TABLE ... DROP CONSTRAINT / ADD CONSTRAINT` counts, exactly as it does in Postgres — and
+  compares against the Dart enums. It lives in the Flutter suite on purpose: the Supabase workflow
+  is path-filtered to `supabase/**` and never runs on the commit that adds an enum value. Verified
+  both ways before landing — it fails on a Dart-only widening, and passes once the migration exists.
+- **Dropping the two server defaults moved four test fixtures.** `NOT NULL` is checked before
+  `CHECK`, so inserts that omitted `source` or `cue_type` started failing 23502 *before* reaching
+  the 23505 and 23514 they were written to assert. Worth remembering when adding a fixture: the
+  column list has to be complete now.
+
+### Left open
+
+- **No remote project is provisioned**, unchanged. Nothing here has been deployed, which is what
+  made editing the migration in place the right fix for the indexes and the defaults rather than a
+  follow-up migration.
+- **The 503 branch still has no test.** The 401 half now does — the verify script re-POSTs the
+  token whose user it just deleted, which is the only way to reach the function's own `getUser`
+  rejection from outside, since `verify_jwt = true` means the gateway turns away anything
+  malformed. Reaching the 503 half needs the auth server to fail mid-request, which nothing local
+  can stage; it rests on the auth-js reading in the comment rather than on a green light.
+- **`nudges` still has no unique constraint on `(habit_id, expected_occasion_at)`**, unchanged, and
+  still the sync branch's question rather than this one's.
+
+---
+
 ## 2026-09-09 — the Supabase backend
 
 Branch: `feature/supabase-backend`. Backend only — nothing under `lib/` changed.

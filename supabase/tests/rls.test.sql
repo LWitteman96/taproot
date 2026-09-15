@@ -25,11 +25,11 @@ values
   ('bbbb2222-0000-0000-0000-000000000002',
    '22222222-0000-0000-0000-000000000002', 'Ben reads', 'ivy', 5, now(), now());
 
-insert into public.completions (habit_id, id, user_id, completed_at)
+insert into public.completions (habit_id, id, user_id, completed_at, source)
 values
   ('bbbb2222-0000-0000-0000-000000000002',
    'cccc2222-0000-0000-0000-000000000002',
-   '22222222-0000-0000-0000-000000000002', now());
+   '22222222-0000-0000-0000-000000000002', now(), 'tap');
 
 -- ── anon ────────────────────────────────────────────────────────────────────
 
@@ -92,10 +92,10 @@ select is(
 -- A completion Ana owns, hung on a habit Ben owns. RLS is satisfied — the row
 -- carries her user_id — and the composite foreign key is what catches it.
 select throws_ok(
-  $$insert into public.completions (habit_id, id, user_id, completed_at)
+  $$insert into public.completions (habit_id, id, user_id, completed_at, source)
     values ('bbbb2222-0000-0000-0000-000000000002',
             'cccc1111-0000-0000-0000-000000000009',
-            '11111111-0000-0000-0000-000000000001', now())$$,
+            '11111111-0000-0000-0000-000000000001', now(), 'tap')$$,
   '23503',
   null,
   'a completion cannot be attached to another user''s habit: the (habit_id, '
@@ -104,10 +104,10 @@ select throws_ok(
 );
 
 select lives_ok(
-  $$insert into public.completions (habit_id, id, user_id, completed_at)
+  $$insert into public.completions (habit_id, id, user_id, completed_at, source)
     values ('aaaa1111-0000-0000-0000-000000000001',
             'cccc1111-0000-0000-0000-000000000001',
-            '11111111-0000-0000-0000-000000000001', now())$$,
+            '11111111-0000-0000-0000-000000000001', now(), 'tap')$$,
   'Ana can water her own plant'
 );
 

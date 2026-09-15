@@ -27,9 +27,22 @@
 // retry. If the auth delete succeeds first and the purge then fails, the files
 // are orphaned forever with nobody left who can retry.
 
-import { createClient } from 'npm:@supabase/supabase-js@2';
+import {
+  AuthRetryableFetchError,
+  createClient,
+} from 'npm:@supabase/supabase-js@2';
 
 import { corsHeaders, jsonResponse } from '../_shared/cors.ts';
+
+/// Whether an auth error means "we could not check" rather than "this token is
+/// bad". AuthRetryableFetchError covers the network failure and the 502/503/504
+/// responses auth-js converts into it; the status check catches any other 5xx
+/// that reaches us as a plain AuthError.
+function isTransientAuthFailure(error: unknown): boolean {
+  if (error instanceof AuthRetryableFetchError) return true;
+  const status = (error as { status?: number } | null)?.status;
+  return typeof status === 'number' && status >= 500;
+}
 
 Deno.serve(async (request: Request): Promise<Response> => {
   // Every path out of here returns a Response with CORS headers on it. An
@@ -69,19 +82,34 @@ async function deleteAccount(request: Request): Promise<Response> {
   });
 
   // ── 1. The caller, from their JWT ─────────────────────────────────────────
-  // A transient failure reaching the auth server throws rather than returning
-  // an error, and it is not the caller's session that is at fault, so the two
-  // cases get different answers: 401 for a token that was rejected, 503 for a
-  // token that could not be checked.
+  // 401 for a token that was rejected, 503 for a token that could not be
+  // checked — the caller's session is not at fault for an auth-server blip,
+  // and an app that reads 401 as "your session expired" would sign a user out
+  // on the one screen App Store review is looking at.
+  //
+  // That split has to be made on the RETURNED error, not in a catch. auth-js
+  // does not throw on a transient failure: it wraps fetch failures — and 502,
+  // 503 and 504 responses — as AuthRetryableFetchError, and GoTrueClient's
+  // _getUser catches every AuthError and hands it back as `{ data: { user:
+  // null }, error }`. A catch here only ever sees non-AuthError exceptions, so
+  // it cannot be where the 503 lives.
   const jwt = authorization.slice('Bearer '.length);
   let userId: string;
   try {
     const { data: caller, error: callerError } = await admin.auth.getUser(jwt);
-    if (callerError || !caller?.user) {
+    if (callerError) {
+      if (isTransientAuthFailure(callerError)) {
+        console.error('delete-account: could not verify the session', callerError);
+        return jsonResponse({ error: 'Could not verify the session' }, 503);
+      }
+      return jsonResponse({ error: 'Invalid session' }, 401);
+    }
+    if (!caller?.user) {
       return jsonResponse({ error: 'Invalid session' }, 401);
     }
     userId = caller.user.id;
   } catch (error) {
+    // Non-AuthError only — a bug here, or something below auth-js entirely.
     console.error('delete-account: could not verify the session', error);
     return jsonResponse({ error: 'Could not verify the session' }, 503);
   }

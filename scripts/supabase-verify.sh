@@ -48,6 +48,13 @@ if ! command -v supabase &>/dev/null; then
   exit 1
 fi
 
+# Preflighted like the CLI above rather than discovered in step 4, which is
+# several minutes of green output later. jq is preinstalled on GitHub runners.
+if ! command -v jq &>/dev/null; then
+  error "jq not found. Install it: https://jqlang.github.io/jq/download/"
+  exit 1
+fi
+
 if ! supabase status &>/dev/null; then
   error "The local stack is not running. Start it with: supabase start"
   exit 1
@@ -107,7 +114,20 @@ supabase test db
 # the cascade took everything with it.
 heading "Step 4/4 — delete-account, end to end"
 
-json_field() { python3 -c 'import sys, json; d = json.load(sys.stdin); print(d.get(sys.argv[1]) or (d.get("user") or {}).get(sys.argv[1]) or "")' "$1"; }
+# jq rather than a python3 one-liner, for two reasons that both bit. Under
+# `set -euo pipefail` a JSONDecodeError on a non-JSON body — Kong answering 502
+# in HTML while the stack warms up, or an empty response — killed the whole
+# script with a traceback, so the `error "Response was:"` diagnostics written
+# below for exactly that case were unreachable. And python3 was the one
+# dependency never preflighted. `// empty` makes a missing key an empty string
+# rather than the literal "null", which is what the `-z` checks below expect.
+#
+# The `|| true` matters as much as the tool does: jq exits non-zero on a parse
+# error, and under `set -e` a failing command substitution in an assignment
+# aborts the script just as the traceback did. Swallowing it leaves an empty
+# value, so the `-z` checks fire and print the body that could not be parsed —
+# which is the diagnostic worth having.
+json_field() { jq -r "(.$1 // .user.$1) // empty" 2>/dev/null || true; }
 
 # The user is created through the admin API rather than /signup, because email
 # confirmations are on (see config.toml) and /signup therefore returns no
@@ -174,6 +194,25 @@ end
 SQL
 run_sql "$TMP_SQL"
 info "the auth user, its profile and its habits are gone"
+
+# The same token again, now that the user behind it is gone. It is still
+# well-formed and unexpired, so the gateway's verify_jwt lets it through and
+# the function's own getUser() is what rejects it — which is the only way to
+# reach that branch from outside, and the branch that has to answer 401 rather
+# than the 503 reserved for "we could not check". auth-js hands transient
+# failures back in the result rather than throwing, so the two live one `if`
+# apart and a refactor can swap them without anything else noticing.
+ORPHAN_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+  "$API_URL/functions/v1/delete-account" \
+  -H "apikey: $ANON_KEY" -H "Authorization: Bearer $TOKEN")"
+
+if [[ "$ORPHAN_STATUS" != "401" ]]; then
+  error "a token whose user is gone returned $ORPHAN_STATUS, expected 401"
+  error "503 there would mean the transient-failure branch is swallowing a "
+  error "genuinely invalid session; 500 means it threw."
+  exit 1
+fi
+info "a token whose user no longer exists is 401, not 503"
 
 echo ""
 echo -e "${GREEN}${BOLD}✓ Backend green.${RESET} Migrations apply from scratch, re-apply cleanly, the tests pass, and an account can delete itself."

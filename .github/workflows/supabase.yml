@@ -44,14 +44,22 @@ jobs:
           # branch that changed nothing. Raise it deliberately.
           version: 2.105.0
 
+      # Studio and the mail catcher are excluded because nothing here opens
+      # either: the verify script creates its test user pre-confirmed through
+      # the admin API, so no confirmation mail is ever fished out of inbucket.
+      # That is several hundred MB of image pulls off the required path.
       - name: Start the local stack
-        run: supabase start
+        run: supabase start -x studio,inbucket
 
-      # Resets from the migrations, re-applies every one of them a second time
-      # to prove they are re-runnable, runs the pgTAP suite, and deletes an
-      # account through the edge function. Exactly what a developer runs.
+      # --no-reset because `supabase start` on a fresh runner has already
+      # applied every migration from scratch; the default reset would drop the
+      # database and do that same work a second time before the deliberate
+      # re-runnability pass. Every guarantee survives — from-scratch apply
+      # (start), second apply (the script), pgTAP, delete-account end to end.
+      # The reset default stays right for a developer with a dirty local
+      # database, which a fresh runner never has.
       - name: Verify the backend
-        run: scripts/supabase-verify.sh
+        run: scripts/supabase-verify.sh --no-reset
 
       - name: Container logs on failure
         if: failure()

@@ -11,7 +11,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(19);
+select plan(24);
 
 -- ── RLS is on, everywhere, with nothing reachable by anon ───────────────────
 
@@ -137,24 +137,55 @@ select throws_ok(
 select throws_ok(
   $$insert into public.reflections
       (id, habit_id, user_id, created_at, occasion, framing, input_mode,
-       updated_at)
+       cue_type, updated_at)
     values ('dddddddd-0000-0000-0000-000000000001',
             'bbbbbbbb-0000-0000-0000-000000000004',
             'aaaaaaaa-0000-0000-0000-000000000001',
-            now(), 'completion', 'reassurance', 'chip', now())$$,
+            now(), 'completion', 'reassurance', 'chip', 'unknown', now())$$,
   '23514',
   null,
   'framing rejects a value that is not in reflection-logic §3'
+);
+
+-- Client-owned columns have no server default, so a push that drops one fails
+-- loudly instead of having a value invented for it. 'tap' and 'unknown' are
+-- both real values the engine treats specially — a serializer bug that lost
+-- the column would have recorded a nudgeConfirmation as a tap and miscounted
+-- autonomy on every device that later pulled it, with nothing to see anywhere.
+
+select throws_ok(
+  $$insert into public.completions
+      (habit_id, id, user_id, completed_at)
+    values ('bbbbbbbb-0000-0000-0000-000000000004',
+            'cccccccc-0000-0000-0000-000000000003',
+            'aaaaaaaa-0000-0000-0000-000000000001', now())$$,
+  '23502',
+  null,
+  'a completion without a source is rejected rather than defaulted to tap — '
+  'the device schema has no default here either'
+);
+
+select throws_ok(
+  $$insert into public.reflections
+      (id, habit_id, user_id, created_at, occasion, framing, input_mode,
+       updated_at)
+    values ('dddddddd-0000-0000-0000-000000000002',
+            'bbbbbbbb-0000-0000-0000-000000000004',
+            'aaaaaaaa-0000-0000-0000-000000000001',
+            now(), 'completion', 'validation', 'chip', now())$$,
+  '23502',
+  null,
+  'and a reflection without a cue_type is not quietly filed as unknown'
 );
 
 -- ── The append-only completion key is (habit_id, id) ────────────────────────
 
 select throws_ok(
   $$insert into public.completions
-      (habit_id, id, user_id, completed_at)
+      (habit_id, id, user_id, completed_at, source)
     values ('bbbbbbbb-0000-0000-0000-000000000004',
             'cccccccc-0000-0000-0000-000000000001',
-            'aaaaaaaa-0000-0000-0000-000000000001', now())$$,
+            'aaaaaaaa-0000-0000-0000-000000000001', now(), 'tap')$$,
   '23505',
   null,
   'replaying the same client UUID for the same habit is a union, not a '
@@ -197,6 +228,18 @@ select is(
   'cursor column frozen at its default is worse than no cursor at all'
 );
 
+-- Captured before the update, and compared strictly greater afterwards. The
+-- obvious form of this assertion — synced_at >= updated_at — is vacuous: the
+-- update below does not touch updated_at, which keeps its insert-time now()
+-- (transaction start), and the insert-time synced_at is already a
+-- clock_timestamp() at or after that. It passes with a before-insert-only
+-- trigger, which is precisely the regression worth catching: a pull cursor
+-- frozen at insert time means updated rows never re-enter an incremental pull.
+create temporary table nudge_synced_before as
+select synced_at
+  from public.nudges
+ where id = 'eeeeeeee-0000-0000-0000-000000000001';
+
 update public.nudges
    set confirmed = true
  where id = 'eeeeeeee-0000-0000-0000-000000000001';
@@ -204,9 +247,9 @@ update public.nudges
 select ok(
   (select synced_at from public.nudges
      where id = 'eeeeeeee-0000-0000-0000-000000000001')
-    >= (select updated_at from public.nudges
-          where id = 'eeeeeeee-0000-0000-0000-000000000001'),
-  'and moves it on update, not only on insert'
+    > (select synced_at from nudge_synced_before),
+  'and moves it on update, not only on insert — an updated row has to re-enter '
+  'an incremental pull, so the cursor must advance when the row changes'
 );
 
 -- ── A soft delete is one-way ────────────────────────────────────────────────
@@ -215,16 +258,44 @@ update public.habits
    set deleted_at = now()
  where id = 'bbbbbbbb-0000-0000-0000-000000000004';
 
-update public.habits
-   set deleted_at = null
- where id = 'bbbbbbbb-0000-0000-0000-000000000004';
+select throws_ok(
+  $$update public.habits
+       set deleted_at = null, name = 'resurrected'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  'PT409',
+  null,
+  'a stale push cannot clear deleted_at and resurrect a habit — revoking '
+  'DELETE is only half of that guarantee, pin_soft_delete() is the other half'
+);
 
 select isnt(
   (select deleted_at from public.habits
      where id = 'bbbbbbbb-0000-0000-0000-000000000004'),
   null,
-  'a stale push cannot clear deleted_at and resurrect a habit — revoking '
-  'DELETE is only half of that guarantee, pin_soft_delete() is the other half'
+  'and the habit is still deleted afterwards — the whole statement rolls back, '
+  'so the other columns it carried do not half-apply either'
+);
+
+select is(
+  (select name from public.habits
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'),
+  'Run',
+  'including the ones that would have gone backwards: a blocked write that '
+  'reports success is what this raise exists to stop'
+);
+
+-- The benign race the raise must not break: two devices each delete the same
+-- habit, so the second push carries a different, later stamp. First deletion
+-- wins and the push still succeeds — nothing is being resurrected.
+update public.habits
+   set deleted_at = now() + interval '1 hour'
+ where id = 'bbbbbbbb-0000-0000-0000-000000000004';
+
+select ok(
+  (select deleted_at from public.habits
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004') < now() + interval '1 hour',
+  'a second device deleting an already-deleted habit keeps the first stamp '
+  'rather than failing — first deletion wins, and it is still a union'
 );
 
 -- ── Deleting the auth user is the whole deletion ────────────────────────────
