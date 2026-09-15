@@ -78,7 +78,11 @@ final nudgeSchedulerProvider = Provider<NudgeScheduler>(
     gateway: ref.watch(notificationGatewayProvider),
     reflection: ref.watch(reflectionPromptComposerProvider),
     clock: ref.watch(clockProvider),
-    newId: ref.watch(newIdProvider),
+    // Deliberately *not* wired to newIdProvider. The ledger mints its own
+    // UUIDs — the same v4 either way in production — because sharing one
+    // sequence makes every test that pins an id depend on how many occasions
+    // the scheduler happened to plan first. It cost an unrelated completion
+    // its expected id the moment the garden started re-planning.
   ),
 );
 
