@@ -208,6 +208,42 @@ rather than inferred from its README.
   all four as fakes. Worth knowing before it presents as an empty ledger: the guard that stops a
   scheduling failure from failing a save also swallows a half-wired test harness.
 
+### Then, the review of PR #7
+
+Nine inline findings, all fixed. The three worth recording beyond "fixed":
+
+- **The cap was consumed by history** (the serious one). `planAll` recounted each habit's decisions
+  afterwards — but the known-row branch reports `send` for every *historical* sent row, so a few
+  weeks of ledger exhausted the 60-notification ceiling on its own and every real future nudge was
+  suppressed as `overCap` and written to the ledger as un-nudged. Silent, and it corrupts the
+  measurement rather than just losing a reminder. There is now one counter, incremented only when
+  the OS actually took a notification, returned out of the per-habit pass instead of recounted.
+  **The regression test needed three habits to reproduce it** — the miscount compounds across
+  habits rather than within one, so the running total only passed the ceiling by the third — and
+  writing it surfaced a second bug in the test seeding itself: a shared row id meant each habit's
+  seeded history *updated* the previous habit's row and moved it across, so every caller but the
+  last silently had no history at all. Both versions of the accounting were run against the test to
+  confirm it fails on the old one; the first two attempts passed under both and were not regression
+  tests at all.
+- **`planAll` and `planHabit` had diverged** in how they seeded the cap. One `_plan` now serves
+  both, so the accounting cannot fork again and the next pass-wide step cannot land on one path
+  only.
+- **Two latency findings, same shape.** The first frame was blocking on a full re-plan, and the
+  permission screen was waiting on one after the dialog had already closed. Both now run unawaited
+  with their own failure logging. The launch pass stays inside the startup chain so it still sees a
+  cold-start answer already recorded. One consequence written down where it happens: a startup retry
+  closes the database handle and can land mid-pass, which surfaces as a logged failure and costs
+  nothing, because the ledger is rebuilt from the calendar on every pass.
+
+Also from the review: one access snapshot per pass rather than two platform round trips per
+notification (which had a split-snapshot hazard — the scheduler deciding `canPost` from one reading
+while the gateway scheduled against another); `requestAccess` now prompts and then re-reads rather
+than keeping a second copy of the mapping that had already drifted on iOS provisional grants; one
+`NudgeResponse.from` shared by the foreground callback, the background isolate and the cold-start
+path; `saveNudges` batching the silent majority into one transaction, with the write-then-queue
+ordering kept only for rows actually headed to the OS; a `loadFor(Habit)` entry point so the planner
+stops re-fetching habits it is already holding; and a write-only `isNew` field deleted.
+
 ### Next
 
 Supabase sync — a pusher over the `pending_sync` column, which the `nudges` table already carries

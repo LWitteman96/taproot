@@ -2,6 +2,7 @@ import 'package:logging/logging.dart';
 import 'package:meta/meta.dart';
 import 'package:uuid/uuid.dart';
 
+import 'package:taproot/app/database/store_exceptions.dart';
 import 'package:taproot/core/engine/autonomy.dart';
 import 'package:taproot/core/engine/constants.dart';
 import 'package:taproot/core/engine/engine.dart';
@@ -26,7 +27,6 @@ class PlannedOccasion {
     required this.habitId,
     required this.occasion,
     required this.decision,
-    required this.isNew,
   });
 
   final String nudgeId;
@@ -34,12 +34,8 @@ class PlannedOccasion {
   final ExpectedOccasion occasion;
   final NudgeDecision decision;
 
-  /// False when the row was already in the ledger and this pass left it alone.
-  final bool isNew;
-
   @override
-  String toString() =>
-      'PlannedOccasion(${occasion.date}, $decision, new: $isNew)';
+  String toString() => 'PlannedOccasion(${occasion.date}, $decision)';
 }
 
 /// The outcome of a planning pass, for logging and for tests.
@@ -49,9 +45,6 @@ class NudgePlan {
 
   final NotificationAccess access;
   final List<PlannedOccasion> occasions;
-
-  Iterable<PlannedOccasion> get scheduled =>
-      occasions.where((occasion) => occasion.decision.shouldSend);
 
   /// Occasions the engine deliberately stayed silent on — autonomy's
   /// denominator, and the only silence that means anything.
@@ -64,7 +57,8 @@ class NudgePlan {
   @override
   String toString() =>
       'NudgePlan(${occasions.length} occasions, '
-      '${scheduled.length} scheduled, ${withheld.length} withheld)';
+      '${occasions.where((occasion) => occasion.decision.shouldSend).length} '
+      'scheduled, ${withheld.length} withheld)';
 }
 
 /// Plans expected occasions, writes the ledger, and queues the notifications.
@@ -115,27 +109,57 @@ class NudgeScheduler {
   /// cannot quietly queue five times the ceiling. Habits are planned in
   /// creation order, which means an overflow always drops the *newest* habit's
   /// furthest-out nudges — deterministic, and reported rather than silent.
-  Future<NudgePlan> planAll() async {
+  Future<NudgePlan> planAll() async => _plan(await _habits.allHabits());
+
+  /// Re-plans one habit. Called after a completion or a habit being planted,
+  /// when the stage — and so the fade rate — may just have changed.
+  Future<NudgePlan> planHabit(String habitId) async {
+    final habit = await _habits.habitById(habitId);
+    if (habit == null) {
+      return const NudgePlan(
+        access: NotificationAccess.denied,
+        occasions: <PlannedOccasion>[],
+      );
+    }
+    return _plan(<Habit>[habit]);
+  }
+
+  /// One planning pass, over one habit or all of them.
+  ///
+  /// Both entry points share this so that the cap accounting cannot diverge
+  /// between them, and so the next pass-wide step — cancelling the orphaned
+  /// notifications of a deleted habit, say — cannot land on only one path.
+  Future<NudgePlan> _plan(List<Habit> habits) async {
     final access = await _gateway.currentAccess();
-    final habits = await _habits.allHabits();
     final pending = access.canPost
         ? await _gateway.pendingNotificationIds()
         : const <int>{};
 
     final planned = <PlannedOccasion>[];
+
+    // **One counter, incremented only when the OS actually took a
+    // notification.** Recounting decisions afterwards is what made the cap
+    // unreachable: the known-row branch reports `send` for every historical
+    // sent row, so a few weeks of ledger history consumed the whole ceiling
+    // and every real future nudge was recorded as overCap-suppressed.
     var queued = pending.length;
 
     for (final habit in habits) {
-      final forHabit = await _planHabit(
-        habit: habit,
-        access: access,
-        pending: pending,
-        queuedSoFar: queued,
-      );
-      planned.addAll(forHabit);
-      queued += forHabit
-          .where((occasion) => occasion.decision.shouldSend)
-          .length;
+      try {
+        final pass = await _planHabit(
+          habit: habit,
+          access: access,
+          pending: pending,
+          queuedSoFar: queued,
+        );
+        planned.addAll(pass.occasions);
+        queued = pass.queued;
+      } on UnknownHabitException {
+        // Deleted on another device between listing the habits and writing its
+        // occasions. Expected but abnormal, and deliberately not an error
+        // report — the other habits in the pass still deserve their ledger.
+        _log.info('${habit.id} was deleted mid-pass; skipping it');
+      }
     }
 
     final plan = NudgePlan(access: access, occasions: planned);
@@ -151,33 +175,7 @@ class NudgeScheduler {
     return plan;
   }
 
-  /// Re-plans one habit. Called after a completion, when the stage — and so
-  /// the fade rate — may just have changed.
-  Future<NudgePlan> planHabit(String habitId) async {
-    final habit = await _habits.habitById(habitId);
-    if (habit == null) {
-      return const NudgePlan(
-        access: NotificationAccess.denied,
-        occasions: <PlannedOccasion>[],
-      );
-    }
-
-    final access = await _gateway.currentAccess();
-    final pending = access.canPost
-        ? await _gateway.pendingNotificationIds()
-        : const <int>{};
-    return NudgePlan(
-      access: access,
-      occasions: await _planHabit(
-        habit: habit,
-        access: access,
-        pending: pending,
-        queuedSoFar: pending.length,
-      ),
-    );
-  }
-
-  Future<List<PlannedOccasion>> _planHabit({
+  Future<_HabitPass> _planHabit({
     required Habit habit,
     required NotificationAccess access,
     required Set<int> pending,
@@ -186,10 +184,14 @@ class NudgeScheduler {
     // A paused habit expects nothing. Writing occasions through a pause would
     // put days the engine has agreed not to count into the denominator the
     // engine measures autonomy over.
-    if (habit.isPaused) return const <PlannedOccasion>[];
+    if (habit.isPaused) {
+      return _HabitPass(
+        occasions: const <PlannedOccasion>[],
+        queued: queuedSoFar,
+      );
+    }
 
-    final inputs = await _inputs.load(habit.id);
-    if (inputs == null) return const <PlannedOccasion>[];
+    final inputs = await _inputs.loadFor(habit);
 
     final now = _clock();
     final today = LocalDate.from(now);
@@ -231,6 +233,7 @@ class NudgeScheduler {
     }
 
     final planned = <PlannedOccasion>[];
+    final silent = <NudgeRecord>[];
     var queued = queuedSoFar;
 
     for (final occasion in occasions) {
@@ -270,7 +273,6 @@ class NudgeScheduler {
             decision: known.sent
                 ? const NudgeDecision.send()
                 : const NudgeDecision.suppress(NudgeSuppression.withheld),
-            isNew: false,
           ),
         );
         continue;
@@ -288,19 +290,37 @@ class NudgeScheduler {
       );
 
       final nudgeId = _newId();
-      // The row goes in **before** the notification is queued and regardless
-      // of what was decided. A crash between the two leaves an occasion the
-      // ledger honestly calls un-nudged; the other order leaves an occasion
-      // nobody recorded, which is the failure that cannot be detected.
-      await _nudges.saveNudge(
-        NudgeRecord(
-          id: nudgeId,
-          habitId: habit.id,
-          expectedOccasionAt: occasion.date.startOfDay,
-          sent: false,
-          scheduledFor: decision.shouldSend ? deliverAt : null,
-        ),
+      final row = NudgeRecord(
+        id: nudgeId,
+        habitId: habit.id,
+        expectedOccasionAt: occasion.date.startOfDay,
+        sent: false,
+        scheduledFor: decision.shouldSend ? deliverAt : null,
       );
+
+      // A row that will never be handed to the OS has nothing to be ordered
+      // against, so it joins the batch written at the end of the pass — which
+      // is most of them, since a backfill after a quiet week is all silence.
+      // A row that *is* about to be queued keeps the one ordering that
+      // matters: written **before** its notification, so a crash between the
+      // two leaves an occasion the ledger honestly calls un-nudged, rather
+      // than an occasion nobody recorded, which is the failure that cannot be
+      // detected.
+      if (!decision.shouldSend) {
+        silent.add(row);
+        planned.add(
+          PlannedOccasion(
+            nudgeId: nudgeId,
+            habitId: habit.id,
+            occasion: occasion,
+            decision: decision,
+          ),
+        );
+        priorOccasions++;
+        continue;
+      }
+
+      await _nudges.saveNudge(row);
 
       var sent = false;
       if (decision.shouldSend) {
@@ -321,10 +341,9 @@ class NudgeScheduler {
           nudgeId: nudgeId,
           habitId: habit.id,
           occasion: occasion,
-          decision: decision.shouldSend && !sent
-              ? const NudgeDecision.suppress(NudgeSuppression.deliveryPassed)
-              : decision,
-          isNew: true,
+          decision: sent
+              ? decision
+              : const NudgeDecision.suppress(NudgeSuppression.deliveryPassed),
         ),
       );
 
@@ -332,7 +351,12 @@ class NudgeScheduler {
       if (sent) priorSent++;
     }
 
-    return planned;
+    // One transaction for the silent majority, after the queued rows are
+    // safely down. Ordering between the two groups does not matter: a silent
+    // row has no notification to be inconsistent with.
+    if (silent.isNotEmpty) await _nudges.saveNudges(silent);
+
+    return _HabitPass(occasions: planned, queued: queued);
   }
 
   NudgeDecision _decide({
@@ -403,6 +427,21 @@ class NudgeScheduler {
       return false;
     }
   }
+}
+
+/// One habit's share of a planning pass.
+///
+/// Carries the running queue count back out rather than letting the caller
+/// recount decisions, because a decision that reads `send` is not the same
+/// thing as a notification the OS took — historical sent rows say `send` too,
+/// and counting those against the ceiling exhausted it from ledger history
+/// alone.
+@immutable
+class _HabitPass {
+  const _HabitPass({required this.occasions, required this.queued});
+
+  final List<PlannedOccasion> occasions;
+  final int queued;
 }
 
 /// A stable 31-bit notification id for a ledger row.

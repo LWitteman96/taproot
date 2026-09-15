@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logging/logging.dart';
 
@@ -49,21 +51,46 @@ final notificationGatewayProvider = Provider<NotificationGateway>((ref) {
 /// logged and the app carries on with no notifications, which is a mode it
 /// already handles.
 final notificationStartupProvider = FutureProvider<void>((ref) async {
+  final log = Logger('notificationStartup');
+  final scheduler = ref.watch(nudgeSchedulerProvider);
+
   try {
     final gateway = ref.watch(notificationGatewayProvider);
     await gateway.initialize();
 
-    // Before planning: an answer that cold-started the app reaches neither
-    // response callback, so this is the only moment it can be recorded. Ask
-    // first, so the plan that follows sees the ledger the user just changed.
+    // Awaited, because it is the only moment a cold-start answer can be
+    // recorded — neither response callback fires for the notification that
+    // launched the app — and because the screen behind it may show the habit
+    // it concerns.
     final launch = await gateway.launchResponse();
     if (launch != null) {
       await ref.read(nudgeResponseRecorderProvider).record(launch);
     }
 
-    await ref.watch(nudgeSchedulerProvider).planAll();
+    // **Not** awaited. A full pass is a per-habit history load, up to ~37
+    // ledger writes after a quiet week, and a platform call per queued nudge —
+    // and nothing on the first screen reads any of it. The doc above says a
+    // notification failure never gates the launch; the same has to hold for
+    // its latency. It stays in this chain rather than becoming a bare
+    // `unawaited` at the top, so the pass still runs after the launch answer
+    // is in the ledger and sees it.
+    // The one cost of not awaiting: a startup retry invalidates the database
+    // provider and closes the handle, which can land mid-pass. That surfaces
+    // here as a logged failure rather than a crash, and the retry's own pass
+    // replaces it — the ledger is rebuilt from the calendar every time, so a
+    // pass that dies half-written loses nothing that the next one will not
+    // write again.
+    unawaited(
+      scheduler.planAll().catchError((Object error, StackTrace stackTrace) {
+        log.severe('the launch re-plan did not finish', error, stackTrace);
+        return const NudgePlan(
+          access: NotificationAccess.denied,
+          occasions: <PlannedOccasion>[],
+        );
+      }),
+    );
   } catch (error, stackTrace) {
-    Logger('notificationStartup').severe(
+    log.severe(
       'notification scheduling is unavailable this launch',
       error,
       stackTrace,
@@ -115,6 +142,26 @@ Future<NotificationAccess> requestNotificationAccess(
       .read(notificationGatewayProvider)
       .requestAccess();
   container.invalidate(notificationAccessProvider);
-  await container.read(nudgeSchedulerProvider).planAll();
+
+  // The answer is known the moment the dialog closes; the re-plan is a habit
+  // list, full histories, ledger writes and platform calls. Awaiting it would
+  // stall the permission screen for a stretch proportional to how many habits
+  // the user has, after a dialog they have already dismissed. The ledger
+  // invariant does not depend on the caller waiting, and the pass owns its own
+  // failures.
+  unawaited(
+    container.read(nudgeSchedulerProvider).planAll().catchError((
+      Object error,
+      StackTrace stackTrace,
+    ) {
+      Logger(
+        'requestNotificationAccess',
+      ).severe('the post-permission re-plan did not finish', error, stackTrace);
+      return const NudgePlan(
+        access: NotificationAccess.denied,
+        occasions: <PlannedOccasion>[],
+      );
+    }),
+  );
   return access;
 }

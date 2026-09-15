@@ -42,22 +42,21 @@ Future<void> recordBackgroundNudgeResponse(
 }) async {
   final log = Logger('backgroundNudgeResponse');
 
-  final payload = NudgePayload.decode(raw.payload);
-  final action = NudgeActionIds.actionFor(raw.actionId);
-  if (payload == null || action == null) {
+  final answer = NudgeResponse.from(raw.payload, raw.actionId);
+  if (answer == null) {
     log.warning('unrecognised background response: ${raw.payload}');
     return;
   }
   // Opening a database to record that a notification was tapped, and then
   // doing nothing with it, would be the most expensive no-op in the app.
-  if (action == NudgeResponseAction.opened) return;
+  if (answer.action == NudgeResponseAction.opened) return;
 
   Database? database;
   try {
     database = await openDatabase();
     await NudgeResponseRecorder(
       nudges: LocalNudgeService(database: database),
-    ).record(NudgeResponse(payload: payload, action: action));
+    ).record(answer);
   } catch (error, stackTrace) {
     // Nothing above this catch has a screen to show, and the isolate is about
     // to end either way. A lost answer costs the ledger one confirm flag; a

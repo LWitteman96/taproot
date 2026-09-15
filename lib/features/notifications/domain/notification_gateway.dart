@@ -36,6 +36,22 @@ class ScheduledNudge {
 class NudgeResponse {
   const NudgeResponse({required this.payload, required this.action});
 
+  /// The one place a platform response becomes a domain value.
+  ///
+  /// Three call sites reach for this — the foreground callback, the background
+  /// isolate, and the cold-start launch details — and they must agree. A
+  /// second copy that missed the payload's next version would make an answer
+  /// given from the shade decode differently from the same answer given in the
+  /// app, silently and only for some users.
+  ///
+  /// Null when either half is unrecognised.
+  static NudgeResponse? from(String? payload, String? actionId) {
+    final decoded = NudgePayload.decode(payload);
+    final action = NudgeActionIds.actionFor(actionId);
+    if (decoded == null || action == null) return null;
+    return NudgeResponse(payload: decoded, action: action);
+  }
+
   final NudgePayload payload;
   final NudgeResponseAction action;
 

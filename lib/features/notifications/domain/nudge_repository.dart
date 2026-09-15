@@ -40,6 +40,21 @@ abstract class NudgeRepository {
   /// Throws [UnknownHabitException] if the habit is unknown or deleted.
   Future<void> saveNudge(NudgeRecord nudge);
 
+  /// Inserts or updates many, in one transaction.
+  ///
+  /// For the occasions a planning pass decided in bulk — which is most of
+  /// them, since a backfill after a quiet week is all silence. Same semantics
+  /// as [saveNudge] per row, including that a re-save restates the schedule
+  /// and never the outcome; it is the round trips that are batched, not the
+  /// rules.
+  ///
+  /// All or nothing: one bad row rolls the batch back, because a partially
+  /// written window is harder to reason about than an unwritten one that the
+  /// next pass will write again.
+  ///
+  /// Throws [UnknownHabitException] if the habit is unknown or deleted.
+  Future<void> saveNudges(Iterable<NudgeRecord> nudges);
+
   /// Every recorded occasion for the habit, oldest first.
   Future<List<NudgeRecord>> nudgesFor(String habitId);
 

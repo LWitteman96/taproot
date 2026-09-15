@@ -34,10 +34,20 @@ void main() {
 
   setUp(() => gateway = FakeNotificationGateway());
 
+  /// Lets the launch re-plan finish.
+  ///
+  /// Startup deliberately does not await `planAll()` — the first frame must not
+  /// wait on it — so the pass is still running when the test body ends. Without
+  /// this the container is disposed underneath it, the database closes
+  /// mid-query, and the failure surfaces as a confusing error from a pass
+  /// nobody was waiting for.
+  Future<void> settle() => pumpEventQueue();
+
   test('startup initialises the platform and plans', () async {
     final container = containerWith(gateway);
 
     await container.read(appStartupProvider.future);
+    await settle();
 
     expect(gateway.initializeCalls, 1);
   });
@@ -50,6 +60,7 @@ void main() {
         .read(habitServiceProvider)
         .saveHabit(testHabit(targetFrequency: 7, createdAt: DateTime.now()));
     await container.read(nudgeSchedulerProvider).planAll();
+    await settle();
 
     final ledger = await container
         .read(nudgeServiceProvider)
@@ -89,6 +100,7 @@ void main() {
       );
       container.invalidate(notificationStartupProvider);
       await container.read(appStartupProvider.future);
+      await settle();
       return container;
     }
 
@@ -126,6 +138,7 @@ void main() {
 
       container.invalidate(notificationStartupProvider);
       await container.read(appStartupProvider.future);
+      await settle();
 
       expect((await row(container)).confirmed, isFalse);
       expect((await row(container)).declined, isFalse);
@@ -139,6 +152,7 @@ void main() {
     final container = containerWith(_BrokenGateway());
 
     await expectLater(container.read(appStartupProvider.future), completes);
+    await settle();
   });
 
   test('access is read without prompting', () async {
@@ -148,6 +162,7 @@ void main() {
     final container = containerWith(gateway);
 
     await container.read(appStartupProvider.future);
+    await settle();
 
     expect(
       await container.read(notificationAccessProvider.future),

@@ -44,6 +44,19 @@ class LocalNotificationGateway implements NotificationGateway {
 
   bool _initialized = false;
 
+  /// The access this pass is scheduling against.
+  ///
+  /// Refreshed by [currentAccess] and [requestAccess], and read by [schedule].
+  /// Two reasons not to re-derive it per notification: on Android it is two
+  /// platform round trips each, so a pass queuing N nudges made ~2N redundant
+  /// channel calls — and, worse, the scheduler decided `canPost` from one
+  /// snapshot while the gateway scheduled against another taken moments later,
+  /// so a permission flip mid-pass left the ledger written against one state
+  /// and the notifications queued against a different one.
+  NotificationAccess _access = const NotificationAccess(
+    mode: NotificationMode.undecided,
+  );
+
   @override
   Future<void> initialize() async {
     if (_initialized) return;
@@ -106,20 +119,23 @@ class LocalNotificationGateway implements NotificationGateway {
   }
 
   void _handleResponse(NotificationResponse response) {
-    final payload = NudgePayload.decode(response.payload);
-    final action = NudgeActionIds.actionFor(response.actionId);
-    if (payload == null || action == null) {
+    final answer = NudgeResponse.from(response.payload, response.actionId);
+    if (answer == null) {
       _log.warning(
         'unrecognised notification response: '
         '${response.payload} / ${response.actionId}',
       );
       return;
     }
-    onResponse?.call(NudgeResponse(payload: payload, action: action));
+    onResponse?.call(answer);
   }
 
   @override
   Future<NotificationAccess> currentAccess() async {
+    return _access = await _readAccess();
+  }
+
+  Future<NotificationAccess> _readAccess() async {
     if (_isAndroid) {
       final android = _plugin
           .resolvePlatformSpecificImplementation<
@@ -154,32 +170,26 @@ class LocalNotificationGateway implements NotificationGateway {
   Future<NotificationAccess> requestAccess() async {
     await initialize();
 
+    // Prompt, then *read*. Deriving the result from the prompt's own return
+    // value duplicated `currentAccess` in full, and the copies had already
+    // drifted: iOS reports a provisional grant incorrectly here, while
+    // `checkPermissions` sees it. One derivation to maintain when the
+    // undecided-state mapping or macOS support arrives.
     if (_isAndroid) {
-      final android = _plugin
+      await _plugin
           .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin
-          >();
-      final granted = await android?.requestNotificationsPermission() ?? false;
-      return NotificationAccess(
-        mode: granted ? NotificationMode.granted : NotificationMode.denied,
-        exactAlarms: await _exactAlarmCapability(android),
-      );
+          >()
+          ?.requestNotificationsPermission();
+    } else if (_isIOS) {
+      await _plugin
+          .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin
+          >()
+          ?.requestPermissions(alert: true, badge: true, sound: true);
     }
 
-    if (_isIOS) {
-      final granted =
-          await _plugin
-              .resolvePlatformSpecificImplementation<
-                IOSFlutterLocalNotificationsPlugin
-              >()
-              ?.requestPermissions(alert: true, badge: true, sound: true) ??
-          false;
-      return NotificationAccess(
-        mode: granted ? NotificationMode.granted : NotificationMode.denied,
-      );
-    }
-
-    return const NotificationAccess(mode: NotificationMode.denied);
+    return currentAccess();
   }
 
   /// Exactness is never *requested*, only observed.
@@ -203,7 +213,6 @@ class LocalNotificationGateway implements NotificationGateway {
   @override
   Future<void> schedule(ScheduledNudge nudge) async {
     await initialize();
-    final access = await currentAccess();
 
     await _plugin.zonedSchedule(
       id: nudge.notificationId,
@@ -211,7 +220,7 @@ class LocalNotificationGateway implements NotificationGateway {
       body: nudge.checkIn.body,
       payload: nudge.payload.encode(),
       scheduledDate: timezone.TZDateTime.from(nudge.deliverAt, timezone.local),
-      androidScheduleMode: access.exactAlarms.allowsExact
+      androidScheduleMode: _access.exactAlarms.allowsExact
           ? AndroidScheduleMode.exactAllowWhileIdle
           : AndroidScheduleMode.inexactAllowWhileIdle,
       notificationDetails: NotificationDetails(
@@ -251,10 +260,7 @@ class LocalNotificationGateway implements NotificationGateway {
     if (details == null || !details.didNotificationLaunchApp) return null;
 
     final raw = details.notificationResponse;
-    final payload = NudgePayload.decode(raw?.payload);
-    final action = NudgeActionIds.actionFor(raw?.actionId);
-    if (payload == null || action == null) return null;
-    return NudgeResponse(payload: payload, action: action);
+    return NudgeResponse.from(raw?.payload, raw?.actionId);
   }
 
   @override

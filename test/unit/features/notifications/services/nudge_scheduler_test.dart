@@ -336,6 +336,52 @@ void main() {
       );
     });
 
+    test('history does not consume the ceiling', () async {
+      // The cap counts notifications the OS is holding, not decisions that
+      // read "send". Every historical sent row reports `send` too, so counting
+      // those against the ceiling let a few weeks of ledger exhaust it — and
+      // then suppressed every *real* future nudge as overCap, silently, with
+      // the ledger recording them as un-nudged.
+      //
+      // Three habits, because the miscount was in the *across-habit*
+      // accounting and it compounds: each habit's history inflated the budget
+      // the next one was handed. The clock has to be far enough past creation
+      // for that history to lie inside the planning window — occasions before
+      // a habit exists are not occasions, so a fresh habit has none to
+      // miscount.
+      final habits = <String>['habit-a', 'habit-b', 'habit-c'];
+      for (final id in habits) {
+        await saveHabit(id: id, name: 'Habit $id');
+      }
+      clock.now = dayAfterCreation(60, hour: 10);
+      for (final id in habits) {
+        await _seedNudgedHistory(store, id, clock.now);
+      }
+
+      // 31 sent rows plus 7 real future nudges each. Counting decisions rather
+      // than notifications, the running total read 38 after the first habit
+      // and 76 after the second — so by the third it was past the ceiling of
+      // 60, and every one of that habit's real nudges was suppressed as
+      // overCap and written to the ledger as un-nudged. Counting only what the
+      // OS actually took, the same pass ends at 21.
+      final plan = await scheduler.planAll();
+
+      expect(
+        plan.suppressedBy(NudgeSuppression.overCap),
+        isEmpty,
+        reason:
+            '21 queued notifications cannot reach a ceiling of '
+            '${EngineConstants.maximumPendingNudges}',
+      );
+      expect(
+        (await ledger('habit-c')).where(
+          (row) => row.sent && row.expectedOccasionAt.isAfter(clock.now),
+        ),
+        isNotEmpty,
+        reason: 'the last habit planned still gets its nudges',
+      );
+    });
+
     test('the pending-notification ceiling is reported, not silent', () async {
       await saveHabit();
       for (
@@ -530,7 +576,10 @@ Future<void> _seedNudgedHistory(
 ) async {
   final today = LocalDate.from(now);
   for (var offset = -EngineConstants.nudgeBackfillDays; offset <= 0; offset++) {
-    final id = 'seeded-$offset';
+    // Per habit: a shared id would have the second habit's seeding *update*
+    // the first habit's row and move it across, so every caller but the last
+    // would silently end up with no history at all.
+    final id = 'seeded-$habitId-$offset';
     await store.nudges.saveNudge(
       NudgeRecord(
         id: id,
