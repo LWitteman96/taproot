@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:logging/logging.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'package:taproot/app/logging/logging.dart';
 import 'package:taproot/app/router/app_router.dart';
 import 'package:taproot/app/startup/app_startup_widget.dart';
+import 'package:taproot/app/supabase/supabase_config.dart';
 import 'package:taproot/app/theme/themedata.dart';
 
 /// Shared bootstrap for every flavor entry point.
@@ -16,15 +20,44 @@ import 'package:taproot/app/theme/themedata.dart';
 ///
 /// What is still missing from this function, in the order §4 puts it:
 ///   SentryWidgetsFlutterBinding.ensureInitialized()  (enables frame tracking)
-///   await Supabase.initialize(url, anonKey)
 ///   SentryFlutter.init(appRunner: ...)
-/// Supabase and Sentry are omitted deliberately rather than stubbed: the .env
-/// files hold no credentials yet, and Supabase.initialize on an empty URL
-/// throws at launch. Add them alongside the first real backend call.
+/// Sentry is omitted deliberately rather than stubbed: no DSN exists yet, and
+/// a stub would be a second thing to remove later. Add it with the first real
+/// crash budget.
 Future<void> runMainApp() async {
   WidgetsFlutterBinding.ensureInitialized();
   setupLogging();
+  await _initialiseSupabase();
   runApp(const ProviderScope(child: TaprootApp()));
+}
+
+/// Brings up Supabase, if this flavor has a backend to bring up.
+///
+/// The conditional is not defensive coding — it is the difference between a
+/// flavor that runs and one that cannot start. Only `.env.dev` holds real
+/// credentials; stg and prod are placeholders until a remote project is
+/// provisioned, and `Supabase.initialize` on an empty URL throws before the
+/// first frame.
+///
+/// Skipping is safe in a way it would not be in most apps, because SQLite is
+/// the *primary* store rather than a cache: the app is fully usable with no
+/// backend at all, and what is lost is durable backup and cross-device sync.
+/// `SyncService` reports that as `SyncStatus.unavailable` rather than as a
+/// sync that is idle forever, so nothing tells the user their work is backed
+/// up when it is not.
+Future<void> _initialiseSupabase() async {
+  final config = SupabaseConfig.fromEnvironment(loadedEnvironment());
+  if (!config.isConfigured) {
+    Logger('Bootstrap').warning(
+      'no Supabase credentials for this flavor — starting without a backend. '
+      'The local store is primary, so the app works; nothing is backed up.',
+    );
+    return;
+  }
+  await Supabase.initialize(
+    url: config.url,
+    publishableKey: config.publishableKey,
+  );
 }
 
 class TaprootApp extends ConsumerWidget {
