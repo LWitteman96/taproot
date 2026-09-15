@@ -49,7 +49,7 @@ export 'package:sqflite/sqflite.dart'
 /// never a data migration.
 abstract final class AppSchema {
   /// Bump on every schema change, and add the matching step to [_upgrade].
-  static const int version = 2;
+  static const int version = 3;
 
   static const String habits = 'habits';
   static const String completions = 'completions';
@@ -57,6 +57,10 @@ abstract final class AppSchema {
   static const String nudges = 'nudges';
   static const String habitPauses = 'habit_pauses';
   static const String completionRetractions = 'completion_retractions';
+
+  /// Where the pull got to, per table. Sync's own bookkeeping rather than
+  /// user data — see the table's comment in [_create].
+  static const String syncCursors = 'sync_cursors';
 }
 
 /// Opens the database at [path], creating or upgrading the schema.
@@ -213,6 +217,27 @@ Future<void> _create(Database database, int version) async {
     )
   ''');
 
+  // Where an incremental pull got to, one row per table.
+  //
+  // **In the database rather than in shared_preferences, and that is the whole
+  // point of the choice.** The two can only disagree in one direction that
+  // matters: a cursor that outlives the rows it describes. Clear the app's
+  // data, keep the preference, and the next pull asks for everything written
+  // *after* a point that no longer has anything behind it — every row before
+  // it is skipped, silently and permanently. Keeping the cursor in the same
+  // file as the rows makes that impossible: they are wiped together.
+  //
+  // The opposite direction is harmless and deliberately so: lose the cursor,
+  // keep the rows, and the next pull starts from the beginning and re-upserts
+  // what is already there. Every table here is keyed so that costs time and
+  // changes nothing.
+  batch.execute('''
+    CREATE TABLE ${AppSchema.syncCursors} (
+      table_name TEXT PRIMARY KEY,
+      synced_through TEXT NOT NULL
+    )
+  ''');
+
   // Every engine window scans one habit's events in time order.
   batch.execute(
     'CREATE INDEX IF NOT EXISTS idx_completions_habit_completed_at '
@@ -262,6 +287,18 @@ Future<void> _upgrade(Database database, int from, int to) async {
       "THEN 'design' ELSE 'track' END "
       'WHERE journey IS NULL',
     );
+  }
+
+  if (from < 3) {
+    // Sync's pull cursor. Added as its own step rather than folded into the
+    // v2 block because an upgrade is cumulative: a device coming from v1 runs
+    // both, and a device already on v2 runs only this one.
+    await database.execute('''
+      CREATE TABLE IF NOT EXISTS ${AppSchema.syncCursors} (
+        table_name TEXT PRIMARY KEY,
+        synced_through TEXT NOT NULL
+      )
+    ''');
   }
 }
 
