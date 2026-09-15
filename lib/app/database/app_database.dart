@@ -29,6 +29,10 @@ export 'package:sqflite/sqflite.dart'
 ///   on the completion. Both ledgers stay insert-only, so merging two devices
 ///   is still a union — and a device replaying a completion it has not heard
 ///   was undone cannot resurrect it.
+/// - `habits.journey` is **recorded, not inferred**. A habit that arrived as
+///   Journey A and later had a discovered cue locked in is indistinguishable
+///   from a designed one by its columns, and the two populations behave
+///   differently under every engine metric.
 /// - `habits` has **no `paused_at` column**. Whether a habit is paused is the
 ///   existence of an open row in `habit_pauses`, so there is exactly one place
 ///   that fact lives. Storing it twice let a whole-row habit upsert clear the
@@ -45,7 +49,7 @@ export 'package:sqflite/sqflite.dart'
 /// never a data migration.
 abstract final class AppSchema {
   /// Bump on every schema change, and add the matching step to [_upgrade].
-  static const int version = 1;
+  static const int version = 2;
 
   static const String habits = 'habits';
   static const String completions = 'completions';
@@ -119,6 +123,8 @@ Future<void> _create(Database database, int version) async {
       plant_type TEXT NOT NULL,
       target_frequency INTEGER NOT NULL
         CHECK (target_frequency BETWEEN 1 AND 7),
+      journey TEXT NOT NULL CHECK (journey IN ('design', 'track')),
+      category TEXT,
       designed_cue TEXT,
       designed_cue_type TEXT,
       routine TEXT,
@@ -232,8 +238,31 @@ Future<void> _upgrade(Database database, int from, int to) async {
   // Steps are cumulative and each must be idempotent, so an upgrade that dies
   // half-way can simply be re-run. Use [ensureColumn] for column adds and
   // `CREATE INDEX IF NOT EXISTS` for indexes.
-  //
-  // if (from < 2) { await ensureColumn(database, AppSchema.habits, ...); }
+
+  if (from < 2) {
+    // Which journey a habit took, and what kind of habit it is. Neither can be
+    // recovered from anything else the app records: the category is only ever
+    // stated at creation, and the journey stops being inferable the moment a
+    // tracked habit locks in a cue it discovered through reflection.
+    //
+    // The columns arrive nullable and the journey is backfilled, because
+    // `ALTER TABLE ... ADD COLUMN ... NOT NULL` needs a default and a default
+    // here would be the silent guess this column exists to stop making. A
+    // freshly created database gets the NOT NULL and the CHECK; an upgraded one
+    // relies on `Habit.fromJson` rejecting an unrecognised journey.
+    await ensureColumn(database, AppSchema.habits, 'journey', 'TEXT');
+    await ensureColumn(database, AppSchema.habits, 'category', 'TEXT');
+
+    // The one place the inference the column replaces is still the right
+    // answer: for a row written before the distinction was recorded, a cue
+    // present at creation is all the evidence there is.
+    await database.rawUpdate(
+      "UPDATE ${AppSchema.habits} "
+      "SET journey = CASE WHEN designed_cue IS NOT NULL "
+      "THEN 'design' ELSE 'track' END "
+      'WHERE journey IS NULL',
+    );
+  }
 }
 
 /// Throws [UnknownHabitException] unless [habitId] names a live habit.

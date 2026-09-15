@@ -21,6 +21,136 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-15 — habit creation
+
+Branch: `feature/habit-creation`, on top of the completion tap.
+
+### Landed
+
+The placeholder shell is gone. Creation is a six-step flow over the repositories that already
+existed — no new store code, one schema migration:
+
+```
+lib/core/models/      habit_journey · habit_category   (+ two fields on habit)
+lib/features/habits/  controllers/habit_creation_controller
+                      domain/plant_choices · cue_suggestions
+                      pages/habit_creation_page
+                      widgets/creation_step · draft_text_field
+                              name_step · plant_step · rhythm_step
+                              cue_step · loop_step · review_step
+```
+
+name → plant → rhythm → cue → loop → review, with the cue and loop steps dropped for a tracked
+habit. The entry gate is no longer stubbed: it reads the habit count, so a user with nothing planted
+is sent to plant something, and the garden gained a way to plant another.
+
+`plantDemoHabit` went with it. Its own doc named habit creation as the trigger for deleting it, and
+with the gate live the empty garden it sat on is only transiently reachable — a dev-only button that
+almost nobody can now reach, standing next to a real one that does the same job properly.
+
+36 new tests on balance — the controller over a `ProviderContainer`, the flow driven end to end
+through the real app so that planting a habit is shown to land back on the garden, and the migration
+exercised against a hand-built version-1 database; less the five that went with the demo seed. The
+suite reports 505 passing, all three gates green.
+
+### Decided
+
+**There is no journey picker at the front door.** design-spec §2 is explicit that an app offering
+designing and tracking as equal-weight choices on the first screen "is a tracker with a designer
+bolted on", and that the opt-out must not be the path of least resistance. So the flow simply *is*
+the design flow, and *"I already do this — just track it"* is a text button on the cue step — the
+first step that asks for something a tracker would not, and the first place the user has seen what
+they would be opting out of. It stays reversible on the review step.
+
+**The journey is recorded, not inferred** — the open question §2 raises for this work. The inference
+("was a designed cue present at creation") is wrong the moment it matters: a Journey A habit that
+discovers a reliable cue and locks it in is exactly the graduation the spec wants to see, and by
+then its columns are indistinguishable from a designed habit's. Recording it costs one column.
+The inference survives once, as the version-2 backfill, which is the only place it is still the best
+available evidence.
+
+**`Habit.category` was added in the same migration**, which is a small scope call worth naming. The
+starter chip library filters the first reflection's chips by habit category (§0, §5.2), creation is
+the only moment that can state one, and the alternative was a second migration and a second pass
+over the same six screens later. It is nullable — the library backfills from its global pools (§6.1)
+— so a habit that fits none of the twelve is not forced into one.
+
+### The two new columns, precisely
+
+Written out in full because the server side of these does not exist yet: the Supabase schema in
+PR [#4](https://github.com/LWitteman96/taproot/pull/4) predates both columns, so a sync push of a
+habits row would fail against the server table until a migration adds them. That migration belongs
+to the sync branch; this is its specification.
+
+| Column | Local (SQLite) | Nullable | Allowed values |
+|---|---|---|---|
+| `journey` | `TEXT NOT NULL CHECK (journey IN ('design', 'track'))` | no | `design`, `track` |
+| `category` | `TEXT` | **yes** | the twelve below, or NULL |
+
+`category` carries **no** `CHECK` locally and should not gain one server-side without the same list
+on both, because the value set widens as the chip library does — it is the twelve authored
+categories in starter-chip-library.md §7 and nothing else:
+
+```
+exercise · meditation · reading · journaling · hydration · tidying
+languagePractice · instrument · stretching · supplements · walking · sleepRoutine
+```
+
+**An unknown `category` reads as null on device, and does not fail the row.** `Habit.fromJson` uses
+`readOpenEnum` for this column: a value outside the twelve decodes to null rather than throwing, so
+a habit synced down from a build that knows a category this one does not still opens. The
+alternative was disproportionate — a `FormatException` here fails `allHabits()`, which puts the
+entire garden into its unreadable state over one optional field whose spec says null is a supported
+answer. **Sync reconciliation should assume the device may hand back null for a category the server
+still holds**, and must not treat that as the user clearing it. `journey` is strict and stays
+strict: closed set, CHECKed on both sides, and an unknown value there really does mean the row
+cannot be trusted.
+
+**Two of those are camelCase, and that is load-bearing.** `languagePractice` and `sleepRoutine` are
+`Enum.name` values written verbatim by `encodeEnum`, so a server column that snake_cases them by
+convention will not round-trip — `readEnum` throws a `FormatException` naming the column rather than
+silently defaulting, which is the behaviour that makes the mismatch findable, not a reason to relax
+it.
+
+On upgrade rather than create, `journey` arrives nullable and is backfilled; `ALTER TABLE ... ADD
+COLUMN ... NOT NULL` needs a default, and a default here would be the silent guess the column exists
+to stop making.
+
+**Journey B requires all three of cue, routine and reward.** §2 defines the journey as writing the
+loop down; a design flow that lets two thirds of it go blank is the bolted-on tracker again. The way
+out is the opt-out, not a half-filled loop.
+
+**The gate waits on startup.** `habitServiceProvider` reads the database synchronously and throws
+until the store is open, so a gate resolved before then would report "no habits" on every cold start
+and send a user with a full garden into habit creation. `appGateResolverProvider` watches the
+startup future and awaits it inside the closure — watching so that a retried startup asks the gate
+again instead of serving the fail-safe it cached.
+
+### Left open
+
+- **The default weekly target is 3**, and it is a calibration question rather than a settled number:
+  `f` anchors every window in the engine, and an over-ambitious default is the front door to the
+  mismatched-target death spiral renegotiation exists to rescue (growth-engine §7). It lives in
+  `habit_creation_controller.dart`, deliberately *not* in `EngineConstants` — nothing in the engine
+  reads it, and bumping the constants version to change a form default would invalidate every cached
+  derivation for nothing.
+- **The plant catalogue is six placeholder ids.** design-spec §4 sends the art to a paid external
+  illustrator and says to treat the visuals as a slot until it lands, so `plant_choices.dart` is
+  plausible names and the words around them, and `Habit.plantType` stays a free string.
+- **The cue step offers examples, not ranked chips.** The starter chip library's surfacing rule (§5)
+  needs a completion and a time of day to rank against, and there is neither at creation. The
+  examples come straight from the taxonomy table in reflection-logic §4.
+- Editing a habit after creation does not exist. `saveHabit` is an upsert, so the store is ready for
+  it; the screen is not.
+
+### Next
+
+Supabase sync, per the build order — a pusher over the `pending_sync` column every table carries.
+Notifications and the nudge ledger are the stage after, and are unblocked now that habits have real
+cue types and target frequencies to schedule against.
+
+---
+
 ## 2026-09-15 — completion tap review and fixes
 
 Branch: `feature/completion-tap`, on top of the entry below. PR [#5](https://github.com/LWitteman96/taproot/pull/5).
