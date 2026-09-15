@@ -1,16 +1,21 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:taproot/app/database/database_provider.dart';
+import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 
 /// Everything that has to finish before the app can show its first screen.
 ///
-/// Guide §4's slot. It holds one step today — opening the local store — and is
-/// typed `<void>` because it will hold several: timezone database
-/// initialisation, the notification permission check, and scheduling the
-/// evening check-in all land here in later branches. Callers depend on "startup
-/// finished", never on what it returned.
+/// Guide §4's slot. Two steps: open the local store, then initialise the
+/// notification plugin and re-plan the evening check-ins. It is typed `<void>`
+/// because callers depend on "startup finished", never on what it returned.
+///
+/// The order is not arbitrary — planning reads the ledger, so the store has to
+/// be open first. Nor is the asymmetry in how they fail: a store that will not
+/// open gets an error screen with a retry, and a notification platform that
+/// will not initialise does not, because the app is fully usable without it.
 final appStartupProvider = FutureProvider<void>((ref) async {
   await ref.watch(openedDatabaseProvider.future);
+  await ref.watch(notificationStartupProvider.future);
 });
 
 /// Re-runs startup from the top.
@@ -32,5 +37,6 @@ final appStartupProvider = FutureProvider<void>((ref) async {
 /// belongs here too.
 void retryAppStartup(ProviderContainer container) {
   container.invalidate(openedDatabaseProvider);
+  container.invalidate(notificationStartupProvider);
   container.invalidate(appStartupProvider);
 }

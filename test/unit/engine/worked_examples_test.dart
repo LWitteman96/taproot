@@ -238,7 +238,11 @@ void main() {
       expect(growth.isShallowRooted, isFalse);
       expect(growth.isRenegotiationCandidate, isFalse);
       expect(growth.isGraduated, isFalse);
-      expect(growth.constantsVersion, 1);
+      // Written out rather than read off EngineConstants, which would assert
+      // nothing. 2 since the notification block joined the constants: the
+      // occasion cadence decides which dates autonomy is counted over, so it
+      // is a derivation input like any θ.
+      expect(growth.constantsVersion, 2);
     });
 
     test('a Seed habit reports the Seedling window, not a phantom one', () {

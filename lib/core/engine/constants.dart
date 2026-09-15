@@ -63,7 +63,12 @@ class DroopProfile {
 abstract final class EngineConstants {
   /// Bump on any change below. Cached derivations keyed by an older version
   /// are invalid and must be recomputed, never migrated.
-  static const int version = 1;
+  ///
+  /// 2 — the notification scheduling block. It is not decoration: the occasion
+  /// cadence decides *which* local dates are expected occasions, and those are
+  /// the rows autonomy's denominator is counted over. Changing the cadence
+  /// changes a derivation.
+  static const int version = 2;
 
   // ── Inputs ────────────────────────────────────────────────────────────────
 
@@ -231,4 +236,42 @@ abstract final class EngineConstants {
 
   /// Confirmation framing takes over from Discovery above this convergence.
   static const double confirmationConvergenceThreshold = 0.6;
+
+  // ── Notification scheduling (reflection spec §1, guide §14) ───────────────
+  //
+  // Owned by the notifications feature; here for the same reason the
+  // reflection block is — one home for every tunable.
+
+  /// The evening check-in slot, on the local wall clock. Reflection and the
+  /// next-day nudge are one notification (reflection spec §1), so this is the
+  /// hour both arrive at.
+  static const int eveningCheckInHour = 20;
+  static const int eveningCheckInMinute = 0;
+
+  /// How far ahead of its occasion a nudge is delivered. 1 — the evening
+  /// before, which is what makes the nudge a *rehearsal* of tomorrow's cue
+  /// rather than a reminder of a deadline (growth spec §6).
+  static const int nudgeLeadDays = 1;
+
+  /// How far ahead occasions are planned and notifications are queued.
+  ///
+  /// Short on purpose. Planning freezes the send/withhold decision against the
+  /// stage the habit is at *now*, so a long horizon would keep nudging at a
+  /// faded-out rate long after the plant climbed a rung — or the reverse.
+  static const int nudgeHorizonDays = 7;
+
+  /// How far back a planning pass will write occasions that nobody was around
+  /// to schedule — the phone was off, or the app was not opened for a week.
+  ///
+  /// Those rows are real un-nudged occasions and belong in the denominator,
+  /// but an unbounded backfill would re-derive a year of history on a launch.
+  static const int nudgeBackfillDays = 30;
+
+  /// Ceiling on notifications queued at once, across all habits.
+  ///
+  /// iOS keeps only the 64 soonest pending notifications and silently drops
+  /// the rest, so the cap is ours to enforce with something left over — an
+  /// app that hits the platform limit loses the *furthest out* nudges without
+  /// being told.
+  static const int maximumPendingNudges = 60;
 }
