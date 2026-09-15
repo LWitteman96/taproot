@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:taproot/app/database/app_database.dart';
+import 'package:taproot/core/models/habit.dart';
+import 'package:taproot/core/models/habit_journey.dart';
 
 import '../../../utils/store_fixtures.dart';
 
@@ -58,6 +60,7 @@ void main() {
           'name',
           'identity_statement',
           'plant_type',
+          'journey',
           'target_frequency',
           'designed_cue',
           'designed_cue_type',
@@ -91,6 +94,7 @@ void main() {
               'name': 'Run',
               'plant_type': 'oak',
               'target_frequency': frequency,
+              'journey': 'design',
               'created_at': '2026-01-05T08:00:00.000Z',
               'updated_at': '2026-01-05T08:00:00.000Z',
               'pending_sync': 1,
@@ -210,6 +214,7 @@ void main() {
         'name': 'Run',
         'plant_type': 'oak',
         'target_frequency': 3,
+        'journey': 'design',
         'created_at': '2026-01-05T08:00:00.000Z',
         'updated_at': '2026-01-05T08:00:00.000Z',
         'pending_sync': 1,
@@ -319,6 +324,7 @@ void main() {
         'name': 'Run',
         'plant_type': 'oak',
         'target_frequency': 3,
+        'journey': 'design',
         'created_at': '2026-01-05T08:00:00.000Z',
         'updated_at': '2026-01-05T08:00:00.000Z',
         'pending_sync': 1,
@@ -333,6 +339,134 @@ void main() {
 
       expect(await second.query(AppSchema.habits), hasLength(1));
       expect(await second.getVersion(), AppSchema.version);
+    });
+
+    group('version 2 — journey and category', () {
+      /// A database as version 1 left it: no journey, no category.
+      Future<Database> openVersionOne(String path) {
+        sqfliteFfiInit();
+        return databaseFactoryFfi.openDatabase(
+          path,
+          options: OpenDatabaseOptions(
+            version: 1,
+            onCreate: (database, version) => database.execute('''
+              CREATE TABLE ${AppSchema.habits} (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                identity_statement TEXT,
+                plant_type TEXT NOT NULL,
+                target_frequency INTEGER NOT NULL
+                  CHECK (target_frequency BETWEEN 1 AND 7),
+                designed_cue TEXT,
+                designed_cue_type TEXT,
+                routine TEXT,
+                reward TEXT,
+                created_at TEXT NOT NULL,
+                graduated_at TEXT,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT,
+                pending_sync INTEGER NOT NULL DEFAULT 0
+              )
+            '''),
+          ),
+        );
+      }
+
+      Future<Map<String, Object?>> upgradeWithCue(String? designedCue) async {
+        final directory = await Directory.systemTemp.createTemp('taproot_v1');
+        addTearDown(() => directory.delete(recursive: true));
+        final path = p.join(directory.path, 'taproot.db');
+
+        final old = await openVersionOne(path);
+        await old.insert(AppSchema.habits, <String, Object?>{
+          'id': 'habit-1',
+          'name': 'Run',
+          'plant_type': 'oak',
+          'target_frequency': 3,
+          'designed_cue': designedCue,
+          'created_at': '2026-01-05T08:00:00.000Z',
+          'updated_at': '2026-01-05T08:00:00.000Z',
+          'pending_sync': 1,
+        });
+        await old.close();
+
+        final upgraded = await openAppDatabase(
+          databaseFactory: databaseFactoryFfi,
+          path: path,
+        );
+        addTearDown(upgraded.close);
+
+        expect(await upgraded.getVersion(), AppSchema.version);
+        return (await upgraded.query(AppSchema.habits)).single;
+      }
+
+      test('backfills the journey from the cue, and only then', () async {
+        // The inference the column exists to replace, used once, where it is
+        // still the only evidence available: a row written before the
+        // distinction was recorded.
+        expect((await upgradeWithCue('after breakfast'))['journey'], 'design');
+        expect((await upgradeWithCue(null))['journey'], 'track');
+      });
+
+      test('leaves the category null rather than guessing one', () async {
+        // Nothing in a version-1 row says what kind of habit it is, and the
+        // chip library backfills from its global pools for a habit with no
+        // category (starter-chip-library.md §6.1). A guess here would be a
+        // miscategorised first reflection forever.
+        expect((await upgradeWithCue('after breakfast'))['category'], isNull);
+      });
+
+      test('an upgraded row reads back as a Habit', () async {
+        // The upgrade and Habit.fromJson have to agree, or the migration
+        // "succeeds" and every read throws.
+        final row = await upgradeWithCue('after breakfast');
+
+        expect(Habit.fromJson(row).journey, HabitJourney.design);
+      });
+
+      test('re-running the upgrade step changes nothing', () async {
+        final directory = await Directory.systemTemp.createTemp('taproot_v1');
+        addTearDown(() => directory.delete(recursive: true));
+        final path = p.join(directory.path, 'taproot.db');
+
+        final old = await openVersionOne(path);
+        await old.insert(AppSchema.habits, <String, Object?>{
+          'id': 'habit-1',
+          'name': 'Run',
+          'plant_type': 'oak',
+          'target_frequency': 3,
+          'created_at': '2026-01-05T08:00:00.000Z',
+          'updated_at': '2026-01-05T08:00:00.000Z',
+          'pending_sync': 1,
+        });
+        await old.close();
+
+        final first = await openAppDatabase(
+          databaseFactory: databaseFactoryFfi,
+          path: path,
+        );
+        // A habit created after the upgrade, then a second pass over the same
+        // database: the backfill must not reach a row that already has an
+        // answer, and the column adds must not throw on a re-entry.
+        await first.update(
+          AppSchema.habits,
+          <String, Object?>{'journey': 'design'},
+          where: 'id = ?',
+          whereArgs: <Object?>['habit-1'],
+        );
+        await first.close();
+
+        final second = await openAppDatabase(
+          databaseFactory: databaseFactoryFfi,
+          path: path,
+        );
+        addTearDown(second.close);
+
+        expect(
+          (await second.query(AppSchema.habits)).single['journey'],
+          'design',
+        );
+      });
     });
   });
 }
