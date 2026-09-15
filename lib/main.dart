@@ -5,6 +5,7 @@ import 'package:taproot/app/logging/logging.dart';
 import 'package:taproot/app/router/app_router.dart';
 import 'package:taproot/app/startup/app_startup_widget.dart';
 import 'package:taproot/app/theme/themedata.dart';
+import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
 
 /// Shared bootstrap for every flavor entry point.
 ///
@@ -32,6 +33,14 @@ class TaprootApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Watched, not read, and watched *here* because this widget outlives every
+    // screen. Riverpod 3 pauses a provider whose listeners are all paused —
+    // and one nobody listens to is in that set — so a lifecycle listener
+    // parked in a provider nothing watches never fires, and the app would go
+    // on believing it may post notifications after the user switched them off
+    // in system settings.
+    ref.watch(notificationAccessRefreshProvider);
+
     return MaterialApp.router(
       title: 'Taproot',
       // State restoration, so an in-progress reflection check-in survives

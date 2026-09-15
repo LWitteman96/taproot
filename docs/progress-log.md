@@ -21,6 +21,91 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-15 — the notification invitation
+
+Branch: `feature/notification-onboarding`, off `develop`.
+
+### Landed
+
+The one moment the app asks for notification permission, and the machinery that keeps the answer
+honest afterwards.
+
+```
+lib/features/notifications/domain/     notification_invitation — the store interface
+lib/features/notifications/services/   preferences_invitation_store
+lib/features/notifications/pages/      notification_invitation_page
+lib/features/notifications/providers/  notification_onboarding_providers — store, newest habit,
+                                       the lifecycle refresh
+lib/app/router/app_router.dart         AppGate gains notificationsOffered; the invitation route
+lib/main.dart                          watches the lifecycle refresh
+```
+
+20 new tests — 633 in total. Three gates green.
+
+### Decided
+
+- **The beat is after the first habit, not at launch.** The user has just finished writing a cue,
+  and what is being asked for is permission to rehearse that exact cue back to them tomorrow
+  evening. Asked on first launch it is a system dialog about an app you have not used yet, and the
+  only honest answer is no. It falls out of the router rather than being wired into habit creation:
+  planting leaves for the garden, lands on the root path, and the gate sends them on — so habit
+  creation does not have to know the invitation exists.
+- **The screen shows the real notification.** The preview is built by `composeEveningCheckIn`, the
+  same function the scheduler uses, so the screen cannot promise something the app does not send.
+- **The question is put once.** Recorded for both answers, and *before* the platform dialog
+  resolves, so dismissing the system prompt without answering does not bring the screen back on the
+  next launch. An app that nags for permission to nudge is arguing with its own thesis.
+- **The app keeps its own record, in `SharedPreferences`, and it must not sync.** The platform
+  cannot answer "have we asked" — Android reports the same "not enabled" for a refusal and for a
+  question never put. It stays device-local because permission is granted per install: a row that
+  rode along with the habits would arrive on a new phone claiming a question had been answered
+  there when it had not, and that user would never be offered notifications at all. What it does
+  *not* record is the answer; that lives with the platform, which is the only copy that stays true
+  when someone changes their mind in settings.
+- **A refusal ends in a designed screen, not an error.** No warning colour, no retry, no trip to
+  system settings — it says what still works and gets out of the way. Asserted, including the
+  absence of an error icon.
+- **The two halves of the fail-safe gate fail in opposite directions.** Habit creation is somewhere
+  to *be*, so an unresolved gate sends you there; the invitation is somewhere to be *asked*, and a
+  failed read is no reason to put a permission request in front of someone who may have answered it
+  already.
+- **A denied pass no longer plans days that have not happened.** This is a change to the scheduler
+  that PR #7 merged, and it is the fix for a gap this branch surfaced: with the old behaviour, a
+  user who declined had the next seven days written as un-nudged immediately, so turning
+  notifications on in settings bought a week of silence — and those days counted in autonomy's
+  denominator as evidence the habit stood on its own, over occasions the app never had permission
+  to nudge. Occasions already past are still recorded, because no notification reached the user and
+  that much is true. A future row earns nothing by existing early: autonomy only counts rows whose
+  date has passed, and anything that slips by unrecorded is picked up by the backfill.
+- **Resume does work, not just noticing.** Revocation is what the lifecycle listener exists for,
+  but the mirror case needs more than a refreshed value: a user who switched notifications *on* has
+  occasions recorded with nothing queued against them, so the resume re-plans as well as
+  invalidating. Planning is idempotent, so a resume that changed nothing writes nothing.
+- **`TaprootApp` watches the lifecycle provider rather than reading it.** Riverpod 3 pauses a
+  provider whose listeners are all paused, and one nobody listens to is in that set — so a
+  lifecycle listener parked in an unwatched provider never fires. There is a test that fails if the
+  watch is ever traded for a read.
+
+### Left open
+
+- **No settings screen.** Turning notifications back on is a trip to system settings, which the app
+  names but does not link to. A settings surface — with the access state, an `openAppSettings`
+  link, and the check-in hour — is its own piece of work.
+- **The invitation is never re-offered**, deliberately. If retention data later argues for asking a
+  second time, the record is one boolean and the beat is one line in `redirectFor`; the argument
+  should be made on data rather than assumed now.
+- **Past occasions recorded while permission was denied still count as un-nudged.** Carried forward
+  from the notifications branch: telling "the engine chose silence" from "the app was not allowed to
+  speak" needs a column the schema does not have. The window change above shrinks the exposure to
+  days that actually elapsed, but does not close it.
+- **The permission prompt's own copy is untested against real users.** Reflection spec §8's
+  calibration questions have a sibling here: whether the offer converts better before or after the
+  first watering is a question about a screen nobody has used yet.
+
+### Next
+
+Reflection check-in, or the settings surface the two Left-opens above both point at.
+
 ## 2026-09-15 — notification scheduling and the nudge ledger
 
 Branch: `feature/notifications`, off `develop`, with the completion tap (PR #5) merged in.

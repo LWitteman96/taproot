@@ -306,10 +306,11 @@ void main() {
       // not, so the engine keeps its inputs.
       gateway.grant(NotificationAccess.denied);
       await saveHabit();
+      clock.now = dayAfterCreation(14);
 
       final plan = await scheduler.planAll();
 
-      expect(await ledger(), hasLength(EngineConstants.nudgeHorizonDays + 1));
+      expect(await ledger(), hasLength(15));
       expect(gateway.queued, isEmpty);
       expect(
         plan.suppressedBy(NudgeSuppression.noPermission),
@@ -319,6 +320,48 @@ void main() {
             'choosing',
       );
       expect(plan.withheld, isEmpty);
+    });
+
+    test('but it does not decide days that have not happened', () async {
+      // The occasions it records are the ones already past: no notification
+      // reached the user, which is the truth autonomy is counted on. Days
+      // still ahead are left alone, because permission is one settings trip
+      // from changing and a week decided in advance against a user who then
+      // grants it is a week of silence they never chose — measured, worse, as
+      // evidence their habit stands on its own.
+      gateway.grant(NotificationAccess.denied);
+      await saveHabit();
+      clock.now = dayAfterCreation(14);
+
+      await scheduler.planAll();
+
+      expect(
+        (await ledger()).where(
+          (row) => row.expectedOccasionAt.isAfter(clock.now),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('and a later grant finds those days still open', () async {
+      // The other half of the same decision, and the reason it matters: a user
+      // who turns notifications on in settings gets nudges from the next
+      // occasion, not after the horizon already written against them expires.
+      gateway.grant(NotificationAccess.denied);
+      await saveHabit();
+      clock.now = dayAfterCreation(14);
+      await scheduler.planAll();
+
+      gateway.grant(const NotificationAccess(mode: NotificationMode.granted));
+      await scheduler.planAll();
+
+      expect(gateway.queued, isNotEmpty);
+      expect(
+        (await ledger()).where(
+          (row) => row.sent && row.expectedOccasionAt.isAfter(clock.now),
+        ),
+        isNotEmpty,
+      );
     });
 
     test('a refused notification leaves the row honestly un-sent', () async {
