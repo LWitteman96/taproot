@@ -204,11 +204,29 @@ class NudgeScheduler {
     };
 
     final windowStart = today.addDays(-EngineConstants.nudgeBackfillDays);
+
+    // **Without permission the pass stops at today.** Occasions that have
+    // already passed are recorded either way — no notification reached the
+    // user, and that is the truth autonomy is counted on. Occasions still
+    // *ahead* are a different matter: writing them now would commit days that
+    // have not happened to "un-nudged" on the strength of a permission state
+    // that is one settings trip away from changing. A user who grants
+    // notifications tomorrow would find the week already decided against them,
+    // silently, and their autonomy measured over occasions the app never had
+    // permission to nudge.
+    //
+    // A future occasion's row earns nothing by existing early: autonomy only
+    // counts rows whose date has passed, and any occasion that slips by
+    // unrecorded is picked up by the backfill above.
+    final windowEnd = access.canPost
+        ? today.addDays(EngineConstants.nudgeHorizonDays)
+        : today;
+
     final occasions = expectedOccasionsBetween(
       createdAt: habit.createdAt,
       targetFrequency: habit.targetFrequency,
       from: windowStart,
-      to: today.addDays(EngineConstants.nudgeHorizonDays),
+      to: windowEnd,
       pauses: inputs.pauses,
     );
 
@@ -380,11 +398,15 @@ class NudgeScheduler {
     if (!wouldSend) {
       return const NudgeDecision.suppress(NudgeSuppression.withheld);
     }
-    if (!deliverAt.isAfter(now)) {
-      return const NudgeDecision.suppress(NudgeSuppression.deliveryPassed);
-    }
+    // Permission before timing, because it is the more useful of two true
+    // answers: every occasion a denied pass records has also missed its
+    // evening, and "we were not allowed to" explains that whole pass, while
+    // "its evening passed" explains only the clock.
     if (!access.canPost) {
       return const NudgeDecision.suppress(NudgeSuppression.noPermission);
+    }
+    if (!deliverAt.isAfter(now)) {
+      return const NudgeDecision.suppress(NudgeSuppression.deliveryPassed);
     }
     if (queued >= EngineConstants.maximumPendingNudges) {
       return const NudgeDecision.suppress(NudgeSuppression.overCap);

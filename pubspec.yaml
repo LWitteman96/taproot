@@ -70,6 +70,12 @@ dev_dependencies:
   riverpod_lint: ^3.0.3
 
   # Test harness (guide §10).
+  #
+  # shared_preferences_platform_interface is transitive, and declared here on
+  # purpose: its InMemorySharedPreferencesAsync is the documented way to test
+  # code over SharedPreferences, and importing it without declaring it is a
+  # dependency the analyzer is right to object to.
+  shared_preferences_platform_interface: ^2.4.1
   mocktail: ^1.0.4
   mock_supabase_http_client: ^0.0.3+2
   sqflite_common_ffi: ^2.4.0+2

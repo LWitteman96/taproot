@@ -9,6 +9,8 @@ import 'package:taproot/features/garden/pages/garden_page.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/pages/habit_creation_page.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
+import 'package:taproot/features/notifications/pages/notification_invitation_page.dart';
+import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
 import 'package:taproot/main.dart';
 
 import '../../utils/fake_repositories.dart';
@@ -18,10 +20,17 @@ import '../../utils/store_fixtures.dart';
 Widget appWith({
   Future<AppGate> Function()? gateResolver,
   HabitRepository? habits,
+  // Defaults to *already offered*, so that every test about some other part of
+  // the router is not also a test about the notification invitation. The two
+  // tests that are about it say so.
+  bool notificationsOffered = true,
 }) => ProviderScope(
   overrides: [
     databaseOpenerProvider.overrideWithValue(openTestDatabaseInWidgetTest),
     if (habits != null) habitServiceProvider.overrideWithValue(habits),
+    notificationInvitationStoreProvider.overrideWithValue(
+      FakeNotificationInvitationStore(offered: notificationsOffered),
+    ),
     if (gateResolver != null)
       appGateResolverProvider.overrideWithValue(gateResolver),
   ],
@@ -44,6 +53,28 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(GardenPage), findsOneWidget);
+    });
+
+    testWidgets('offers the notification invitation after the first habit', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        appWith(habits: await plantedStore(), notificationsOffered: false),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NotificationInvitationPage), findsOneWidget);
+      expect(find.byType(GardenPage), findsNothing);
+    });
+
+    testWidgets('and never offers it before there is a habit', (tester) async {
+      // A permission request about nothing is an interrogation. The user is
+      // sent to plant something first.
+      await tester.pumpWidget(appWith(notificationsOffered: false));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(HabitCreationPage), findsOneWidget);
+      expect(find.byType(NotificationInvitationPage), findsNothing);
     });
 
     testWidgets('sends a user with nothing planted in to plant one', (

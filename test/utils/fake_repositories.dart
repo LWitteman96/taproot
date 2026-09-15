@@ -9,6 +9,7 @@ import 'package:taproot/core/utils/local_dates.dart';
 import 'package:taproot/features/habits/domain/completion_repository.dart';
 import 'package:taproot/features/habits/domain/completion_retraction.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
+import 'package:taproot/features/notifications/domain/notification_invitation.dart';
 import 'package:taproot/features/notifications/domain/nudge_repository.dart';
 import 'package:taproot/features/reflection/domain/reflection_repository.dart';
 
@@ -317,6 +318,26 @@ class FakeNudgeService implements NudgeRepository {
     final existing = _nudges[nudgeId];
     if (existing == null) throw UnknownNudgeException(nudgeId);
     _nudges[nudgeId] = change(existing);
+  }
+}
+
+/// The invitation record, in memory.
+///
+/// `offered` is public so a test can set up "already asked" without having to
+/// drive the screen that asks.
+class FakeNotificationInvitationStore implements NotificationInvitationStore {
+  FakeNotificationInvitationStore({this.offered = false});
+
+  bool offered;
+  int markCalls = 0;
+
+  @override
+  Future<bool> hasBeenOffered() async => offered;
+
+  @override
+  Future<void> markOffered() async {
+    markCalls++;
+    offered = true;
   }
 }
 

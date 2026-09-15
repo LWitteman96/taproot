@@ -24,6 +24,7 @@ Update this file in the same commit as the work it describes.
 | **Habit creation** (`lib/features/habits/`) | **Built — the design flow, the tracking opt-out, plant choice, and a live entry gate** |
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
+| **Notification permission** | **Built — the invitation after the first habit, denial as a mode, resume-aware** |
 | Reflection check-in and chips | Not started |
 | Garden rendering | Not started (blocked on external illustrator) |
 | Insight surfacing | Not started |
@@ -45,10 +46,10 @@ sent to plant something and only then gets a garden. The debug-only dev-flavor s
 to stand on the empty garden has been **removed**: the real flow supersedes it, and with the gate
 live the screen it sat on is only transiently reachable.
 
-The notification permission prompt is wired but not *placed* — nothing calls
-`requestNotificationAccess` yet, because onboarding is where it belongs and onboarding does not
-exist, so a real device runs in the denied mode until it does. Occasions are still recorded in that
-mode, so the engine keeps its inputs either way.
+The notification permission prompt is now placed: it is offered once, on the beat after the first
+habit is planted, and never again. Occasions are still recorded when it is declined, so the engine
+keeps its inputs either way — but only for days that have already passed, so a later change of mind
+in system settings finds the coming week still open.
 
 What the **backend** does not include, deliberately: any Dart that talks to it. There is no
 `supabaseClientProvider`, no remote service behind the repository interfaces and no sync — that is
