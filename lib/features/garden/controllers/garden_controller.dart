@@ -17,7 +17,6 @@ import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/habits/services/habit_inputs_loader.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
-import 'package:taproot/features/notifications/services/nudge_scheduler.dart';
 
 /// The garden: every habit, and what the engine derives for it.
 ///
@@ -31,7 +30,6 @@ class GardenController extends Notifier<GardenState> {
   late final HabitRepository _habits;
   late final CompletionRepository _completions;
   late final HabitInputsLoader _loader;
-  late final NudgeScheduler _nudges;
   late final DateTime Function() _clock;
   late final String Function() _newId;
 
@@ -40,7 +38,6 @@ class GardenController extends Notifier<GardenState> {
     _habits = ref.read(habitServiceProvider);
     _completions = ref.read(completionServiceProvider);
     _loader = ref.read(habitInputsLoaderProvider);
-    _nudges = ref.read(nudgeSchedulerProvider);
     _clock = ref.read(clockProvider);
     _newId = ref.read(newIdProvider);
 
@@ -285,9 +282,13 @@ class GardenController extends Notifier<GardenState> {
   /// nudges already planned. What it does do is roll the horizon forward for a
   /// garden left open across days, and catch up a habit whose occasions nobody
   /// had planned yet.
+  /// The scheduler is resolved here rather than in `build` on purpose: reading
+  /// it up front would make every garden depend on the notification stack being
+  /// buildable, so a failure over there would take the completion tap down with
+  /// it — which is the one thing that must never happen.
   Future<void> _replanNudges(String habitId) async {
     try {
-      await _nudges.planHabit(habitId);
+      await ref.read(nudgeSchedulerProvider).planHabit(habitId);
     } catch (error, stackTrace) {
       _log('replan', 'the nudges for $habitId were not re-planned: $error');
       dev.log('$stackTrace', name: 'GardenController');

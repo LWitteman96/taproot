@@ -2,6 +2,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:taproot/app/database/app_database.dart';
 import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/models/habit.dart';
+import 'package:taproot/core/models/habit_category.dart';
+import 'package:taproot/core/models/habit_journey.dart';
 
 /// A clock the tests move by hand.
 ///
@@ -52,6 +54,8 @@ Habit testHabit({
   String name = 'Morning run',
   String plantType = 'oak',
   int targetFrequency = 3,
+  HabitJourney journey = HabitJourney.design,
+  HabitCategory? category = HabitCategory.exercise,
   DateTime? createdAt,
   String? identityStatement = 'I am someone who runs',
   String? designedCue = 'after breakfast',
@@ -65,6 +69,8 @@ Habit testHabit({
   name: name,
   plantType: plantType,
   targetFrequency: targetFrequency,
+  journey: journey,
+  category: category,
   createdAt: createdAt ?? DateTime(2026, 1, 5, 9),
   identityStatement: identityStatement,
   designedCue: designedCue,

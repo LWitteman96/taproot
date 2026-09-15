@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:taproot/core/models/habit_journey.dart';
 import 'package:taproot/core/utils/local_dates.dart';
 import 'package:taproot/features/notifications/domain/evening_check_in.dart';
 import 'package:taproot/features/notifications/domain/expected_occasions.dart';
@@ -27,10 +28,17 @@ void main() {
   test(
     'a habit with no designed cue gets the plain form, not an invented cue',
     () {
-      // Inventing one would be the app putting words in the user's mouth about
-      // the single field the whole product is built on.
+      // A *tracked* habit — Journey A, design-spec §2 — which is the whole
+      // reason a habit can reach the scheduler with no cue. Inventing one
+      // would be the app putting words in the user's mouth about the single
+      // field the product is built on, and for this user it would be putting
+      // them there about a loop he explicitly declined to design.
       final checkIn = composeEveningCheckIn(
-        habit: testHabit(designedCue: null, designedCueType: null),
+        habit: testHabit(
+          journey: HabitJourney.track,
+          designedCue: null,
+          designedCueType: null,
+        ),
         occasion: occasion,
       );
 

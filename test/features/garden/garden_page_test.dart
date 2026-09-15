@@ -165,16 +165,17 @@ void main() {
       expect(find.byType(PlantCard), findsNothing);
     });
 
-    testWidgets('the dev seed puts a plant in the garden', (tester) async {
+    testWidgets('an empty garden offers the flow that fills it', (
+      tester,
+    ) async {
+      // The dev seed button that used to sit here is gone: habit creation is
+      // real, and the entry gate now sends a user with nothing planted
+      // straight into it.
       final harness = PageHarness();
       await tester.pumpWidget(harness.app);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text(GardenPage.seedLabel));
-      await tester.pumpAndSettle();
-
-      expect(find.byType(PlantCard), findsOneWidget);
-      expect(find.text('Morning walk'), findsOneWidget);
+      expect(find.text(GardenPage.plantLabel), findsOneWidget);
     });
 
     testWidgets('holding waters the plant and it grows in place', (

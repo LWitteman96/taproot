@@ -161,4 +161,43 @@ void main() {
       );
     });
   });
+
+  group('readOpenEnum', () {
+    test('reads a value it knows', () {
+      expect(
+        readOpenEnum(
+          <String, Object?>{'stage': 'sprout'},
+          'stage',
+          Stage.values,
+        ),
+        Stage.sprout,
+      );
+    });
+
+    test('reads null for a value it does not know', () {
+      // The difference from readEnum, and the whole point: an open column
+      // widens without a schema change, so an unrecognised value means this
+      // build is behind, not that the row is corrupt.
+      expect(
+        readOpenEnum(
+          <String, Object?>{'stage': 'topiary'},
+          'stage',
+          Stage.values,
+        ),
+        isNull,
+      );
+    });
+
+    test('reads null for a missing value', () {
+      expect(readOpenEnum(<String, Object?>{}, 'stage', Stage.values), isNull);
+    });
+
+    test('still throws on a value of the wrong type', () {
+      expect(
+        () =>
+            readOpenEnum(<String, Object?>{'stage': 3}, 'stage', Stage.values),
+        throwsFormatException,
+      );
+    });
+  });
 }
