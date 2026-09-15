@@ -1,5 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:taproot/app/database/database_provider.dart';
+import 'package:taproot/app/supabase/supabase_config.dart';
+import 'package:taproot/app/sync/local_sync_store.dart';
+import 'package:taproot/app/sync/remote_sync_store.dart';
+import 'package:taproot/app/sync/two_way_sync_drain.dart';
+
 /// One round of synchronisation: push everything pending, pull everything new.
 ///
 /// The seam between [SyncService], which decides *when* to sync, and the code
@@ -38,9 +44,18 @@ class UnconfiguredSyncDrain implements SyncDrain {
 
 /// The drain in use.
 ///
-/// Still [UnconfiguredSyncDrain] on every flavor: the push and the pull are the
-/// schema-shaped half of this branch and land with the remote services. This
-/// provider is the one line that changes when they do.
-final syncDrainProvider = Provider<SyncDrain>(
-  (ref) => const UnconfiguredSyncDrain(),
-);
+/// [UnconfiguredSyncDrain] on a flavor with no backend, where reading
+/// `supabaseClientProvider` would throw because `Supabase.initialize` was never
+/// called. `SyncService` answers `SyncStatus.unavailable` before it ever
+/// reaches a drain there, so this is belt and braces — but it is the kind that
+/// keeps a provider readable on every flavor rather than only on the ones that
+/// happen to be wired.
+final syncDrainProvider = Provider<SyncDrain>((ref) {
+  if (!ref.watch(supabaseConfigProvider).isConfigured) {
+    return const UnconfiguredSyncDrain();
+  }
+  return TwoWaySyncDrain(
+    local: LocalSyncStore(database: ref.watch(appDatabaseProvider)),
+    remote: ref.watch(remoteSyncStoreProvider),
+  );
+});
