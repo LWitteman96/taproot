@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/models/habit.dart';
+import 'package:taproot/core/models/habit_category.dart';
+import 'package:taproot/core/models/habit_journey.dart';
 
 void main() {
   final createdAt = DateTime(2026, 1, 5, 9);
@@ -9,11 +11,15 @@ void main() {
     DateTime? pausedAt,
     DateTime? graduatedAt,
     CueType? designedCueType = CueType.event,
+    HabitJourney journey = HabitJourney.design,
+    HabitCategory? category = HabitCategory.exercise,
   }) => Habit(
     id: 'habit-1',
     name: 'Morning run',
     plantType: 'oak',
     targetFrequency: 3,
+    journey: journey,
+    category: category,
     createdAt: createdAt,
     identityStatement: 'I am someone who runs',
     designedCue: 'after breakfast',
@@ -38,6 +44,8 @@ void main() {
       expect(restored.identityStatement, original.identityStatement);
       expect(restored.plantType, original.plantType);
       expect(restored.targetFrequency, original.targetFrequency);
+      expect(restored.journey, original.journey);
+      expect(restored.category, original.category);
       expect(restored.designedCue, original.designedCue);
       expect(restored.designedCueType, original.designedCueType);
       expect(restored.routine, original.routine);
@@ -55,12 +63,14 @@ void main() {
         name: 'Read',
         plantType: 'fern',
         targetFrequency: 7,
+        journey: HabitJourney.track,
         createdAt: createdAt,
       );
 
       final restored = Habit.fromJson(sparse.toJson());
 
       expect(restored.identityStatement, isNull);
+      expect(restored.category, isNull);
       expect(restored.designedCue, isNull);
       expect(restored.designedCueType, isNull);
       expect(restored.routine, isNull);
@@ -78,6 +88,8 @@ void main() {
           'identity_statement',
           'plant_type',
           'target_frequency',
+          'journey',
+          'category',
           'designed_cue',
           'designed_cue_type',
           'routine',
@@ -137,6 +149,7 @@ void main() {
         name: 'Run',
         plantType: 'oak',
         targetFrequency: frequency,
+        journey: HabitJourney.track,
         createdAt: createdAt,
       );
 
@@ -161,6 +174,111 @@ void main() {
       expect(() => habit(designedCueType: null), returnsNormally);
       expect(() => habit(designedCueType: CueType.time), returnsNormally);
     });
+
+    test('a designed habit cannot exist without the cue it designed', () {
+      // Journey B *is* the act of writing the loop down. A design-journey
+      // habit with no cue would be a Journey A habit wearing the wrong label,
+      // and every metric that splits the two populations would count it wrong.
+      expect(
+        () => Habit(
+          id: 'habit-1',
+          name: 'Run',
+          plantType: 'oak',
+          targetFrequency: 3,
+          journey: HabitJourney.design,
+          createdAt: createdAt,
+        ),
+        throwsA(isA<AssertionError>()),
+      );
+    });
+
+    test('a tracked habit may be handed a cue it discovered later', () {
+      // The asymmetry is the point: reflection can lock in an official cue for
+      // a habit that arrived without one (design-spec §3), and that habit is
+      // still Journey A. Inferring the route from "has a cue" would lose it.
+      final discovered = habit(
+        journey: HabitJourney.track,
+      ).copyWith(designedCue: () => 'after coffee');
+
+      expect(discovered.journey, HabitJourney.track);
+      expect(discovered.hasDesignedLoop, isTrue);
+    });
+  });
+
+  group('a category this build has not heard of', () {
+    Map<String, Object?> rowWithCategory(Object? category) => <String, Object?>{
+      ...habit().toJson(),
+      'category': category,
+    };
+
+    test('reads as null rather than failing the whole row', () {
+      // The set is open: no CHECK on either side, and it widens as the chip
+      // library is authored. A row naming a category this build has not heard
+      // of is an ordinary consequence of syncing with a newer device. Throwing
+      // would fail allHabits() and take the entire garden into its unreadable
+      // state over one optional field.
+      final restored = Habit.fromJson(rowWithCategory('woodworking'));
+
+      expect(restored.category, isNull);
+      expect(restored.name, 'Morning run');
+      expect(restored.journey, HabitJourney.design);
+    });
+
+    test('a category of the wrong type is still a FormatException', () {
+      // Leniency is about values, not about shapes. A number in this column
+      // means something wrote the row wrong, which is worth hearing about.
+      expect(() => Habit.fromJson(rowWithCategory(7)), throwsFormatException);
+    });
+
+    test('a known category still decodes', () {
+      expect(
+        Habit.fromJson(rowWithCategory('sleepRoutine')).category,
+        HabitCategory.sleepRoutine,
+      );
+    });
+  });
+
+  group('the journey of a row written before the column existed', () {
+    Map<String, Object?> rowWithoutJourney({String? designedCue}) {
+      final json = habit(journey: HabitJourney.track).toJson()
+        ..remove('journey');
+      return <String, Object?>{
+        ...json,
+        'designed_cue': designedCue,
+        'designed_cue_type': designedCue == null ? null : CueType.event.name,
+      };
+    }
+
+    test('falls back to the inference the column replaced', () {
+      // The schema-version-2 upgrade backfills exactly this, so in practice
+      // the fallback only fires for a row that skipped the migration. It is
+      // still the one defensible reading of such a row.
+      expect(
+        Habit.fromJson(
+          rowWithoutJourney(designedCue: 'after breakfast'),
+        ).journey,
+        HabitJourney.design,
+      );
+      expect(Habit.fromJson(rowWithoutJourney()).journey, HabitJourney.track);
+    });
+
+    test('an explicit journey always wins over the inference', () {
+      final tracked = <String, Object?>{
+        ...rowWithoutJourney(designedCue: 'after breakfast'),
+        'journey': HabitJourney.track.name,
+      };
+
+      expect(Habit.fromJson(tracked).journey, HabitJourney.track);
+    });
+
+    test('an unrecognised journey is a FormatException, not a default', () {
+      final broken = <String, Object?>{
+        ...rowWithoutJourney(),
+        'journey': 'improvised',
+      };
+
+      expect(() => Habit.fromJson(broken), throwsFormatException);
+    });
   });
 
   group('copyWith', () {
@@ -177,6 +295,14 @@ void main() {
 
       expect(paused.copyWith(name: 'Run').pausedAt, isNotNull);
       expect(paused.copyWith(pausedAt: () => null).pausedAt, isNull);
+    });
+
+    test('clears the category without clearing anything else', () {
+      final uncategorised = habit().copyWith(category: () => null);
+
+      expect(uncategorised.category, isNull);
+      expect(uncategorised.journey, HabitJourney.design);
+      expect(uncategorised.name, 'Morning run');
     });
   });
 }

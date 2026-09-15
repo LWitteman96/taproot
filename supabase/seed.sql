@@ -1,0 +1,9 @@
+-- Taproot — local seed data.
+--
+-- Deliberately empty. The starter chip library (docs/starter-chip-library.md)
+-- is app content, not server content: it ships in the bundle so a first
+-- reflection works offline and on first launch, before any session exists.
+--
+-- Nothing else in this schema has server-owned content — every row belongs to
+-- a user and is created on their device. If a row is ever seeded here, it is a
+-- sign something has become server-owned, which is worth arguing about first.

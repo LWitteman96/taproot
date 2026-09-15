@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:taproot/app/startup/app_startup.dart';
 import 'package:taproot/app/theme/app_dimensions.dart';
 import 'package:taproot/app/theme/app_spacing.dart';
 import 'package:taproot/features/garden/pages/garden_page.dart';
+import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/pages/habit_creation_page.dart';
+import 'package:taproot/features/habits/providers/habit_providers.dart';
 
 /// Every path in the app, in one place.
 abstract final class AppRoutes {
@@ -36,20 +39,33 @@ const AppGate openAppGate = (hasFirstHabit: true);
 const AppGate failSafeAppGate = (hasFirstHabit: false);
 
 /// How the gate gets resolved. The seam tests override.
-final appGateResolverProvider = Provider<Future<AppGate> Function()>(
-  (ref) => resolveAppGate,
-);
+///
+/// The startup future is **watched** here and awaited inside the closure, which
+/// is doing two things at once. Awaiting it means the gate is never answered
+/// before the local store is open — `habitServiceProvider` reads the database
+/// synchronously and throws until then, and a gate that resolved from that
+/// throw would report "no habits" on every cold start and send a user with a
+/// full garden into habit creation. Watching it means that when a failed
+/// startup is retried, this provider is rebuilt and the gate is asked again
+/// rather than serving the fail-safe it cached the first time.
+final appGateResolverProvider = Provider<Future<AppGate> Function()>((ref) {
+  final startup = ref.watch(appStartupProvider.future);
+  return () async {
+    await startup;
+    return resolveAppGate(ref.read(habitServiceProvider));
+  };
+});
 
-/// Resolves the gate.
+/// Resolves the gate: has this user planted anything yet.
 ///
-/// **Stubbed.** There is no auth, no profile row and no habit creation yet, so
-/// there is nothing to read and nothing that could route a user anywhere useful
-/// — reporting "no habits" today would strand every launch on a placeholder.
-/// It returns the open gate until the habit count is real.
+/// One habit is the whole question. A user with an empty garden has nowhere to
+/// be except habit creation — the garden leads with accumulated progress
+/// (design-spec §6), and there is none — so the first habit is what the app
+/// needs before it has a home screen worth showing.
 ///
-/// What is *not* stubbed is the failure path in [appGateProvider]. That is the
-/// half that is easy to get wrong later, so it is written and tested now.
-Future<AppGate> resolveAppGate() async => openAppGate;
+/// Takes the repository rather than a `Ref` so it can be tested as a function.
+Future<AppGate> resolveAppGate(HabitRepository habits) async =>
+    (hasFirstHabit: (await habits.allHabits()).isNotEmpty);
 
 /// The gate, resolved, with the failure folded into a value.
 ///
