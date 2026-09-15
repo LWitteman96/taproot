@@ -12,6 +12,7 @@ class CheckInOccasion {
     required this.occasion,
     required this.at,
     this.isAnomalous = false,
+    this.wasNudged = false,
   });
 
   final String habitId;
@@ -25,6 +26,15 @@ class CheckInOccasion {
   /// Whether this occasion is out of the ordinary for the habit — see
   /// `isAnomalousOccasion`.
   final bool isAnomalous;
+
+  /// Whether the app nudged this occasion.
+  ///
+  /// Recorded onto the reflection rather than used here. Nothing in the engine
+  /// reads `Reflection.wasNudged` today — it is kept faithful because the
+  /// question it answers later ("do people reflect differently when we asked
+  /// them to?") cannot be reconstructed from anything else once the row is
+  /// written.
+  final bool wasNudged;
 }
 
 /// `Priority = uncertainty + early_bonus + occasion_weight + anomaly −

@@ -50,6 +50,10 @@ CheckInOccasion? occasionFor({
     for (final nudge in nudges)
       if (!nudge.sent) LocalDate.from(nudge.expectedOccasionAt),
   };
+  final nudgedDates = <LocalDate>{
+    for (final nudge in nudges)
+      if (nudge.sent) LocalDate.from(nudge.expectedOccasionAt),
+  };
 
   final freshCompletions =
       completions.where((completion) => isNew(completion.completedAt)).toList()
@@ -89,6 +93,7 @@ CheckInOccasion? occasionFor({
       habitId: habitId,
       occasion: wasSilent ? Occasion.autonomyCompletion : Occasion.completion,
       at: completion.completedAt,
+      wasNudged: nudgedDates.contains(LocalDate.from(completion.completedAt)),
       isAnomalous: isAnomalousOccasion(
         at: completion.completedAt,
         previousCompletions: completions
@@ -106,6 +111,7 @@ CheckInOccasion? occasionFor({
     habitId: habitId,
     occasion: Occasion.miss,
     at: latestMiss.expectedOccasionAt,
+    wasNudged: latestMiss.sent,
   );
 }
 
