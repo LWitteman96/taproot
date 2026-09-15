@@ -11,17 +11,39 @@ import 'package:taproot/features/habits/controllers/habit_creation_controller.da
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 
+import 'package:taproot/features/notifications/domain/notification_access.dart';
+import 'package:taproot/features/reflection/providers/reflection_providers.dart';
+import 'package:taproot/features/notifications/providers/nudge_providers.dart';
+
+import '../../../../utils/fake_notification_gateway.dart';
 import '../../../../utils/fake_repositories.dart';
 
 void main() {
   final createdAt = DateTime.utc(2026, 3, 1, 19, 30);
 
   late FakeHabitService habits;
+  late FakeNudgeService nudges;
 
-  ProviderContainer containerWith({HabitRepository? repository}) {
+  ProviderContainer containerWith({
+    HabitRepository? repository,
+    FakeNotificationGateway? gateway,
+  }) {
     final container = ProviderContainer(
       overrides: [
         habitServiceProvider.overrideWithValue(repository ?? habits),
+        // Planting re-plans the habit's occasions, and the planner assembles
+        // HabitInputs from all four repositories — so all four have to be
+        // fakes here, not just the two this flow writes through.
+        completionServiceProvider.overrideWithValue(
+          FakeCompletionService(habits: habits),
+        ),
+        reflectionServiceProvider.overrideWithValue(
+          FakeReflectionService(habits: habits),
+        ),
+        nudgeServiceProvider.overrideWithValue(nudges),
+        notificationGatewayProvider.overrideWithValue(
+          gateway ?? FakeNotificationGateway(),
+        ),
         newIdProvider.overrideWithValue(() => 'habit-new'),
         clockProvider.overrideWithValue(() => createdAt),
       ],
@@ -53,7 +75,10 @@ void main() {
       ..rewardChanged('coffee on the porch');
   }
 
-  setUp(() => habits = FakeHabitService());
+  setUp(() {
+    habits = FakeHabitService();
+    nudges = FakeNudgeService(habits: habits);
+  });
 
   group('the front door', () {
     test('starts on the name, already designing', () {
@@ -301,6 +326,35 @@ void main() {
       expect(stateOf(container).createdHabitId, isNull);
     });
 
+    test('a planted habit gets its occasions the same moment', () async {
+      // Otherwise the ledger stays empty until the next cold start, and a
+      // habit planted this morning gets no check-in tonight — the evening when
+      // the first one matters most, because it is the first rehearsal of the
+      // cue the user has just finished designing.
+      final container = containerWith();
+      final controller = controllerOf(container);
+      fillDesignedLoop(controller);
+
+      await controller.submit();
+
+      expect(await nudges.nudgesFor('habit-new'), isNotEmpty);
+    });
+
+    test('a scheduler that throws still plants the habit', () async {
+      // The habit is saved by the time the planning runs. Turning a scheduling
+      // problem into "that did not save" would send the user back through the
+      // whole flow to plant a second copy of a plant already in the ground.
+      final container = containerWith(gateway: _BrokenGateway());
+      final controller = controllerOf(container);
+      fillDesignedLoop(controller);
+
+      await controller.submit();
+
+      expect(await habits.allHabits(), hasLength(1));
+      expect(controller.state.errorMessage, isNull);
+      expect(controller.state.createdHabitId, 'habit-new');
+    });
+
     test('a second tap does not plant a second plant', () async {
       final container = containerWith();
       final controller = controllerOf(container);
@@ -387,4 +441,11 @@ class _UnwritableHabitService implements HabitRepository {
   @override
   Future<List<PauseInterval>> pausesFor(String habitId) async =>
       <PauseInterval>[];
+}
+
+/// A notification platform that cannot even report what it is allowed to do.
+class _BrokenGateway extends FakeNotificationGateway {
+  @override
+  Future<NotificationAccess> currentAccess() async =>
+      throw StateError('no notification platform here');
 }

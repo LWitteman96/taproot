@@ -893,6 +893,64 @@ void storeContract(StoreOpener open) {
       },
     );
 
+    test('a batch writes every row it is given', () async {
+      // Most of a planning pass is silent occasions, and writing them one
+      // round trip at a time made a backfill after a quiet week ~37 of them
+      // per habit on the startup path.
+      await seedHabit();
+
+      await store.nudges.saveNudges(<NudgeRecord>[
+        nudge('n-1', startOfTest, sent: false),
+        nudge('n-2', startOfTest.add(const Duration(days: 1)), sent: false),
+        nudge('n-3', startOfTest.add(const Duration(days: 2)), sent: false),
+      ]);
+
+      final ledger = await store.nudges.nudgesFor('habit-1');
+      expect(ledger.map((row) => row.id), <String>['n-1', 'n-2', 'n-3']);
+      expect(ledger.every((row) => !row.sent), isTrue);
+    });
+
+    test('a batch is all or nothing', () async {
+      // The rules do not relax in bulk — this batches the round trips, not the
+      // checks. A half-written window is harder to reason about than an
+      // unwritten one the next pass will write again, so a bad row takes the
+      // batch with it.
+      await seedHabit();
+
+      await expectLater(
+        store.nudges.saveNudges(<NudgeRecord>[
+          nudge('n-1', startOfTest, sent: false),
+          // Same local day as n-1: the duplicate-occasion rule, mid-batch.
+          nudge('n-2', startOfTest.add(const Duration(hours: 6)), sent: false),
+        ]),
+        throwsA(isA<DuplicateOccasionException>()),
+      );
+
+      expect(await store.nudges.nudgesFor('habit-1'), isEmpty);
+    });
+
+    test('an empty batch is a no-op, not an error', () async {
+      await seedHabit();
+
+      await expectLater(
+        store.nudges.saveNudges(const <NudgeRecord>[]),
+        completes,
+      );
+      expect(await store.nudges.nudgesFor('habit-1'), isEmpty);
+    });
+
+    test('a batch against a deleted habit is refused', () async {
+      await seedHabit();
+      await store.habits.deleteHabit('habit-1');
+
+      await expectLater(
+        store.nudges.saveNudges(<NudgeRecord>[
+          nudge('n-1', startOfTest, sent: false),
+        ]),
+        throwsA(isA<UnknownHabitException>()),
+      );
+    });
+
     test('a second occasion on the same local day is refused', () async {
       // The ledger is one row per occasion, and computeAutonomy matches
       // occasions to completions by local date — so uniqueness is per local

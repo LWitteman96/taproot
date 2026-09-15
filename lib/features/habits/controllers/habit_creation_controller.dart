@@ -11,6 +11,7 @@ import 'package:taproot/core/models/habit.dart';
 import 'package:taproot/core/models/habit_category.dart';
 import 'package:taproot/core/models/habit_journey.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
+import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 
 /// The weekly target a habit starts on before the user says otherwise.
@@ -315,6 +316,7 @@ class HabitCreationController extends Notifier<HabitCreationState> {
     try {
       await _habits.saveHabit(habit);
       _log('submit', 'planted ${habit.id} (${habit.journey.name})');
+      await _planNudges(habit.id);
       state = state.copyWith(isSaving: false, createdHabitId: () => habit.id);
     } catch (error, stackTrace) {
       _log('submit', 'failed: $error');
@@ -326,6 +328,31 @@ class HabitCreationController extends Notifier<HabitCreationState> {
         errorMessage: () =>
             'That did not save. Nothing has been lost — try again.',
       );
+    }
+  }
+
+  /// Gives the new habit its expected occasions straight away.
+  ///
+  /// Without this the ledger stays empty until the next cold start, so a habit
+  /// planted this morning gets no check-in tonight — and the evening before is
+  /// exactly when the first one matters, because it is the first rehearsal of
+  /// the cue the user has just finished designing.
+  ///
+  /// Never allowed to fail the creation. The habit is saved by the time this
+  /// runs; turning a scheduling problem into "that did not save" would send the
+  /// user back through the whole flow to plant a second copy of a plant that is
+  /// already in the ground.
+  /// The scheduler is resolved *here* rather than in `build`, and that is the
+  /// difference between a promise and a comment. Reading it up front makes
+  /// every construction of this controller depend on the notification stack
+  /// being buildable — so a store that will not open takes the creation flow
+  /// down with it, before the user has typed anything.
+  Future<void> _planNudges(String habitId) async {
+    try {
+      await ref.read(nudgeSchedulerProvider).planHabit(habitId);
+    } catch (error, stackTrace) {
+      _log('submit', 'the nudges were not planned: $error');
+      dev.log('$stackTrace', name: 'HabitCreationController');
     }
   }
 

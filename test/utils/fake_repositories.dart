@@ -275,6 +275,25 @@ class FakeNudgeService implements NudgeRepository {
   }
 
   @override
+  Future<void> saveNudges(Iterable<NudgeRecord> nudges) async {
+    // All or nothing, like the transaction the real service wraps these in. A
+    // fake that kept the rows written before the bad one would let a test pass
+    // against behaviour the store does not have — which is the whole reason
+    // both run through `storeContract`.
+    final before = Map<String, NudgeRecord>.from(_nudges);
+    try {
+      for (final nudge in nudges) {
+        await saveNudge(nudge);
+      }
+    } catch (_) {
+      _nudges
+        ..clear()
+        ..addAll(before);
+      rethrow;
+    }
+  }
+
+  @override
   Future<List<NudgeRecord>> nudgesFor(String habitId) async =>
       _nudges.values.where((nudge) => nudge.habitId == habitId).toList()
         ..sort((a, b) {
