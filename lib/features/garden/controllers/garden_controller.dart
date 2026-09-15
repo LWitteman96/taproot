@@ -292,9 +292,10 @@ class GardenController extends Notifier<GardenState> {
   /// flag is for the reflection layer, which weights an un-nudged completion
   /// differently when it decides what to ask about.
   ///
-  /// It is false everywhere today, because nothing writes the ledger until the
-  /// notifications branch. That is honest rather than provisional: no nudge was
-  /// sent, so none was.
+  /// The ledger behind it is written by `NudgeScheduler`, which records every
+  /// expected occasion — including the ones it deliberately stayed silent on.
+  /// So a false here means "no nudge was sent for today", never "nothing is
+  /// recorded for today".
   bool _wasNudgedToday(HabitInputs inputs, DateTime at) {
     final today = LocalDate.from(at);
     return inputs.nudges.any(

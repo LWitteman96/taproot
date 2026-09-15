@@ -23,22 +23,25 @@ Update this file in the same commit as the work it describes.
 | **Completion tap** (`lib/features/garden/`) | **Built — garden controller, press-and-hold watering, undo** |
 | Habit creation | Not started — the page is a placeholder shell |
 | Supabase project, migrations, RLS | Not started |
-| Notification scheduling + nudge ledger | Not started |
+| **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
 | Reflection check-in and chips | Not started |
 | Garden rendering | Not started (blocked on external illustrator) |
 | Insight surfacing | Not started |
 
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
 tap → Supabase sync → notifications and the nudge ledger → reflection check-in → garden → insights.
-The first four are done, so **Supabase sync is next** — a pusher over the `pending_sync` column the
-schema already carries.
+Notifications were taken ahead of Supabase sync (they share no code), so what is left before the
+reflection check-in is **Supabase sync** — a pusher over the `pending_sync` column the schema
+already carries.
 
 What is deliberately *not* built yet: Supabase and Sentry are still uninitialised (the `.env` files
 hold no credentials, and `Supabase.initialize` on an empty URL throws at launch); the router's gate
 is stubbed open with only its fail-safe path implemented; `HabitCreationPage` is still a placeholder
 shell, so the only way to get a habit into the store is the **debug-only dev-flavor seed button** on
 the empty garden; and the garden renders its plants as words rather than art, which is waiting on
-the external illustrator.
+the external illustrator. The notification permission prompt is wired but not *placed* — nothing
+calls `requestNotificationAccess` yet, because onboarding is where it belongs and onboarding does
+not exist, so a real device runs in the denied mode until it does.
 
 ---
 

@@ -1,0 +1,503 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:taproot/core/engine/autonomy.dart';
+import 'package:taproot/core/engine/constants.dart';
+import 'package:taproot/core/models/completion.dart';
+import 'package:taproot/core/models/habit.dart';
+import 'package:taproot/core/models/nudge.dart';
+import 'package:taproot/core/utils/local_dates.dart';
+import 'package:taproot/features/habits/services/habit_inputs_loader.dart';
+import 'package:taproot/features/notifications/domain/evening_check_in.dart';
+import 'package:taproot/features/notifications/domain/expected_occasions.dart';
+import 'package:taproot/features/notifications/domain/notification_access.dart';
+import 'package:taproot/features/notifications/domain/notification_gateway.dart';
+import 'package:taproot/features/notifications/domain/nudge_decision.dart';
+import 'package:taproot/features/notifications/domain/nudge_payload.dart';
+import 'package:taproot/features/notifications/services/nudge_scheduler.dart';
+
+import '../../../../utils/fake_notification_gateway.dart';
+import '../../../../utils/fake_repositories.dart';
+import '../../../../utils/store_contract.dart';
+import '../../../../utils/store_fixtures.dart';
+
+/// The scheduler, on a fake clock and a fake notification platform.
+///
+/// The invariant under test throughout: **every expected occasion gets a
+/// ledger row, and the ones the engine deliberately stayed silent on get one
+/// too.** Those rows are autonomy's denominator, and their absence is
+/// indistinguishable from the absence of an occasion — so a scheduler that
+/// quietly skips them breaks the measurement without breaking anything
+/// visible.
+void main() {
+  const habitId = 'habit-1';
+  final createdAt = DateTime(2026, 3, 2, 9);
+
+  late TestClock clock;
+  late TestStore store;
+  late FakeNotificationGateway gateway;
+  late NudgeScheduler scheduler;
+  var nextId = 0;
+
+  /// A prompt composer that records what it was asked, standing in for the
+  /// reflection feature.
+  final asked = <String>[];
+
+  Future<void> buildScheduler({
+    ReflectionPromptComposer reflection = const NoReflectionPrompt(),
+  }) async {
+    scheduler = NudgeScheduler(
+      habits: store.habits,
+      nudges: store.nudges,
+      inputs: HabitInputsLoader(
+        habits: store.habits,
+        completions: store.completions,
+        reflections: store.reflections,
+        nudges: store.nudges,
+      ),
+      gateway: gateway,
+      reflection: reflection,
+      clock: clock.call,
+      newId: () => 'nudge-${nextId++}',
+    );
+  }
+
+  setUp(() async {
+    nextId = 0;
+    asked.clear();
+    // Mid-morning on the habit's creation day: today's occasion has already
+    // lost its evening slot, tomorrow's has not.
+    clock = TestClock(DateTime(2026, 3, 2, 10));
+    store = await openFakeStore(clock);
+    gateway = FakeNotificationGateway();
+    await buildScheduler();
+  });
+
+  Future<Habit> saveHabit({
+    int targetFrequency = 7,
+    String id = habitId,
+    String name = 'Morning run',
+  }) async {
+    final habit = testHabit(
+      id: id,
+      name: name,
+      targetFrequency: targetFrequency,
+      createdAt: createdAt,
+    );
+    await store.habits.saveHabit(habit);
+    return habit;
+  }
+
+  Future<List<NudgeRecord>> ledger([String id = habitId]) =>
+      store.nudges.nudgesFor(id);
+
+  group('the ledger', () {
+    test('records every expected occasion in the horizon', () async {
+      await saveHabit();
+
+      await scheduler.planAll();
+
+      // A daily habit, planned from today through the 7-day horizon.
+      final rows = await ledger();
+      expect(rows, hasLength(EngineConstants.nudgeHorizonDays + 1));
+      expect(
+        rows.map((row) => LocalDate.from(row.expectedOccasionAt)).toList(),
+        List<LocalDate>.generate(
+          EngineConstants.nudgeHorizonDays + 1,
+          (offset) => LocalDate(2026, 3, 2).addDays(offset),
+        ),
+      );
+    });
+
+    test('records the occasions it deliberately stayed silent on', () async {
+      // A habit climbed to a faded stage: some of the coming occasions carry a
+      // notification and some do not, and *all* of them carry a row. This is
+      // the assertion the whole stage exists for — the silent rows are what
+      // autonomy is divided by, and they cannot be inferred later from the
+      // absence of a notification.
+      await saveHabit();
+      await _climbTo(store, habitId, createdAt);
+      clock.now = createdAt.add(const Duration(days: 60, hours: 10));
+
+      await scheduler.planAll();
+
+      final horizon = (await ledger())
+          .where((row) => row.expectedOccasionAt.isAfter(clock.now))
+          .toList();
+
+      expect(
+        horizon.where((row) => row.sent),
+        isNotEmpty,
+        reason: 'the stage still nudges some occasions',
+      );
+      expect(
+        horizon.where((row) => !row.sent),
+        isNotEmpty,
+        reason: 'and stays deliberately silent on others',
+      );
+      expect(
+        horizon.every((row) => row.sent == (gateway.forNudge(row.id) != null)),
+        isTrue,
+        reason: 'a row says sent exactly when a notification was queued',
+      );
+    });
+
+    test('the row count is the occasion count, whatever the fade rate', () async {
+      // Stated as the negative: the number of rows must not depend on how many
+      // notifications went out. If it did, a faded habit would look like a
+      // habit with fewer expected occasions, and autonomy would quietly
+      // improve as the app went quiet — the exact failure the ledger exists to
+      // prevent.
+      await saveHabit();
+      await _climbTo(store, habitId, createdAt);
+      clock.now = createdAt.add(const Duration(days: 60, hours: 10));
+
+      await scheduler.planAll();
+
+      final rows = await ledger();
+      final occasions = expectedOccasionsBetween(
+        createdAt: createdAt,
+        targetFrequency: 7,
+        from: LocalDate.from(
+          clock.now,
+        ).addDays(-EngineConstants.nudgeBackfillDays),
+        to: LocalDate.from(clock.now).addDays(EngineConstants.nudgeHorizonDays),
+      );
+
+      expect(rows, hasLength(occasions.length));
+      expect(
+        rows.where((row) => row.sent).length,
+        lessThan(rows.length),
+        reason: 'some of them were deliberately silent',
+      );
+    });
+
+    test('rows for past occasions are backfilled as un-nudged', () async {
+      // The phone was off for a fortnight. Nobody was there to nudge, so the
+      // occasions are honestly un-nudged — but they are still occasions, and
+      // leaving them out would hide two weeks of a habit standing or not
+      // standing on its own.
+      await saveHabit();
+      clock.now = createdAt.add(const Duration(days: 14));
+
+      await scheduler.planAll();
+
+      final past = (await ledger())
+          .where((row) => row.expectedOccasionAt.isBefore(clock.now))
+          .toList();
+      // Fifteen, not fourteen: an occasion is a local *date*, stamped at
+      // local midnight, so today's own occasion is already behind the clock by
+      // the time anybody opens the app.
+      expect(past, hasLength(15));
+      expect(past.every((row) => !row.sent), isTrue);
+      expect(past.every((row) => gateway.forNudge(row.id) == null), isTrue);
+    });
+
+    test('backfill is bounded rather than replaying the whole history', () {
+      expect(EngineConstants.nudgeBackfillDays, 30);
+    });
+
+    test('a paused habit expects nothing', () async {
+      await saveHabit();
+      await store.habits.pauseHabit(habitId);
+
+      await scheduler.planAll();
+
+      expect(await ledger(), isEmpty);
+      expect(gateway.queued, isEmpty);
+    });
+  });
+
+  group('idempotence', () {
+    test(
+      're-planning neither duplicates rows nor duplicates notifications',
+      () async {
+        await saveHabit();
+
+        await scheduler.planAll();
+        final first = await ledger();
+        final firstQueue = Map<int, Object>.from(gateway.queued);
+
+        await scheduler.planAll();
+        await scheduler.planAll();
+
+        final again = await ledger();
+        expect(again.map((row) => row.id), first.map((row) => row.id));
+        expect(gateway.queued.keys, firstQueue.keys);
+      },
+    );
+
+    test('a decision already in the ledger is never re-decided', () async {
+      // The ledger records what happened, not what the current stage would do.
+      // Re-deciding would let an occasion flip from silent to nudged after the
+      // fact — and a flipped row moves between autonomy's numerator and its
+      // denominator retroactively.
+      await saveHabit();
+      await scheduler.planAll();
+
+      final before = await ledger();
+      final silent = before.firstWhere(
+        (row) => !row.sent,
+        orElse: () => before.first,
+      );
+
+      // Climb the habit so the fade rate changes underneath the planned rows.
+      await _climbTo(store, habitId, createdAt);
+      await scheduler.planAll();
+
+      final after = await ledger();
+      expect(after.firstWhere((row) => row.id == silent.id).sent, silent.sent);
+    });
+
+    test('a notification the platform lost is queued again', () async {
+      // A reinstall or a restore empties the OS alarm table while the ledger
+      // still says the nudge was sent. Left alone that is a nudge the ledger
+      // claims and the user never receives — the one direction that corrupts
+      // the measurement rather than just missing a reminder.
+      await saveHabit();
+      await scheduler.planAll();
+      final sent = (await ledger()).firstWhere(
+        (row) => row.sent && row.expectedOccasionAt.isAfter(clock.now),
+      );
+
+      gateway.queued.clear();
+      await scheduler.planAll();
+
+      expect(gateway.forNudge(sent.id), isNotNull);
+    });
+  });
+
+  group('when the app cannot nudge', () {
+    test('denied permission still records the occasions', () async {
+      // Denial is a designed app mode, not an error (guide §2). The habit
+      // still has expected days and the user still either does it or does
+      // not, so the engine keeps its inputs.
+      gateway.grant(NotificationAccess.denied);
+      await saveHabit();
+
+      final plan = await scheduler.planAll();
+
+      expect(await ledger(), hasLength(EngineConstants.nudgeHorizonDays + 1));
+      expect(gateway.queued, isEmpty);
+      expect(
+        plan.suppressedBy(NudgeSuppression.noPermission),
+        isNotEmpty,
+        reason:
+            'the silence is reported as the app failing, not the engine '
+            'choosing',
+      );
+      expect(plan.withheld, isEmpty);
+    });
+
+    test('a refused notification leaves the row honestly un-sent', () async {
+      await saveHabit();
+      gateway.failNextSchedule = true;
+
+      await scheduler.planAll();
+
+      final rows = await ledger();
+      expect(rows, isNotEmpty, reason: 'the pass carried on past the failure');
+      expect(
+        rows.where((row) => row.sent).length,
+        lessThan(rows.length),
+        reason: 'the refused occasion is not recorded as nudged',
+      );
+    });
+
+    test('the pending-notification ceiling is reported, not silent', () async {
+      await saveHabit();
+      for (
+        var index = 0;
+        index < EngineConstants.maximumPendingNudges;
+        index++
+      ) {
+        await gateway.schedule(ScheduledNudgeStub.at(index));
+      }
+
+      final plan = await scheduler.planAll();
+
+      expect(plan.suppressedBy(NudgeSuppression.overCap), isNotEmpty);
+      expect(await ledger(), isNotEmpty);
+    });
+  });
+
+  group('the notification itself', () {
+    test('rehearses the designed cue rather than naming the app', () async {
+      await saveHabit();
+
+      await scheduler.planAll();
+
+      final queued = gateway.everyScheduleCall.first;
+      expect(queued.checkIn.title, 'Morning run');
+      expect(queued.checkIn.body, contains('after breakfast'));
+      expect(queued.checkIn.body, isNot(contains('Taproot')));
+    });
+
+    test('is delivered the evening before its occasion', () async {
+      await saveHabit();
+
+      await scheduler.planAll();
+
+      final queued = gateway.everyScheduleCall.first;
+      final occasionDate = LocalDate.from(
+        (await ledger())
+            .firstWhere((row) => row.id == queued.payload.nudgeId)
+            .expectedOccasionAt,
+      );
+      expect(
+        queued.deliverAt,
+        DateTime(
+          occasionDate.year,
+          occasionDate.month,
+          occasionDate.day,
+          EngineConstants.eveningCheckInHour,
+        ).subtract(const Duration(days: EngineConstants.nudgeLeadDays)),
+      );
+      expect(queued.deliverAt.isAfter(clock.now), isTrue);
+    });
+
+    test('carries the ledger row back with it', () async {
+      await saveHabit();
+
+      await scheduler.planAll();
+
+      final queued = gateway.everyScheduleCall.first;
+      expect(
+        NudgePayload.decode(queued.payload.encode()),
+        NudgePayload(nudgeId: queued.payload.nudgeId, habitId: habitId),
+      );
+      expect(
+        (await ledger()).map((row) => row.id),
+        contains(queued.payload.nudgeId),
+      );
+    });
+
+    test('carries the reflection question when there is one', () async {
+      // Reflection and the next-day nudge are one notification (reflection
+      // spec §1) — this is the seam that keeps them from becoming two.
+      await saveHabit();
+      await buildScheduler(reflection: _RecordingComposer(asked));
+
+      await scheduler.planAll();
+
+      final queued = gateway.everyScheduleCall.first;
+      expect(queued.checkIn.body, startsWith('What got you going today?'));
+      expect(queued.checkIn.body, contains('after breakfast'));
+      expect(asked, isNotEmpty);
+    });
+  });
+
+  test('the withheld occasions are what autonomy is measured over', () async {
+    // End to end: plan a faded habit, complete on some of the silent days,
+    // and read the engine's own autonomy off the ledger the scheduler wrote.
+    await saveHabit();
+    await _seedLedger(
+      store,
+      habitId,
+      createdAt,
+      sent: 0,
+      withheld: 4,
+      rate: 0.4,
+    );
+    clock.now = createdAt.add(const Duration(days: 4, hours: 12));
+
+    final inputs = await HabitInputsLoader(
+      habits: store.habits,
+      completions: store.completions,
+      reflections: store.reflections,
+      nudges: store.nudges,
+    ).load(habitId);
+
+    final autonomy = computeAutonomy(inputs: inputs!, at: clock.now);
+    expect(
+      autonomy.occasions,
+      4,
+      reason: 'four silent occasions, so a denominator of four',
+    );
+    expect(autonomy.completed, 2);
+    expect(autonomy.value, closeTo(0.5, 1e-9));
+  });
+}
+
+/// A composer standing in for the reflection feature.
+class _RecordingComposer implements ReflectionPromptComposer {
+  _RecordingComposer(this.asked);
+
+  final List<String> asked;
+
+  @override
+  Future<String?> promptFor({
+    required Habit habit,
+    required ExpectedOccasion occasion,
+    required DateTime deliverAt,
+  }) async {
+    asked.add('${habit.id}@${occasion.date}');
+    return 'What got you going today?';
+  }
+}
+
+/// Writes a ledger by hand — [sent] nudged occasions then [withheld] silent
+/// ones, one per day from [from], with a completion on every other silent day.
+Future<void> _seedLedger(
+  TestStore store,
+  String habitId,
+  DateTime from, {
+  required int sent,
+  required int withheld,
+  required double rate,
+}) async {
+  var day = 0;
+  for (var index = 0; index < sent; index++, day++) {
+    final id = 'seed-sent-$habitId-$index';
+    await store.nudges.saveNudge(
+      NudgeRecord(
+        id: id,
+        habitId: habitId,
+        expectedOccasionAt: from.add(Duration(days: day)),
+        sent: false,
+      ),
+    );
+    await store.nudges.markSent(id);
+  }
+  for (var index = 0; index < withheld; index++, day++) {
+    await store.nudges.saveNudge(
+      NudgeRecord(
+        id: 'seed-silent-$habitId-$index',
+        habitId: habitId,
+        expectedOccasionAt: from.add(Duration(days: day)),
+        sent: false,
+      ),
+    );
+    if (index.isEven) {
+      await store.completions.recordCompletion(
+        Completion(
+          id: 'seed-completion-$habitId-$index',
+          habitId: habitId,
+          completedAt: from.add(Duration(days: day, hours: 7)),
+        ),
+      );
+    }
+  }
+}
+
+/// Completes the habit often enough to climb it off Sprout.
+Future<void> _climbTo(TestStore store, String habitId, DateTime from) async {
+  for (var day = 0; day < 60; day++) {
+    await store.completions.recordCompletion(
+      Completion(
+        id: 'climb-$day',
+        habitId: habitId,
+        completedAt: from.add(Duration(days: day, hours: 7)),
+      ),
+    );
+  }
+}
+
+/// A notification queued by something other than the scheduler, to fill the
+/// platform's pending list.
+abstract final class ScheduledNudgeStub {
+  static ScheduledNudge at(int index) => ScheduledNudge(
+    notificationId: 900000 + index,
+    payload: NudgePayload(nudgeId: 'other-$index', habitId: 'other'),
+    checkIn: const EveningCheckIn(title: 'other', body: 'other'),
+    deliverAt: DateTime(2026, 4, 1, 20),
+  );
+}

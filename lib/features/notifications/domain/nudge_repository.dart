@@ -20,6 +20,16 @@ abstract class NudgeRepository {
   Future<void> markSent(String nudgeId);
 
   /// Throws [UnknownNudgeException] if the row is not in the ledger.
+  ///
+  /// TODO(notifications): cascade an undo back onto this flag. Retracting a
+  /// completion leaves the row still saying a nudge was confirmed by a
+  /// completion that no longer counts. Autonomy self-corrects — it matches
+  /// completions against occasions, so the undone completion drops out of the
+  /// numerator on its own — but the column is stale, and the insight surfaces
+  /// that read confirms/declines directly (growth spec §8) would read it.
+  /// Deliberately left open rather than built against the completion-tap
+  /// branch mid-flight; it is a cross-aggregate cascade and needs an owner,
+  /// see docs/progress-log.md for this branch's "Left open".
   Future<void> markConfirmed(String nudgeId);
 
   /// Throws [UnknownNudgeException] if the row is not in the ledger.
