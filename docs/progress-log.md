@@ -21,6 +21,119 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-15 — Supabase sync
+
+Branch: `feature/supabase-sync`, on top of the backend and the completion tap.
+
+### Landed
+
+```
+lib/app/supabase/      supabase_config · supabase_providers
+lib/app/connectivity/  connectivity_providers
+lib/app/sync/          sync_state · sync_service · sync_drain · sync_tables
+                       local_sync_store · remote_sync_store · two_way_sync_drain
+lib/app/database/      schema v3 — sync_cursors
+supabase/migrations/   habit_journey_and_category · pin_last_write_wins
+```
+
+`main()` brings Supabase up, the false → true connectivity edge starts a drain, the drain pulls
+every table and then pushes everything still queued, and `sync_cursors` remembers where the pull got
+to.
+
+The three traps the backend branch left written down are all closed, and each was verified by
+deleting the guard and watching a test go red rather than by reasoning about it:
+
+- **The pull pages.** PostgREST's `max_rows` is 1000 and it truncates *silently*, so a first-install
+  pull of a year of completions would otherwise get one page and no signal there was more.
+- **The cursor overlaps by 30 seconds.** `synced_at` is stamped when a row is written and the row
+  becomes visible when its transaction commits, which is later — so a cursor advanced exactly to the
+  read time steps over late-committing rows permanently. Re-reading a window is safe because every
+  upsert on both sides is idempotent. `gte` rather than `gt` for the same reason in miniature.
+- **Nudge occasion duplicates** are the one still open — see below.
+
+### Decided
+
+**No remote services behind the repository interfaces, and the earlier plan that called for them is
+wrong.** That line came from the guide's §8 table, which describes inkBlox, where SQLite is a
+*cache* and the remote is the real store — one interface over both makes sense there. Taproot
+inverted that deliberately: the local store is primary, Supabase is backup and cross-device merge.
+Two consequences kill the idea. Sync performs exactly two operations — *rows changed since a cursor,
+paged* and *rows where `pending_sync = 1`* — and **neither exists on any repository interface**.
+Everything the interfaces do offer is meaningless server-side — a remote `pauseHabit()`, a
+window-checked `retractCompletion()`. Writing them would have produced four classes with no caller
+while sync still needed a second surface next to them. It got that surface instead:
+`RemoteSyncStore` and `LocalSyncStore`, both row-shaped.
+
+**The drain pulls before it pushes, and getting this wrong is the story worth keeping.** It was
+written push-first, with a confident rationale and a passing test. Inverting the order to check the
+test was load-bearing showed it still passed — so it was proving nothing, and working out why showed
+the *design* was wrong rather than the test. **A PostgREST upsert is unconditional**: there is no
+"only if newer", so the server keeps whatever it is last sent, and pushing first lets a device
+holding a stale edit overwrite a newer one made elsewhere. Both devices then agree on the stale
+value and nothing records that an edit was lost. Pulling first puts the last-write-wins comparison
+where it is implemented — a local row that loses is replaced *and comes off the queue*, so the push
+cannot send it. The cost is that a failed pull defers the push a cycle, which is the cheap
+direction: the local store is primary, so late backup costs nothing where a clobbered edit is gone
+for good.
+
+The general lesson, and it has now paid twice on this project: **a test that passes proves nothing
+until you have seen it fail.** Inverting the thing under test is cheap, and it is the only way to
+tell a guard from a decoration.
+
+**Last-write-wins is a constraint, not a convention.** The ordering above is correct and tested, and
+it was still only a convention — nothing stopped a *future* caller upserting a stale row, and "the
+only caller does it in the right order" is true exactly until a second caller exists.
+`reject_stale_update` raises `PT409` when `updated_at` goes backwards, the `pin_soft_delete` shape.
+Scoped to the tables where whole-row last-write-wins is genuinely the reconciliation rule —
+`habits`, `reflections`, `habit_pauses` — and **deliberately not `nudges`**, whose cross-device
+story is OR'd flags with a read-time collapse of duplicate occasions, where a strict gate would
+reject a legitimate flag write from the device that did not create the row. That exemption has its
+own pgTAP assertion, so applying the trigger more widely later fails the suite rather than quietly
+breaking the merge. The append-only ledgers need nothing: no `updated_at`, no UPDATE grant, and a
+replay ignored on its key. **Equal passes** — the overlap window re-reads covered ground and a
+retried push resends a batch verbatim, so an identical row arriving again is what sync does all day.
+
+Three smaller ones:
+
+- **The pull cursor lives in the device database, not in `shared_preferences`.** The two can
+  disagree in one direction that matters: a cursor outliving the rows it describes asks for
+  everything written after a point with nothing behind it, and skips the lot, silently and
+  permanently. Same file means they are wiped together. The opposite direction just re-pulls, which
+  every key here makes free.
+- **A pulled null `category` never erases one already here.** `readOpenEnum` reads a category this
+  build has not heard of as null, so "the user cleared it" and "that device could not decode it" are
+  the same value on the wire. Taken at face value it would erase categories every time an older
+  build synced. Null is *no opinion*.
+- **The queue is cleared conditionally on `updated_at`.** A user can edit a row between it being
+  read for the push and the push returning, which re-queues it; clearing by key alone wipes that
+  flag and the edit is never sent. A silent lost write, and a slower network makes it likelier.
+
+### Left open
+
+- **Duplicate nudge occasions are not yet collapsed.** Two devices can each write a `nudges` row for
+  the same `(habit_id, expected_occasion_at)`, which double-counts autonomy's denominator. The fix
+  is a read-time collapse — lowest id takes identity, flags OR'd, because if either device sent it,
+  it was sent — rather than a delete, since no client role has DELETE and a dropped row would be
+  re-pulled forever. Sequenced deliberately after the notifications branch, which owns the ledger's
+  read paths.
+- **A cleared loser holds stale content until the next pull.** Safe for a specific reason rather
+  than by luck: the row that beat it was written after this device last pulled — that is what made
+  it stale — so the winner sits ahead of the cursor. Written into the code rather than left as a
+  claim.
+- **Nothing is proven against a hosted project.** Every gate here runs against the local stack;
+  `.env.stg` and `.env.prod` are still placeholders, so stg and prod start without a backend and say
+  so as `SyncStatus.unavailable`.
+- **Sync is untested at widget level.** The trigger, the drain and the store are covered against
+  fakes and real SQLite; no test drives the app through an offline edit and a reconnect.
+
+### Next
+
+The nudge collapse, and then auth — sync does nothing until somebody is signed in, and
+`currentUserId` returning null is an ordinary state the drain handles rather than a gap to close
+here.
+
+---
+
 ## 2026-09-15 — backend review and fixes
 
 Branch: `feature/supabase-backend`, on top of the entry below. PR [#4](https://github.com/LWitteman96/taproot/pull/4).
