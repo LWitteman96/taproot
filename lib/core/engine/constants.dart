@@ -237,6 +237,86 @@ abstract final class EngineConstants {
   /// Confirmation framing takes over from Discovery above this convergence.
   static const double confirmationConvergenceThreshold = 0.6;
 
+  // ── Starter chip surfacing (starter-chip-library.md §5) ───────────────────
+  //
+  // Same arrangement as the block above: owned by the reflection feature, kept
+  // here because every tunable lives in one file.
+  //
+  // Adding these did **not** bump [version], deliberately. The version exists
+  // so that a cached derivation computed under different numbers is discarded,
+  // and nothing here feeds stage, vitality, roots or autonomy — these rank the
+  // chips a first reflection offers. Bumping would invalidate every cached
+  // derivation to change the order of four buttons.
+
+  /// How much of a chip's prior survives its daypart. Multiplicative — see
+  /// `daypartFactor`, where the reasoning lives.
+  static const double daypartFactorMatch = 1.0;
+  static const double daypartFactorNeutral = 0.8;
+
+  /// A guess, and flagged as one in §9. It is what stops `after lunch` leading
+  /// an 18:30 walking set while still letting `with morning coffee` reach a
+  /// midday reading set.
+  static const double daypartFactorAdjacent = 0.35;
+
+  /// The ranking preference for habit stacking, made numeric.
+  ///
+  /// The event bonus is the single most consequential number in the chip
+  /// library (§9): it trades the app's belief that stacking is the most
+  /// reliable anchor against its ability to discover that a given user's habit
+  /// is genuinely internally cued. Roughly a third of the prior range — enough
+  /// that a moderately common event cue beats a very common time cue, not so
+  /// much that it steamrolls a category whose honest answer is internal.
+  static const Map<CueType, double> cueTypeBonus = <CueType, double>{
+    CueType.event: 0.30,
+    CueType.location: 0.15,
+    CueType.time: 0.10,
+    CueType.internal: 0.05,
+    CueType.social: 0.0,
+    CueType.unknown: 0.0,
+  };
+
+  /// Below this, a chip is not offered at all. Max possible score is 1.30.
+  ///
+  /// A mismatched daypart leaves a chip scoring at most its type bonus (0.30),
+  /// which sits below this floor by construction — so mismatches self-eliminate
+  /// and no separate rule is needed.
+  static const double starterChipScoreFloor = 0.35;
+
+  /// The event floor may only promote chips scoring at least this.
+  ///
+  /// This matters more than it looks. Without it the guard happily pushes
+  /// `after dinner` into a 09:00 tidying set to satisfy its own arithmetic, and
+  /// a guard that forces in a chip nobody would tap is worse than the imbalance
+  /// it was correcting.
+  static const double starterChipEventPromotionFloor = 0.60;
+
+  /// How many starter chips a first reflection offers, beside the pinned
+  /// designed cue.
+  static const int starterChipCount = 4;
+
+  /// Journey A has no designed cue to pin, so it surfaces one more — and
+  /// raises the non-event floor, because its job is discovering a cue *type*
+  /// the user has not named and an event-heavy set biases that discovery
+  /// toward the answer the app already prefers.
+  static const int starterChipCountWithoutDesignedCue = 5;
+  static const int nonEventFloorWithoutDesignedCue = 2;
+
+  /// At most this many chips of any one cue type, so no set is a monoculture.
+  static const int starterChipTypeCeiling = 3;
+
+  /// At least this many non-event chips, so an internally-, time- or socially-
+  /// cued user always has a true answer available — which is also what keeps
+  /// the growth-engine §5 internal-cue exemption reachable.
+  static const int starterChipNonEventFloor = 1;
+
+  /// At least this many event chips, subject to the promotion floor above.
+  static const int starterChipEventFloor = 2;
+
+  /// Diagnosis surfaces this many friction chips beside `Something else`.
+  static const int frictionChipCount = 5;
+
+  /// At most this many chips of any one friction type.
+  static const int frictionTypeCap = 2;
   // ── Notification scheduling (reflection spec §1, guide §14) ───────────────
   //
   // Owned by the notifications feature; here for the same reason the
