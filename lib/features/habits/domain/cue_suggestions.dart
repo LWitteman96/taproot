@@ -51,19 +51,20 @@ List<String> cueExamplesFor(CueType type) => switch (type) {
     'got home from work',
     'once the kids are asleep',
   ],
-  CueType.time => const <String>[
-    'just woke up',
-    'lunchtime',
-    'before bed',
-  ],
+  CueType.time => const <String>['just woke up', 'lunchtime', 'before bed'],
   CueType.location => const <String>[
     'walked past the gym',
     'sat down at my desk',
     'got in the car',
   ],
-  CueType.social => const <String>[
-    'my partner was going',
-    'a friend texted',
-  ],
+  CueType.social => const <String>['my partner was going', 'a friend texted'],
   CueType.internal || CueType.unknown => const <String>[],
 };
+
+/// The cue read back as one line — the type, then what the user wrote.
+///
+/// A cue with no type still reads fine: the type is required by the creation
+/// flow, but a habit restored from a row written before it was is not a bug to
+/// render around.
+String cueSentence(String cue, CueType? type) =>
+    type == null ? cue : '${cueTypeLabel(type)}: $cue';

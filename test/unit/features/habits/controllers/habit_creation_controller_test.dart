@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:taproot/app/runtime/runtime_providers.dart';
 import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/models/habit.dart';
 import 'package:taproot/core/models/habit_category.dart';
@@ -21,8 +22,8 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         habitServiceProvider.overrideWithValue(repository ?? habits),
-        habitIdGeneratorProvider.overrideWithValue(() => 'habit-new'),
-        creationClockProvider.overrideWithValue(() => createdAt),
+        newIdProvider.overrideWithValue(() => 'habit-new'),
+        clockProvider.overrideWithValue(() => createdAt),
       ],
     );
     addTearDown(container.dispose);
@@ -117,7 +118,7 @@ void main() {
 
     test('back stops at the first step rather than underflowing', () {
       final container = containerWith();
-      final controller = controllerOf(container)..back();
+      controllerOf(container).back();
 
       expect(stateOf(container).stepIndex, 0);
       expect(stateOf(container).isFirstStep, isTrue);
@@ -157,7 +158,7 @@ void main() {
 
     test('opting back in lands on the cue, not on a vanished step', () {
       final container = containerWith();
-      final controller = controllerOf(container)
+      controllerOf(container)
         ..journeyChosen(HabitJourney.track)
         ..journeyChosen(HabitJourney.design);
 
@@ -305,7 +306,10 @@ void main() {
       final controller = controllerOf(container);
       fillDesignedLoop(controller);
 
-      await Future.wait(<Future<void>>[controller.submit(), controller.submit()]);
+      await Future.wait(<Future<void>>[
+        controller.submit(),
+        controller.submit(),
+      ]);
       await controller.submit();
 
       expect(await habits.allHabits(), hasLength(1));

@@ -13,6 +13,7 @@ class DraftTextField extends StatefulWidget {
     required this.label,
     required this.initialValue,
     required this.onChanged,
+    this.controller,
     this.hint,
     this.maxLines = 1,
     this.autofocus = false,
@@ -21,7 +22,16 @@ class DraftTextField extends StatefulWidget {
   });
 
   final String label;
+
+  /// Seeds the field the first time it is built. Ignored when [controller] is
+  /// supplied — the owner has already seeded it.
   final String initialValue;
+
+  /// Supplied when the parent needs to write into the field itself, as the cue
+  /// step does when an example is tapped rather than typed. The parent owns and
+  /// disposes it.
+  final TextEditingController? controller;
+
   final ValueChanged<String> onChanged;
   final String? hint;
   final int maxLines;
@@ -33,29 +43,20 @@ class DraftTextField extends StatefulWidget {
 }
 
 class _DraftTextFieldState extends State<DraftTextField> {
-  late final TextEditingController _controller = TextEditingController(
-    text: widget.initialValue,
-  );
+  late final TextEditingController _owned =
+      widget.controller ?? TextEditingController(text: widget.initialValue);
 
   @override
   void dispose() {
-    _controller.dispose();
+    // Only what this widget made. A controller handed in belongs to the parent
+    // and is still in use after this field is gone.
+    if (widget.controller == null) _owned.dispose();
     super.dispose();
-  }
-
-  /// Replaces the text from outside the field — used when a suggestion is
-  /// tapped rather than typed. Keeps the cursor at the end of the new value.
-  void setText(String value) {
-    _controller.value = TextEditingValue(
-      text: value,
-      selection: TextSelection.collapsed(offset: value.length),
-    );
-    widget.onChanged(value);
   }
 
   @override
   Widget build(BuildContext context) => TextField(
-    controller: _controller,
+    controller: _owned,
     onChanged: widget.onChanged,
     autofocus: widget.autofocus,
     maxLines: widget.maxLines,

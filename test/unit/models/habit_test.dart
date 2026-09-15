@@ -221,13 +221,12 @@ void main() {
       // the fallback only fires for a row that skipped the migration. It is
       // still the one defensible reading of such a row.
       expect(
-        Habit.fromJson(rowWithoutJourney(designedCue: 'after breakfast')).journey,
+        Habit.fromJson(
+          rowWithoutJourney(designedCue: 'after breakfast'),
+        ).journey,
         HabitJourney.design,
       );
-      expect(
-        Habit.fromJson(rowWithoutJourney()).journey,
-        HabitJourney.track,
-      );
+      expect(Habit.fromJson(rowWithoutJourney()).journey, HabitJourney.track);
     });
 
     test('an explicit journey always wins over the inference', () {

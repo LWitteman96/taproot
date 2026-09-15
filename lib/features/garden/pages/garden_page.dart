@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import 'package:taproot/app/router/app_router.dart';
 import 'package:taproot/app/theme/app_dimensions.dart';
 import 'package:taproot/app/theme/app_motion.dart';
 import 'package:taproot/app/theme/app_spacing.dart';
@@ -26,8 +28,10 @@ class GardenPage extends ConsumerWidget {
   static const String title = 'Taproot';
   static const String emptyHeadline = 'Nothing planted yet';
   static const String emptyBody =
-      'A garden starts with one habit. Designing one is the next thing this '
-      'app will learn to do.';
+      'A garden starts with one habit — the thing you do, what sets it off, '
+      'and what you get out of it.';
+  static const String plantLabel = 'Plant something';
+  static const String addLabel = 'Plant another';
   static const String seedLabel = 'Plant a habit (dev)';
   static const String wateredMessage = 'Watered';
   static const String unreadableHeadline = 'Your garden could not be read';
@@ -63,6 +67,17 @@ class GardenPage extends ConsumerWidget {
     final habitIds = ref.watch(plantIdsProvider);
 
     return Scaffold(
+      // Only once there is a garden to add to. The empty state makes the same
+      // offer as its primary action, and a floating button over a spinner or
+      // over "we could not read your garden" is an invitation to make the
+      // problem worse.
+      floatingActionButton: (isLoading || habitIds.isEmpty)
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: () => context.push(AppRoutes.habitCreation),
+              icon: const Icon(Icons.add),
+              label: const Text(addLabel),
+            ),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
@@ -207,9 +222,15 @@ class _UnreadableGarden extends ConsumerWidget {
 
 /// What the app looks like before anything is planted.
 ///
-/// The seed button is dev-only scaffolding — see [plantDemoHabit]. On stg and
-/// prod this is a plain empty state, which is the honest thing to show while
-/// habit creation is still a placeholder.
+/// Mostly transient, now that the entry gate is real: a user with no habits is
+/// redirected into habit creation, so this is what shows in the frame before
+/// the gate resolves, and what a user would find if they ever got back here
+/// with nothing planted.
+///
+/// The seed button below it is dev-only scaffolding — see [plantDemoHabit]. It
+/// has been superseded by the flow the button above it opens, and is kept only
+/// because planting a habit in one tap is still faster than walking six steps
+/// when what you are testing is the watering.
 class _EmptyGarden extends ConsumerWidget {
   const _EmptyGarden();
 
@@ -239,8 +260,13 @@ class _EmptyGarden extends ConsumerWidget {
             style: theme.textTheme.bodyMedium,
             textAlign: TextAlign.center,
           ),
+          const SizedBox(height: AppSpacing.large),
+          FilledButton(
+            onPressed: () => context.push(AppRoutes.habitCreation),
+            child: const Text(GardenPage.plantLabel),
+          ),
           if (canSeed) ...[
-            const SizedBox(height: AppSpacing.large),
+            const SizedBox(height: AppSpacing.medium),
             FilledButton(
               onPressed: () async {
                 await ref.read(demoHabitSeedProvider)();

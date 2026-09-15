@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:taproot/app/runtime/runtime_providers.dart';
 import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/models/habit.dart';
+import 'package:taproot/core/models/habit_category.dart';
+import 'package:taproot/core/models/habit_journey.dart';
 import 'package:taproot/core/utils/flavor.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
@@ -39,6 +41,10 @@ Future<Habit?> plantDemoHabit({
     identityStatement: 'I am someone who gets outside',
     plantType: 'placeholder',
     targetFrequency: 3,
+    // The loop is written out below, so this is a Journey B habit — the seed
+    // stands in for a habit someone designed, not one they already had.
+    journey: HabitJourney.design,
+    category: HabitCategory.walking,
     designedCue: 'after the kettle boils',
     designedCueType: CueType.event,
     routine: 'twice round the block',

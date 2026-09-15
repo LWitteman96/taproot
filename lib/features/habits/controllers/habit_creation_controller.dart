@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:meta/meta.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
+import 'package:taproot/app/runtime/runtime_providers.dart';
 import 'package:taproot/core/engine/constants.dart';
 import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/models/habit.dart';
@@ -219,8 +220,8 @@ class HabitCreationController extends Notifier<HabitCreationState> {
   @override
   HabitCreationState build() {
     _habits = ref.read(habitServiceProvider);
-    _newHabitId = ref.read(habitIdGeneratorProvider);
-    _clock = ref.read(creationClockProvider);
+    _newHabitId = ref.read(newIdProvider);
+    _clock = ref.read(clockProvider);
     return const HabitCreationState();
   }
 
@@ -314,10 +315,7 @@ class HabitCreationController extends Notifier<HabitCreationState> {
     try {
       await _habits.saveHabit(habit);
       _log('submit', 'planted ${habit.id} (${habit.journey.name})');
-      state = state.copyWith(
-        isSaving: false,
-        createdHabitId: () => habit.id,
-      );
+      state = state.copyWith(isSaving: false, createdHabitId: () => habit.id);
     } catch (error, stackTrace) {
       _log('submit', 'failed: $error');
       // A no-op until Sentry is initialised (docs/status.md), which is why the
@@ -335,7 +333,7 @@ class HabitCreationController extends Notifier<HabitCreationState> {
       dev.log(message, name: 'HabitCreationController.$action');
 }
 
-final habitCreationControllerProvider = NotifierProvider.autoDispose<
-  HabitCreationController,
-  HabitCreationState
->(HabitCreationController.new);
+final habitCreationControllerProvider =
+    NotifierProvider.autoDispose<HabitCreationController, HabitCreationState>(
+      HabitCreationController.new,
+    );
