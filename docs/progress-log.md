@@ -40,7 +40,7 @@ supabase/migrations/   habit_journey_and_category · pin_last_write_wins
 every table and then pushes everything still queued, and `sync_cursors` remembers where the pull got
 to.
 
-The three traps the backend branch left written down are all closed, and each was verified by
+All three traps the backend branch left written down are closed, and each was verified by
 deleting the guard and watching a test go red rather than by reasoning about it:
 
 - **The pull pages.** PostgREST's `max_rows` is 1000 and it truncates *silently*, so a first-install
@@ -49,7 +49,13 @@ deleting the guard and watching a test go red rather than by reasoning about it:
   becomes visible when its transaction commits, which is later — so a cursor advanced exactly to the
   read time steps over late-committing rows permanently. Re-reading a window is safe because every
   upsert on both sides is idempotent. `gte` rather than `gt` for the same reason in miniature.
-- **Nudge occasion duplicates** are the one still open — see below.
+- **Duplicate nudge occasions collapse at read.** Two devices can each plan the same evening, and
+  sync writes rows by key without meeting the duplicate check `saveNudge` enforces — so the ledger
+  holds two rows for one occasion, which is two entries in autonomy's denominator for something
+  that happened once. Lowest id takes identity (arbitrary but stable, so both devices agree without
+  talking and keep agreeing after a re-pull), flags are OR'd, and it is a read rather than a delete
+  because no client role has DELETE: the duplicate is permanent on the server and would be re-pulled
+  forever, so dropping it locally undoes itself.
 
 ### Decided
 
@@ -118,12 +124,10 @@ failure message says what to do if the grants ever move on purpose.
 
 ### Left open
 
-- **Duplicate nudge occasions are not yet collapsed.** Two devices can each write a `nudges` row for
-  the same `(habit_id, expected_occasion_at)`, which double-counts autonomy's denominator. The fix
-  is a read-time collapse — lowest id takes identity, flags OR'd, because if either device sent it,
-  it was sent — rather than a delete, since no client role has DELETE and a dropped row would be
-  re-pulled forever. Sequenced deliberately after the notifications branch, which owns the ledger's
-  read paths.
+- **The occasion collapse keys on the local date, not the instant.** That matches what the ledger
+  already enforces — `saveNudge` refuses a second row for a habit on a date — and what a completion
+  is matched against. It does mean two occasions deliberately planned for one day would merge. The
+  scheduler does not do that today; if it ever wants to, this is the rule to revisit.
 - **A cleared loser holds stale content until the next pull.** Safe for a specific reason rather
   than by luck: the row that beat it was written after this device last pulled — that is what made
   it stale — so the winner sits ahead of the cursor. Written into the code rather than left as a
@@ -136,9 +140,10 @@ failure message says what to do if the grants ever move on purpose.
 
 ### Next
 
-The nudge collapse, and then auth — sync does nothing until somebody is signed in, and
-`currentUserId` returning null is an ordinary state the drain handles rather than a gap to close
-here.
+Auth. Sync does nothing until somebody is signed in — `currentUserId` returning null is an ordinary
+state the drain handles rather than a gap to close here — so nothing synchronises on a real device
+until that branch lands. Then the reflection check-in, the last stage of the build order still
+missing.
 
 ---
 
