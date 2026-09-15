@@ -134,6 +134,233 @@ here.
 
 ---
 
+## 2026-09-15 — notification scheduling and the nudge ledger
+
+Branch: `feature/notifications`, off `develop`, with the completion tap (PR #5) merged in.
+
+### Landed
+
+The evening check-in, and the ledger that makes autonomy measurable.
+
+```
+lib/core/engine/constants.dart          + the notification block; version → 2
+lib/features/notifications/domain/      expected_occasions · nudge_decision ·
+                                        evening_check_in · notification_access ·
+                                        notification_gateway · nudge_payload
+lib/features/notifications/services/    nudge_scheduler · local_notification_gateway ·
+                                        disabled_notification_gateway ·
+                                        nudge_response_recorder
+lib/features/notifications/providers/   nudge_providers — gateway, scheduler, access,
+                                        and the startup pass
+lib/app/startup/app_startup.dart        step two: initialise the platform, then re-plan
+android/…/AndroidManifest.xml           POST_NOTIFICATIONS, boot + action receivers
+ios/Runner/AppDelegate.swift            the UNUserNotificationCenter delegate
+```
+
+58 new tests — 531 in total. Three gates green.
+
+### Decided
+
+- **A silent occasion is a row, and that is the invariant the whole branch is built around.**
+  `NudgeScheduler` writes the ledger row *before* it queues anything, for every expected occasion,
+  whatever it decided. The failure it is arranged against is the undetectable one: a missing row is
+  indistinguishable from a habit that had no occasion that day, so autonomy would keep returning a
+  confident answer computed over the wrong denominator. Tested as a row count that does not move
+  when the fade rate does.
+- **Occasion n falls on the creation date + `round(n × 7 / f)` days.** A habit carries `f` and
+  nothing else — no weekday set — but autonomy counts *occasions*, so something had to name the
+  days. Even spreading yields exactly `f` per rolling week at every `f`, never drifts over a year,
+  and needs no stored schedule, so two devices replaying one habit derive the same dates. **This is
+  an open calibration question, not a settled one** (see below).
+- **Fading is a deficit rule, not a coin flip:** send unless `priorSent ≥ rate × (priorOccasions + 1)`.
+  It makes Young's 0.70 exactly 7 in 10 rather than 7 on average, it is deterministic so a synced
+  ledger replays identically, it front-loads (a new habit is never silent first), and it absorbs a
+  stage change by withholding until the share falls to the new rate instead of restarting a counter.
+  A random draw at Bloom's 0.10 can go 30 occasions silent, which the user experiences as the app
+  having forgotten him.
+- **Exact alarms are not requested, and neither permission is declared.** Guide §14 asks for the
+  decision early: below Android 12 the app schedules exactly because nothing gates it; on 12+
+  `canScheduleExactNotifications()` reports false and it schedules `inexactAllowWhileIdle`. An
+  evening ritual slot does not need second-accuracy, `USE_EXACT_ALARM` would claim an
+  alarm-clock-class use Play does not grant this app, and `SCHEDULE_EXACT_ALARM` would spend a
+  full-screen settings trip on a few minutes of precision.
+- **Denied permission records occasions anyway**, and reports the silence as `noPermission` rather
+  than as a withhold. The rows are honest — no notification reached the user — and the plan
+  distinguishes *the engine choosing* silence from *the app failing* to nudge, because only the
+  first is a measurement.
+- **The fade decision is made before the permission check**, so a user who declines notifications
+  and later grants them does not resume mid-pattern at the wrong rate.
+- **Startup never fails on notifications.** Step two is wrapped: a platform that will not initialise
+  is a degraded mode, not an error screen in front of the garden. Off Android and iOS the gateway
+  resolves to `DisabledNotificationGateway`, so the desktop test host runs the real startup path in
+  the app's real denied mode rather than being a special case.
+- **Reflection attaches to the notification through `ReflectionPromptComposer`.** Reflection and the
+  next-day nudge are deliberately one notification (reflection spec §1) — look back at today, commit
+  to tomorrow — so the scheduler asks for the backward-looking half and composes it onto the front
+  of the body. `NoReflectionPrompt` answers null until that stage lands. The seam carries one real
+  constraint for it: the question is composed when the notification is *queued*, up to
+  `nudgeHorizonDays` before it fires.
+- **`EngineConstants.version` → 2.** The notification block is not decoration: the occasion cadence
+  decides which local dates autonomy is counted over, so it is a derivation input like any θ.
+- **Notification ids are `nudgeId.hashCode & 0x7fffffff`.** The platforms key by `int`, the ledger
+  by UUID, and re-planning has to replace a pending notification rather than duplicate it — so the
+  mapping is a pure function of the row id rather than a counter.
+- **A pending notification the OS lost is queued again.** A row that claims a nudge, for an occasion
+  still ahead, with nothing pending at its id, is a reinstall or a restore. Left alone it is a nudge
+  the ledger claims and the user never gets — the direction that corrupts the measurement rather
+  than just missing a reminder.
+
+### Left open
+
+- **The occasion calendar is a default, not a resolved question.** Neither spec picks one. Letting
+  the user choose weekdays at creation is better UX and worse measurement — someone who picks
+  Mon/Wed/Fri and runs on Tuesday reads as a miss *and* an un-nudged occasion he never had. Worth
+  instrumenting alongside the nudge-fade rates, which growth spec §9 already calls the single most
+  important thing to measure.
+- **Undo does not clear a nudge's `confirmed` flag.** Carried forward from the store branch and
+  deliberately not built against the completion-tap branch while it was in flight. Autonomy
+  self-corrects, but the column is stale and the insight surfaces that read confirms and declines
+  directly (growth spec §8) would read it. `TODO(notifications)` sits on `markConfirmed`.
+- **A schedule the platform refuses is not retried.** The occasion is recorded un-nudged, which is
+  honest, but a transient failure permanently converts a nudge into something that looks like a
+  deliberate withhold. Distinguishing the two needs a column the schema does not have — the same
+  column that would let denied-permission occasions be excluded from the denominator.
+- **Nothing calls `requestNotificationAccess` yet.** The permission prompt is a designed onboarding
+  moment and onboarding does not exist, so a real device runs in the denied mode until it does.
+  **For whoever builds that screen:** `notificationAccessProvider` is a one-shot read, and
+  permission can be revoked in system settings while the app is backgrounded — so the screen needs
+  to invalidate it on lifecycle resume rather than trust what it read on the way in. Scheduling
+  itself is unaffected: every planning pass asks the gateway for access afresh.
+- **A stage change takes up to a week to reach the notifications.** Rows inside the horizon are
+  decided when they are planned and never re-decided, so a habit that climbs a rung today keeps the
+  old rate on occasions already planned. Shortening the horizon trades that against how much of a
+  quiet week survives a phone being off.
+- **The backfill catches up its own rate.** Occasions nobody was around to nudge are recorded
+  un-nudged, which leaves the fade rule in debt and makes it nudge the next several occasions in a
+  row. Defensible as re-engagement after the phone was off for a fortnight; it is also not a
+  decision anyone made on purpose, and it is the other thing worth instrumenting alongside the fade
+  rates themselves.
+
+### Then, before review
+
+Three things landed after the branch was first pushed, in one follow-up.
+
+- **`planHabit` is wired.** `GardenController` re-plans after a watering and after an undo. Awaited
+  rather than fired and forgotten — the plant has already reacted by then, so what it delays is the
+  undo affordance, not the reward — and it can never fail a watering: a completion that was stored
+  is stored, and surfacing a scheduling problem as a failed tap would take back growth the user
+  earned. `nudgeSchedulerProvider` now takes its clock and id generator from `clockProvider` and
+  `newIdProvider`, so the scheduler runs on the same fake clock as the rest of the garden.
+- **The fade counters advance across the planning window, not just its past.** They were seeded from
+  rows before *now* and only advanced on occasions already in the past, so every occasion in one
+  horizon decided against the same numbers — a pass handed out seven sends or seven silences in a
+  row, and the rate was honoured between passes rather than across occasions. They are now seeded
+  from rows before the *window* and advanced occasion by occasion through it. **CI caught this and
+  local runs did not**: the test asserting that some coming occasions are silent passed in
+  Europe/Amsterdam only because a `DateTime.add(Duration(days: 60))` crossed a DST boundary and put
+  the fake clock at exactly 20:00 — the check-in slot — which suppressed one occasion for having
+  missed its evening. On a UTC runner it was 19:00, nothing was suppressed, and the assertion found
+  no silent rows. The test now builds every instant from calendar fields rather than by adding
+  durations, and forces the withhold through a seeded ledger instead of an accident of the clock.
+- **The cross-feature read contract is on the repository interface.** Reflection's priority scoring
+  reads these rows directly (repositories are per-aggregate and shared for reads); notifications
+  stays the only writer. Documented there because a raw read can misinterpret all three of: rows
+  that exist for occasions a week away, `sent` meaning *queued* rather than *seen*, and `confirmed`
+  being an answer to a notification rather than a fact about the habit.
+
+### Then, the background answer
+
+Found while auditing the feature's providers against the paused-provider trap the sync branch hit
+(a Riverpod 3 provider nobody listens to is paused, so it never hears the event it was built to
+hear). **No provider here has that shape** — the feature holds no subscriptions at all, and the one
+live callback belongs to the gateway, which the startup chain keeps listened for the app's
+lifetime. But looking for it surfaced a worse bug one layer down.
+
+**Shade answers were being dropped whenever the app was not in the foreground** — which, for a
+notification that arrives at 20:00, is nearly always. Both actions are declared
+`showsUserInterface: false` so that answering costs nothing, and that is exactly the flag that makes
+the platform deliver the response to a *background isolate*. Only `onDidReceiveNotificationResponse`
+was registered, so the answer went to an isolate nobody was listening on. Silent: no error, the
+ledger simply never recorded a confirm. Confirmed against the plugin's `callback_dispatcher.dart`
+rather than inferred from its README.
+
+- `backgroundNudgeResponseHandler` is now registered as the background callback. It is annotated
+  `@pragma('vm:entry-point')` — load-bearing, because the compiler strips a function nothing appears
+  to call, and the failure would show up only in release builds.
+- The isolate has no `ProviderContainer`, so it opens its own database handle, writes through the
+  same repository, and closes. **On two isolates writing one store:** SQLite serialises the writes,
+  so the row is safe; what is not shared is memory. The main isolate's `GardenController` will not
+  see the write until it next reads. That costs nothing today — `confirmed` feeds the insight
+  surfaces, which read the store — but it is now written on `NudgeRepository` alongside the other
+  misread risks, because anything that starts caching nudge rows has to re-read on resume.
+- A body tap opens no database at all. Opening the store to record that a notification was tapped,
+  and then doing nothing with it, would be the most expensive no-op in the app.
+- **The cold-start path is covered too.** An answer given to a notification that *launches* the app
+  reaches neither callback; it is only readable from `getNotificationAppLaunchDetails()`. Startup
+  now asks once, before planning, so the pass that follows sees the ledger the user just changed.
+- Tested over a real database **file** rather than the in-memory fixture. Every in-memory open
+  returns a private store, so a handler writing to one handle and a test reading from another would
+  both pass and prove nothing. Two isolates share a file, so the test does too.
+
+### Then, merging develop (habit creation and the backend)
+
+- **A habit is planned the moment it is planted.** `HabitCreationController` re-plans on a successful
+  save. Without it the ledger stayed empty until the next cold start, so a habit designed this
+  morning got no check-in tonight — the evening when the first one matters most, because it is the
+  first rehearsal of the cue the user has just finished writing.
+- **Both re-plan hooks resolve the scheduler lazily, inside the guard.** Reading it in `build()`
+  made every construction of the garden *and* the creation flow depend on the notification stack
+  being buildable — which took twenty habit-creation tests down the moment the hook landed, and on a
+  device would have meant a notification problem breaking the completion tap. That is the one thing
+  that must never happen, so the promise is now structural rather than a comment.
+- **A cue-less habit is a *tracked* habit.** The merge's `journey` assert caught the notification
+  copy building a Habit that could not exist: no designed cue means Journey A (design-spec §2). The
+  plain form — "Tomorrow, then — Morning run?" — is right for that user precisely because he
+  declined to design a loop, and the test now says so instead of reading as an oversight.
+- The planner assembles `HabitInputs` from all four repositories, so any test that reaches it needs
+  all four as fakes. Worth knowing before it presents as an empty ledger: the guard that stops a
+  scheduling failure from failing a save also swallows a half-wired test harness.
+
+### Then, the review of PR #7
+
+Nine inline findings, all fixed. The three worth recording beyond "fixed":
+
+- **The cap was consumed by history** (the serious one). `planAll` recounted each habit's decisions
+  afterwards — but the known-row branch reports `send` for every *historical* sent row, so a few
+  weeks of ledger exhausted the 60-notification ceiling on its own and every real future nudge was
+  suppressed as `overCap` and written to the ledger as un-nudged. Silent, and it corrupts the
+  measurement rather than just losing a reminder. There is now one counter, incremented only when
+  the OS actually took a notification, returned out of the per-habit pass instead of recounted.
+  **The regression test needed three habits to reproduce it** — the miscount compounds across
+  habits rather than within one, so the running total only passed the ceiling by the third — and
+  writing it surfaced a second bug in the test seeding itself: a shared row id meant each habit's
+  seeded history *updated* the previous habit's row and moved it across, so every caller but the
+  last silently had no history at all. Both versions of the accounting were run against the test to
+  confirm it fails on the old one; the first two attempts passed under both and were not regression
+  tests at all.
+- **`planAll` and `planHabit` had diverged** in how they seeded the cap. One `_plan` now serves
+  both, so the accounting cannot fork again and the next pass-wide step cannot land on one path
+  only.
+- **Two latency findings, same shape.** The first frame was blocking on a full re-plan, and the
+  permission screen was waiting on one after the dialog had already closed. Both now run unawaited
+  with their own failure logging. The launch pass stays inside the startup chain so it still sees a
+  cold-start answer already recorded. One consequence written down where it happens: a startup retry
+  closes the database handle and can land mid-pass, which surfaces as a logged failure and costs
+  nothing, because the ledger is rebuilt from the calendar on every pass.
+
+Also from the review: one access snapshot per pass rather than two platform round trips per
+notification (which had a split-snapshot hazard — the scheduler deciding `canPost` from one reading
+while the gateway scheduled against another); `requestAccess` now prompts and then re-reads rather
+than keeping a second copy of the mapping that had already drifted on iOS provisional grants; one
+`NudgeResponse.from` shared by the foreground callback, the background isolate and the cold-start
+path; `saveNudges` batching the silent majority into one transaction, with the write-then-queue
+ordering kept only for rows actually headed to the OS; a `loadFor(Habit)` entry point so the planner
+stops re-fetching habits it is already holding; and a write-only `isNew` field deleted.
+
+### Next
+
+Supabase sync — a pusher over the `pending_sync` column, which the `nudges` table already carries
+along with the other three.
 ## 2026-09-15 — backend review and fixes
 
 Branch: `feature/supabase-backend`, on top of the entry below. PR [#4](https://github.com/LWitteman96/taproot/pull/4).

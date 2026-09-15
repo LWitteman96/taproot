@@ -16,6 +16,7 @@ import 'package:taproot/features/habits/domain/completion_retraction.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/habits/services/habit_inputs_loader.dart';
+import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 
 /// The garden: every habit, and what the engine derives for it.
 ///
@@ -194,6 +195,7 @@ class GardenController extends Notifier<GardenState> {
 
     try {
       await _completions.recordCompletion(completion);
+      await _replanNudges(habitId);
       return completion;
     } on UnknownHabitException {
       // The habit was deleted on another device. Expected but abnormal — a
@@ -235,6 +237,7 @@ class GardenController extends Notifier<GardenState> {
 
     try {
       await _completions.retractCompletion(habitId, completionId);
+      await _replanNudges(habitId);
     } on CompletionNotRetractableException {
       if (!ref.mounted) return;
       // Normal: the garden was left open across midnight and the offer went
@@ -259,6 +262,36 @@ class GardenController extends Notifier<GardenState> {
       if (!ref.mounted) return;
       _restoreCompletion(habitId, retracted, _clock());
       state = state.copyWith(errorMessage: () => couldNotUndoMessage);
+    }
+  }
+
+  /// Re-plans the habit's upcoming occasions after its history changed.
+  ///
+  /// Awaited rather than fired and forgotten, because the plant has *already*
+  /// reacted — the state update happens before the write — so what this delays
+  /// is the undo affordance, not the reward. It is all local reads and writes,
+  /// and a planning pass that finds every occasion already in the ledger
+  /// writes nothing.
+  ///
+  /// **It can never fail a watering.** A completion that was stored is stored;
+  /// surfacing a scheduling problem as a failed tap would take back growth the
+  /// user earned. The failure is logged and the next launch re-plans anyway.
+  ///
+  /// Within the horizon this is usually a no-op by design: occasions already in
+  /// the ledger are never re-decided, so a stage climbed today does not rewrite
+  /// nudges already planned. What it does do is roll the horizon forward for a
+  /// garden left open across days, and catch up a habit whose occasions nobody
+  /// had planned yet.
+  /// The scheduler is resolved here rather than in `build` on purpose: reading
+  /// it up front would make every garden depend on the notification stack being
+  /// buildable, so a failure over there would take the completion tap down with
+  /// it — which is the one thing that must never happen.
+  Future<void> _replanNudges(String habitId) async {
+    try {
+      await ref.read(nudgeSchedulerProvider).planHabit(habitId);
+    } catch (error, stackTrace) {
+      _log('replan', 'the nudges for $habitId were not re-planned: $error');
+      dev.log('$stackTrace', name: 'GardenController');
     }
   }
 
@@ -292,9 +325,10 @@ class GardenController extends Notifier<GardenState> {
   /// flag is for the reflection layer, which weights an un-nudged completion
   /// differently when it decides what to ask about.
   ///
-  /// It is false everywhere today, because nothing writes the ledger until the
-  /// notifications branch. That is honest rather than provisional: no nudge was
-  /// sent, so none was.
+  /// The ledger behind it is written by `NudgeScheduler`, which records every
+  /// expected occasion — including the ones it deliberately stayed silent on.
+  /// So a false here means "no nudge was sent for today", never "nothing is
+  /// recorded for today".
   bool _wasNudgedToday(HabitInputs inputs, DateTime at) {
     final today = LocalDate.from(at);
     return inputs.nudges.any(

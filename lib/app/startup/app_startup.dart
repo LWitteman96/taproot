@@ -2,14 +2,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:taproot/app/database/database_provider.dart';
 import 'package:taproot/app/sync/sync_service.dart';
+import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 
 /// Everything that has to finish before the app can show its first screen.
 ///
-/// Guide §4's slot. It holds one step today — opening the local store — and is
-/// typed `<void>` because it will hold several: timezone database
-/// initialisation, the notification permission check, and scheduling the
-/// evening check-in all land here in later branches. Callers depend on "startup
-/// finished", never on what it returned.
+/// Guide §4's slot. Three steps: open the local store, start sync listening,
+/// then initialise the notification plugin and re-plan the evening check-ins.
+/// It is typed `<void>` because callers depend on "startup finished", never on
+/// what it returned.
+///
+/// The order is not arbitrary — planning reads the ledger, so the store has to
+/// be open first, and sync sits between them for a reason of its own (below).
+/// Nor is the asymmetry in how they fail: a store that will not open gets an
+/// error screen with a retry, and a notification platform that will not
+/// initialise does not, because the app is fully usable without it.
 final appStartupProvider = FutureProvider<void>((ref) async {
   await ref.watch(openedDatabaseProvider.future);
   if (!ref.mounted) return;
@@ -30,9 +36,14 @@ final appStartupProvider = FutureProvider<void>((ref) async {
   // guide §4 describes it for — in inkBlox it earns its keep by doing nothing
   // but holding a listener alive.
   //
-  // After the store is open, not before: the drain reads the local database,
-  // and a drain that fired first would fail on launch for no reason.
+  // **After the store, before the notifications.** After, because the drain
+  // reads the local database and one that fired first would fail on launch for
+  // no reason. Before, because the notification step *can* fail — that is the
+  // designed asymmetry above — and a device with notifications denied or a
+  // plugin that will not initialise must still back its garden up.
   ref.listen(syncServiceProvider, (previous, next) {});
+
+  await ref.watch(notificationStartupProvider.future);
 });
 
 /// Re-runs startup from the top.
@@ -54,5 +65,6 @@ final appStartupProvider = FutureProvider<void>((ref) async {
 /// belongs here too.
 void retryAppStartup(ProviderContainer container) {
   container.invalidate(openedDatabaseProvider);
+  container.invalidate(notificationStartupProvider);
   container.invalidate(appStartupProvider);
 }

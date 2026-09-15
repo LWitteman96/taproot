@@ -1,4 +1,5 @@
 import 'package:taproot/core/engine/inputs.dart';
+import 'package:taproot/core/models/habit.dart';
 import 'package:taproot/features/habits/domain/completion_repository.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/notifications/domain/nudge_repository.dart';
@@ -34,7 +35,15 @@ class HabitInputsLoader {
   Future<HabitInputs?> load(String habitId) async {
     final habit = await _habits.habitById(habitId);
     if (habit == null) return null;
+    return loadFor(habit);
+  }
 
+  /// The same, for a caller that is already holding the habit.
+  ///
+  /// The planner walks `allHabits()` and would otherwise re-fetch every one of
+  /// them by id — a second query per habit, per pass, for a row it has in hand.
+  Future<HabitInputs> loadFor(Habit habit) async {
+    final habitId = habit.id;
     final completions = _completions.completionsFor(habitId);
     final reflections = _reflections.reflectionsFor(habitId);
     // Including the occasions the engine stayed silent on — they are
