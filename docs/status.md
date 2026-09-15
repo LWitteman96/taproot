@@ -19,7 +19,9 @@ Update this file in the same commit as the work it describes.
 | CI, lint, pre-commit hook | Built |
 | **Growth engine** (`lib/core/engine/`) | **Built and reviewed — stage, vitality, roots, autonomy, adherence, renegotiation** |
 | **Local SQLite store + repositories** | **Built — schema, four repositories, engine inputs loader** |
-| **App skeleton** (`lib/app/`) | **Built — startup, logging, theme, router; two placeholder pages** |
+| **App skeleton** (`lib/app/`) | **Built — startup, logging, theme, router** |
+| **Completion tap** (`lib/features/garden/`) | **Built — garden controller, press-and-hold watering, undo** |
+| Habit creation | Not started — the page is a placeholder shell |
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | Notification scheduling + nudge ledger | Not started |
 | Reflection check-in and chips | Not started |
@@ -28,20 +30,23 @@ Update this file in the same commit as the work it describes.
 
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
 tap → Supabase sync → notifications and the nudge ledger → reflection check-in → garden → insights.
-The engine, the store and the wiring between `main()` and a screen are done, so **the completion tap
-is next** — the first feature code, over repositories that already exist. The backend now exists
-ahead of that order, but only as a schema: nothing in `lib/` talks to it yet.
+The first four are done, so **Supabase sync is next** — a pusher over the `pending_sync` column the
+schema already carries. The backend now exists ahead of that order, but only as a schema: nothing in
+`lib/` talks to it yet.
 
-What the skeleton does *not* include, deliberately: Supabase and Sentry are still uninitialised in
-`main()`, the router's gate is stubbed open with only its fail-safe path implemented, and
-`GardenPage` and `HabitCreationPage` are placeholder shells.
+What is deliberately *not* built yet: Supabase and Sentry are still uninitialised (the `.env` files
+hold no credentials, and `Supabase.initialize` on an empty URL throws at launch); the router's gate
+is stubbed open with only its fail-safe path implemented; `HabitCreationPage` is still a placeholder
+shell, so the only way to get a habit into the store is the **debug-only dev-flavor seed button** on
+the empty garden; and the garden renders its plants as words rather than art, which is waiting on
+the external illustrator.
 
 What the **backend** does not include, deliberately: any Dart that talks to it. There is no
 `supabaseClientProvider`, no remote service behind the repository interfaces and no sync — that is
-the Supabase-sync branch, after the completion tap. Nor is a hosted project provisioned: `.env.dev`
-points at the local stack, `.env.stg` and `.env.prod` are placeholders, and the project refs in
-`scripts/supabase-push.sh` are still empty. Apple and Google sign-in are wired in `config.toml` and
-disabled, because the credentials do not exist yet.
+the Supabase-sync branch. Nor is a hosted project provisioned: `.env.dev` points at the local stack,
+`.env.stg` and `.env.prod` are placeholders, and the project refs in `scripts/supabase-push.sh` are
+still empty. Apple and Google sign-in are wired in `config.toml` and disabled, because the
+credentials do not exist yet.
 
 ---
 
