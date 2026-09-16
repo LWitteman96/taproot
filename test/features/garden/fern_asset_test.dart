@@ -20,9 +20,20 @@ const String fernAsset = 'assets/rive/fern.riv';
 
 /// Every growth stage the engine can report, and the artboard that draws it.
 ///
-/// `Stage.seed` is deliberately absent — the fern has no seed artboard yet, and
-/// the garden has to decide what a just-planted habit looks like.
+/// One entry per [Stage] value, and the map is the checklist: an artboard that
+/// is not in here is not checked, so a stage added to `fern/` without a line
+/// here ships unverified.
+///
+/// `FernSeed` is the odd one. It carries the same state machine and the same
+/// `vitality` binding as the rest, so every assertion below holds — but it is
+/// deliberately inert to vitality, because the engine has none before the first
+/// completion. It sways; it does not droop. Do not extend these tests with
+/// "writing vitality changes the render" without exempting it.
+///
+/// Not every artboard is a stage: `fern/` also has `FernRoots`, which draws
+/// below the ground line and is composed separately.
 const Map<String, String> stageArtboards = {
+  'seed': 'FernSeed',
   'sprout': 'FernSprout',
   'seedling': 'FernSeedling',
   'young': 'FernYoung',
