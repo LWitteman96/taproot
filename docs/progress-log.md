@@ -739,7 +739,7 @@ Branch: `feature/supabase-backend`, on top of the entry below. PR [#4](https://g
 
 ### Corrected
 
-**The entry below says "same seven tables". The device has six.** `habits`, `completions`,
+**The *Supabase backend* entry below says "same seven tables". The device has six.** `habits`, `completions`,
 `completion_retractions`, `reflections`, `nudges` and `habit_pauses` exist on both sides; the
 server's seventh, `profiles`, has no device counterpart at all. It is created by the
 `handle_new_user` trigger, keyed by the auth user id, and is **not drained through `pending_sync`**.
@@ -806,133 +806,6 @@ Three of the fixes are worth knowing about before touching this code:
 
 ---
 
-## 2026-09-09 — the Supabase backend
-
-Branch: `feature/supabase-backend`. Backend only — nothing under `lib/` changed.
-
-### Landed
-
-```
-supabase/config.toml                        local + remote configuration
-supabase/migrations/  20260909090000_initial_schema
-                      20260909090100_rls
-                      20260909090200_new_user_trigger
-supabase/functions/   _shared/cors · delete-account
-supabase/tests/       schema.test · rls.test        (pgTAP, 27 assertions)
-supabase/seed.sql                           deliberately empty
-scripts/supabase-verify.sh                  the backend's gate
-.github/workflows/supabase.yml              runs it, path-filtered on supabase/**
-supabase/README.md                          how to run and verify it
-```
-
-The schema is the device's SQLite schema (`lib/app/database/app_database.dart`) plus `user_id` and
-`synced_at` — same seven tables, same keys, same append-only ledgers, same absence of any stored
-engine value. `scripts/supabase-verify.sh` resets from the migrations, **re-applies every migration a
-second time**, runs pgTAP, and deletes an account through the edge function. All four steps are green
-locally and the same script is what CI runs.
-
-`delete-account` was written now rather than at submission time, and verified end to end against the
-local stack: sign up → plant a habit → POST with the session token → 200, and the auth user, its
-profile and its habits are gone. Guideline 5.1.1(v) is the most common cause of a first-review
-rejection and it is not a thing to discover late.
-
-### Decided
-
-- **No `DELETE` is granted to any client role, on any table.** Deleting a habit is `deleted_at`,
-  undoing a completion is a row in `completion_retractions`, and erasing an account is the edge
-  function running as `service_role`. Without this a device that has not yet heard about a row could
-  delete it and a second device could re-push it — sync stops being a union the moment rows can go
-  backwards. `completions` and `completion_retractions` have no `UPDATE` grant either: they are event
-  ledgers, and an edit to a past event is a different event.
-- **Child rows carry a composite `(habit_id, user_id)` foreign key** into
-  `habits (id, user_id)`, which is why `habits` has a redundant unique constraint on that pair. It
-  makes "this completion belongs to the same user as its habit" a foreign key rather than something
-  the RLS check has to be trusted to have got right. A test inserts a completion Ana owns onto a
-  habit Ben owns: RLS passes, the foreign key catches it.
-- **`synced_at` is a new column with no counterpart on the device** — the pull cursor, stamped by a
-  trigger off the *server's* clock. `updated_at` comes off the client's and is what the app compares.
-  Conflating them means a device with a skewed clock can write a row a later incremental pull never
-  sees. This is the one piece of schema here that the sync branch needs and the guide's schema sketch
-  does not have.
-- **Text enum columns carry the Dart `Enum.name` verbatim** — camelCase (`nudgeConfirmation`,
-  `autonomyCompletion`, `cantRemember`), because `encodeEnum` is `value.name`. `CHECK` lists spell
-  them out so a value the app could not decode fails at insert rather than sitting in the table.
-- **`DROP POLICY IF EXISTS` rather than the guide's `DO $$ ... EXECUTE 'DROP POLICY' ... $$`.** Same
-  idempotency guarantee, a third of the lines; the block form predates `DROP POLICY IF EXISTS`.
-- **Realtime and storage are off.** Realtime would be a second, unordered path into rows that sync
-  drains one way; storage has nothing to hold, since plant art ships in the bundle. The storage purge
-  step stays in `delete-account` as a comment, in the position it belongs in, for the day a bucket
-  exists.
-- **Email confirmations are on**, which the magic-link flow does not itself need. Enabling email
-  sign-up enables the password grant with it and there is no switch separating the two, so with
-  confirmations off anyone could sign up as someone else's address, get a session immediately, and
-  keep a working password on the row that address's real owner later signs into with a magic link.
-  One extra round trip is not worth a stranger's foothold in someone's habits. The auth branch can
-  revisit it if it removes the password grant.
-- **`habits.deleted_at` is pinned one-way by a trigger** (`pin_soft_delete`). Revoking `DELETE` is
-  only half of "a device that never heard about a deletion cannot undo it" — the other half is that
-  a stale whole-row push must not be able to set `deleted_at` back to null. First deletion wins, so
-  a second device cannot move the stamp either. `graduated_at` is deliberately *not* pinned:
-  graduation derives from autonomy, which can fall, and whether it is one-way is the engine's
-  question.
-- **Taproot runs on the 5433x port block, not the CLI defaults.** inkBlox holds 5432x, and "stop your
-  other project" is exactly the thing the bare+worktree layout exists to avoid. `.env.dev` now points
-  at `http://127.0.0.1:54331`.
-
-### Left open
-
-- **No remote project is provisioned.** The refs at the top of `scripts/supabase-push.sh` are still
-  empty and the script fails loudly on them. `.env.stg` and `.env.prod` are placeholders.
-- **Apple and Google sign-in are wired and disabled**, because the credentials do not exist. The
-  `env()` names are in `config.toml` and the empty keys are in `.secrets/.env.*`; enabling a provider
-  is one commit that flips `enabled` and fills its pair. The deep-link scheme
-  `io.supabase.taproot://login-callback/` is *declared* but not registered in `Info.plist` or
-  `AndroidManifest.xml` — the native half is untested.
-- **No SMTP provider is chosen**, so `[auth.email.smtp]` is commented out. Local mail goes to the
-  catcher on port 54334; staging and production would send nothing.
-- **`nudges` has no unique constraint on `(habit_id, expected_occasion_at)`**, matching the device.
-  Two devices can therefore each create a row for the same expected occasion and double-count
-  autonomy's denominator. Adding the constraint here would turn that into a failed sync push rather
-  than something the sync branch can reconcile, so it is a question for that branch, not this one.
-- **`delete-account` does not revoke the Apple grant.** Apple's `/auth/revoke` needs a token issued
-  for that user at sign-in, and nothing captures one yet. The function logs that it skipped rather
-  than pretending; the step keeps its slot, and it stays best-effort — nothing it does may block the
-  deletion.
-- **The pull cursor has a commit-time gap, and the sync branch has to close it.** `synced_at` is
-  stamped when a row is written; the row becomes visible when its transaction commits, which is
-  later. A pull that reads at T and stores `cursor = T` can miss a row stamped before T that commits
-  after it — permanently. `clock_timestamp()` narrows the window to the write itself rather than the
-  transaction's start, but does not close it. The two real fixes are an overlap window
-  (`synced_at > cursor - slack`, safe because every upsert here is idempotent) or an `xid8` cursor.
-  The warning is written out at the top of the schema migration, where the branch that builds the
-  pull will read it.
-- **PostgREST's `max_rows = 1000` truncates silently.** A first-install pull of a year of
-  completions gets exactly one page and no signal that there is more, so the pull must page rather
-  than treat one response as the whole answer. Noted in `config.toml` next to the setting.
-- **Whether a habit should be hard-deletable** at all. Soft delete is what protects the union, but a
-  user asking to erase one habit's history currently keeps its rows. If that changes it is an RPC, or
-  a second edge function — not a `DELETE` grant.
-
-### Reviewed
-
-A review pass over the branch found eight things; six were fixed here and two became the "left open"
-notes above. The six: `profiles` carried a `synced_at` column with no trigger to move it (a cursor
-frozen at its default, which is worse than no cursor — there is now a test asserting *every* table
-with the column has the trigger); email confirmations; the `deleted_at` pin; `delete-account` had no
-`try`/`catch`, so the "best-effort" contract on the Apple revoke was a comment rather than a
-guarantee and an exception would have escaped as a CORS failure on the one screen App Store review
-checks; `now()` → `clock_timestamp()`; and the CI job had no `permissions:` block. The pgTAP suite
-went from 27 assertions to 30.
-
-### Next
-
-Sync, and it is the completion tap's branch that unblocks it, not this one. What that branch needs
-from here: a three-line `supabaseClientProvider`, remote services behind the existing repository
-interfaces, and a `SyncService` that drains `pending_sync` on a false → true connectivity edge —
-treating a `null` previous value as "was offline", so the first `true` emission is not swallowed.
-`main()` also still has no `Supabase.initialize`; the `.env.dev` credentials now exist for it.
-
----
 ## 2026-09-15 — habit creation
 
 Branch: `feature/habit-creation`, on top of the completion tap.
@@ -1065,7 +938,7 @@ cue types and target frequencies to schedule against.
 
 ## 2026-09-15 — completion tap review and fixes
 
-Branch: `feature/completion-tap`, on top of the entry below. PR [#5](https://github.com/LWitteman96/taproot/pull/5).
+Branch: `feature/completion-tap`, on top of the *completion tap* entry below. PR [#5](https://github.com/LWitteman96/taproot/pull/5).
 
 ### Found
 
@@ -1115,6 +988,133 @@ The seed button itself is still scaffolding waiting on the designed habit-creati
 
 ---
 
+## 2026-09-09 — the Supabase backend
+
+Branch: `feature/supabase-backend`. Backend only — nothing under `lib/` changed.
+
+### Landed
+
+```
+supabase/config.toml                        local + remote configuration
+supabase/migrations/  20260909090000_initial_schema
+                      20260909090100_rls
+                      20260909090200_new_user_trigger
+supabase/functions/   _shared/cors · delete-account
+supabase/tests/       schema.test · rls.test        (pgTAP, 27 assertions)
+supabase/seed.sql                           deliberately empty
+scripts/supabase-verify.sh                  the backend's gate
+.github/workflows/supabase.yml              runs it, path-filtered on supabase/**
+supabase/README.md                          how to run and verify it
+```
+
+The schema is the device's SQLite schema (`lib/app/database/app_database.dart`) plus `user_id` and
+`synced_at` — same seven tables, same keys, same append-only ledgers, same absence of any stored
+engine value. `scripts/supabase-verify.sh` resets from the migrations, **re-applies every migration a
+second time**, runs pgTAP, and deletes an account through the edge function. All four steps are green
+locally and the same script is what CI runs.
+
+`delete-account` was written now rather than at submission time, and verified end to end against the
+local stack: sign up → plant a habit → POST with the session token → 200, and the auth user, its
+profile and its habits are gone. Guideline 5.1.1(v) is the most common cause of a first-review
+rejection and it is not a thing to discover late.
+
+### Decided
+
+- **No `DELETE` is granted to any client role, on any table.** Deleting a habit is `deleted_at`,
+  undoing a completion is a row in `completion_retractions`, and erasing an account is the edge
+  function running as `service_role`. Without this a device that has not yet heard about a row could
+  delete it and a second device could re-push it — sync stops being a union the moment rows can go
+  backwards. `completions` and `completion_retractions` have no `UPDATE` grant either: they are event
+  ledgers, and an edit to a past event is a different event.
+- **Child rows carry a composite `(habit_id, user_id)` foreign key** into
+  `habits (id, user_id)`, which is why `habits` has a redundant unique constraint on that pair. It
+  makes "this completion belongs to the same user as its habit" a foreign key rather than something
+  the RLS check has to be trusted to have got right. A test inserts a completion Ana owns onto a
+  habit Ben owns: RLS passes, the foreign key catches it.
+- **`synced_at` is a new column with no counterpart on the device** — the pull cursor, stamped by a
+  trigger off the *server's* clock. `updated_at` comes off the client's and is what the app compares.
+  Conflating them means a device with a skewed clock can write a row a later incremental pull never
+  sees. This is the one piece of schema here that the sync branch needs and the guide's schema sketch
+  does not have.
+- **Text enum columns carry the Dart `Enum.name` verbatim** — camelCase (`nudgeConfirmation`,
+  `autonomyCompletion`, `cantRemember`), because `encodeEnum` is `value.name`. `CHECK` lists spell
+  them out so a value the app could not decode fails at insert rather than sitting in the table.
+- **`DROP POLICY IF EXISTS` rather than the guide's `DO $$ ... EXECUTE 'DROP POLICY' ... $$`.** Same
+  idempotency guarantee, a third of the lines; the block form predates `DROP POLICY IF EXISTS`.
+- **Realtime and storage are off.** Realtime would be a second, unordered path into rows that sync
+  drains one way; storage has nothing to hold, since plant art ships in the bundle. The storage purge
+  step stays in `delete-account` as a comment, in the position it belongs in, for the day a bucket
+  exists.
+- **Email confirmations are on**, which the magic-link flow does not itself need. Enabling email
+  sign-up enables the password grant with it and there is no switch separating the two, so with
+  confirmations off anyone could sign up as someone else's address, get a session immediately, and
+  keep a working password on the row that address's real owner later signs into with a magic link.
+  One extra round trip is not worth a stranger's foothold in someone's habits. The auth branch can
+  revisit it if it removes the password grant.
+- **`habits.deleted_at` is pinned one-way by a trigger** (`pin_soft_delete`). Revoking `DELETE` is
+  only half of "a device that never heard about a deletion cannot undo it" — the other half is that
+  a stale whole-row push must not be able to set `deleted_at` back to null. First deletion wins, so
+  a second device cannot move the stamp either. `graduated_at` is deliberately *not* pinned:
+  graduation derives from autonomy, which can fall, and whether it is one-way is the engine's
+  question.
+- **Taproot runs on the 5433x port block, not the CLI defaults.** inkBlox holds 5432x, and "stop your
+  other project" is exactly the thing the bare+worktree layout exists to avoid. `.env.dev` now points
+  at `http://127.0.0.1:54331`.
+
+### Left open
+
+- **No remote project is provisioned.** The refs at the top of `scripts/supabase-push.sh` are still
+  empty and the script fails loudly on them. `.env.stg` and `.env.prod` are placeholders.
+- **Apple and Google sign-in are wired and disabled**, because the credentials do not exist. The
+  `env()` names are in `config.toml` and the empty keys are in `.secrets/.env.*`; enabling a provider
+  is one commit that flips `enabled` and fills its pair. The deep-link scheme
+  `io.supabase.taproot://login-callback/` is *declared* but not registered in `Info.plist` or
+  `AndroidManifest.xml` — the native half is untested.
+- **No SMTP provider is chosen**, so `[auth.email.smtp]` is commented out. Local mail goes to the
+  catcher on port 54334; staging and production would send nothing.
+- **`nudges` has no unique constraint on `(habit_id, expected_occasion_at)`**, matching the device.
+  Two devices can therefore each create a row for the same expected occasion and double-count
+  autonomy's denominator. Adding the constraint here would turn that into a failed sync push rather
+  than something the sync branch can reconcile, so it is a question for that branch, not this one.
+- **`delete-account` does not revoke the Apple grant.** Apple's `/auth/revoke` needs a token issued
+  for that user at sign-in, and nothing captures one yet. The function logs that it skipped rather
+  than pretending; the step keeps its slot, and it stays best-effort — nothing it does may block the
+  deletion.
+- **The pull cursor has a commit-time gap, and the sync branch has to close it.** `synced_at` is
+  stamped when a row is written; the row becomes visible when its transaction commits, which is
+  later. A pull that reads at T and stores `cursor = T` can miss a row stamped before T that commits
+  after it — permanently. `clock_timestamp()` narrows the window to the write itself rather than the
+  transaction's start, but does not close it. The two real fixes are an overlap window
+  (`synced_at > cursor - slack`, safe because every upsert here is idempotent) or an `xid8` cursor.
+  The warning is written out at the top of the schema migration, where the branch that builds the
+  pull will read it.
+- **PostgREST's `max_rows = 1000` truncates silently.** A first-install pull of a year of
+  completions gets exactly one page and no signal that there is more, so the pull must page rather
+  than treat one response as the whole answer. Noted in `config.toml` next to the setting.
+- **Whether a habit should be hard-deletable** at all. Soft delete is what protects the union, but a
+  user asking to erase one habit's history currently keeps its rows. If that changes it is an RPC, or
+  a second edge function — not a `DELETE` grant.
+
+### Reviewed
+
+A review pass over the branch found eight things; six were fixed here and two became the "left open"
+notes above. The six: `profiles` carried a `synced_at` column with no trigger to move it (a cursor
+frozen at its default, which is worse than no cursor — there is now a test asserting *every* table
+with the column has the trigger); email confirmations; the `deleted_at` pin; `delete-account` had no
+`try`/`catch`, so the "best-effort" contract on the Apple revoke was a comment rather than a
+guarantee and an exception would have escaped as a CORS failure on the one screen App Store review
+checks; `now()` → `clock_timestamp()`; and the CI job had no `permissions:` block. The pgTAP suite
+went from 27 assertions to 30.
+
+### Next
+
+Sync, and it is the completion tap's branch that unblocks it, not this one. What that branch needs
+from here: a three-line `supabaseClientProvider`, remote services behind the existing repository
+interfaces, and a `SyncService` that drains `pending_sync` on a false → true connectivity edge —
+treating a `null` previous value as "was offline", so the first `true` emission is not swallowed.
+`main()` also still has no `Supabase.initialize`; the `.env.dev` credentials now exist for it.
+
+---
 ## 2026-09-09 — the completion tap
 
 Branch: `feature/completion-tap`, on top of the app skeleton.
