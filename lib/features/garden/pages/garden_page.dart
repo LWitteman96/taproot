@@ -508,6 +508,13 @@ class _SelectedPlantCard extends ConsumerWidget {
     final controller = ref.read(gardenControllerProvider.notifier);
     final undoable = plant.undoableCompletion;
 
+    // Reflect is offered **only when the check-in names this habit**
+    // (garden-design §4.4). A standing button would quietly argue the opposite
+    // of reflection-logic's "don't ask every time", and would open a sheet with
+    // nothing to ask most days.
+    final offer = ref.watch(checkInOfferProvider).value;
+    final reflectsThisPlant = offer != null && offer.habit.id == habitId;
+
     return PlantDetailCard(
       plant: plant,
       ticker: ticker,
@@ -517,6 +524,11 @@ class _SelectedPlantCard extends ConsumerWidget {
       onUndo: undoable == null
           ? null
           : () => controller.undo(habitId, undoable.id),
+      // The offer travels with the tap, so the sheet re-verifies one habit
+      // rather than re-electing a winner among all of them.
+      onReflect: reflectsThisPlant
+          ? () => context.push(AppRoutes.checkIn, extra: offer)
+          : null,
     );
   }
 }

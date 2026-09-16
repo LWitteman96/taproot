@@ -142,7 +142,7 @@ class PageHarness {
       // the race with the test's pumps is not the same thing as a test that
       // does not depend on it. `plant_art_view_test.dart` covers the drawn
       // path; these tests are about the card.
-      riveFernFileProvider.overrideWith((ref) async => null),
+      plantArtFileProvider.overrideWith((ref, plantType) async => null),
     ],
     child: MaterialApp(theme: AppTheme.light, home: const GardenPage()),
   );
@@ -487,6 +487,41 @@ void main() {
       final position = tester.state<ScrollableState>(scrollable).position;
       expect(position.axisDirection, AxisDirection.right);
       expect(position.maxScrollExtent, greaterThan(0));
+    });
+  });
+
+  group('the Reflect button', () {
+    testWidgets('is absent when the check-in is not about this plant', (
+      tester,
+    ) async {
+      // reflection-logic §2 expects no check-in on most days. A standing
+      // Reflect button would quietly argue the opposite, and would open a
+      // sheet with nothing to ask.
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      expect(find.text(PlantDetailCard.reflectLabel), findsNothing);
+    });
+
+    testWidgets('appears once the check-in names this plant', (tester) async {
+      final harness = PageHarness();
+      await harness.store.saveHabit(
+        testHabit(id: 'a', name: 'Morning walk', designedCue: 'after coffee'),
+      );
+      await harness.completions.recordCompletion(
+        Completion(
+          id: 'c1',
+          habitId: 'a',
+          completedAt: DateTime(2026, 3, 4, 7),
+          source: CompletionSource.tap,
+        ),
+      );
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      expect(find.text(PlantDetailCard.reflectLabel), findsOneWidget);
     });
   });
 
