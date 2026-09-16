@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer' as dev;
 
 import 'package:flutter/material.dart';
@@ -5,12 +6,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'package:taproot/app/runtime/runtime_providers.dart';
+import 'package:taproot/core/engine/domain.dart';
+import 'package:taproot/features/garden/controllers/garden_controller.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
+import 'package:taproot/features/garden/providers/garden_selectors.dart';
+import 'package:taproot/features/garden/providers/plant_art_providers.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 import 'package:taproot/features/reflection/controllers/check_in_controller.dart';
 import 'package:taproot/features/reflection/services/check_in_assembler.dart';
 import 'package:taproot/features/reflection/domain/commit_target.dart';
 import 'package:taproot/features/reflection/widgets/check_in_commit.dart';
+import 'package:taproot/features/reflection/widgets/check_in_done.dart';
 import 'package:taproot/features/reflection/widgets/check_in_look_back.dart';
 import 'package:taproot/features/reflection/widgets/check_in_sheet.dart';
 
@@ -69,6 +75,10 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
   /// there is nothing to commit to and the step is skipped entirely.
   CommitTarget? _commit;
 
+  /// Whether the user asked for a different day, which the done state says
+  /// something different about.
+  bool _declined = false;
+
   @override
   void initState() {
     super.initState();
@@ -76,6 +86,12 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
     // the build that is creating this widget rebuilds a provider mid-frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      // Reset at the start rather than cleared on the way out: `dispose` runs
+      // while the element is already deactivated, so reading the provider
+      // container from it is unsafe — and "every check-in starts at the
+      // beginning" is the same guarantee either way.
+      ref.read(checkInIsDoneProvider.notifier).set(false);
+      _holdRoots();
       ref
           .read(checkInControllerProvider.notifier)
           .load(offered: widget.offered);
@@ -103,19 +119,63 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
     if (mounted) setState(() => _hasCommitStep = target != null);
   }
 
+  /// Pin the roots at what they were before the answer.
+  ///
+  /// The reflection is written on answer, so the engine's root depth moves
+  /// straight away. Pinning here and releasing at done is what makes the growth
+  /// land *with* the done state — which is the entire reason the check-in is a
+  /// sheet over the garden rather than a page (check-in-design §7.2).
+  void _holdRoots() {
+    final habitId =
+        (ref.read(checkInControllerProvider).offer ?? widget.offered)?.habit.id;
+    if (habitId == null) return;
+    ref
+        .read(heldRootDepthProvider.notifier)
+        .hold(
+          habitId: habitId,
+          depth: ref.read(habitRootDepthProvider(habitId)) ?? 0,
+        );
+  }
+
+  /// Reach the done state: lift the scrim and let the roots grow.
+  ///
+  /// The garden is refreshed first. The reflection was written through the
+  /// *check-in* controller, so the garden's engine state still predates it —
+  /// releasing the pin without recomputing would grow the roots to exactly
+  /// where they already were (check-in-design §8: "R after comes from the
+  /// engine's recompute after the local write").
+  Future<void> _toDone() async {
+    setState(() => _step = _SheetStep.done);
+    ref.read(checkInIsDoneProvider.notifier).set(true);
+    await ref.read(gardenControllerProvider.notifier).refresh();
+    if (!mounted) return;
+    // Releasing the pin is the payoff. Rive eases the roots to their new depth
+    // over 1.2s, and a Young or Mature plant straightens as its roots pass the
+    // stage's threshold — all of it in the art, none of it drawn here.
+    ref.read(heldRootDepthProvider.notifier).release();
+  }
+
+  /// How the look-back was answered, for the done state's wording.
+  InputMode? _answeredWith;
+
   /// Decide where to go after the look-back answer.
   ///
   /// The commit target is resolved *here* rather than when the sheet opened,
   /// because answering takes time and the notification's own Yes can land in
   /// between — which is one of the three cases §4.3 skips the step for.
-  Future<void> _afterAnswer(CheckInOffer offer) async {
+  Future<void> _afterAnswer(CheckInOffer offer, InputMode inputMode) async {
+    _answeredWith = inputMode;
     final target = await _resolveCommitTarget(offer);
     if (!mounted) return;
     setState(() {
       _commit = target;
       _hasCommitStep = target != null;
-      _step = target == null ? _SheetStep.done : _SheetStep.commit;
     });
+    if (target == null) {
+      unawaited(_toDone());
+    } else {
+      setState(() => _step = _SheetStep.commit);
+    }
   }
 
   Future<CommitTarget?> _resolveCommitTarget(CheckInOffer offer) async {
@@ -195,7 +255,7 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
         _SheetStep.lookBack => CheckInLookBack(
           offer: offer!,
           ticker: widget.ticker,
-          onAnswered: () => _afterAnswer(offer),
+          onAnswered: (inputMode) => _afterAnswer(offer, inputMode),
           // Closing *is* the acknowledgement for a skip: there is no step 2
           // and no done state to show (check-in-design §4.4).
           onSkipped: _close,
@@ -209,13 +269,33 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
             framing: offer.candidate.framing,
             target: commit,
             ticker: widget.ticker,
-            onCommitted: ({required bool declined}) =>
-                setState(() => _step = _SheetStep.done),
+            onCommitted: ({required bool declined}) {
+              _declined = declined;
+              unawaited(_toDone());
+            },
           ),
           null => const SizedBox.shrink(),
         },
-        // Build step 5.
-        _SheetStep.done => const SizedBox(height: 120),
+        _SheetStep.done => CheckInDone(
+          habitId: offer!.habit.id,
+          framing: offer.candidate.framing,
+          inputMode: _answeredWith ?? InputMode.chip,
+          ticker: widget.ticker,
+          declined: _declined,
+          commitDay: _commit == null
+              ? null
+              : commitDayLabel(
+                  occasionAt: _commit!.at,
+                  now: ref.read(clockProvider)(),
+                ),
+          // The one insight v1 fires: the habit's first completion nobody
+          // asked for. Everything else in reflection-logic §6 needs an action
+          // editor that does not exist, and §0.4 forbids an insight without
+          // one.
+          showAutonomyInsight:
+              offer.candidate.occasion.occasion == Occasion.autonomyCompletion,
+          onBack: _close,
+        ),
       },
     };
 
@@ -232,4 +312,21 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
       child: child,
     );
   }
+}
+
+/// Whether the sheet has reached its done state.
+///
+/// Lifted out of the sheet so the garden behind it can react: the scrim lifts
+/// when the answer lands, which is what lets the roots growing behind the sheet
+/// actually be seen (check-in-design §3).
+final checkInIsDoneProvider = NotifierProvider<CheckInIsDoneController, bool>(
+  CheckInIsDoneController.new,
+);
+
+class CheckInIsDoneController extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  // ignore: avoid_positional_boolean_parameters
+  void set(bool value) => state = value;
 }

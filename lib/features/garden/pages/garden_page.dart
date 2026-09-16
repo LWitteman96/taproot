@@ -137,7 +137,14 @@ class GardenPage extends ConsumerWidget {
           builder: (context, live, progress) => GardenScene(
             mode: mode,
             groundLineFraction: live.groundLineFraction,
-            scrimOpacity: CheckInSheetHost.scrimAsking * progress,
+            // Fades to 10% when the answer lands: the whole point of the sheet
+            // is watching the roots grow behind it, and 25% dims them too much
+            // for that to read (check-in-design §3).
+            scrimOpacity:
+                (ref.watch(checkInIsDoneProvider)
+                    ? CheckInSheetHost.scrimDone
+                    : CheckInSheetHost.scrimAsking) *
+                progress,
             ground: (context, groundLine, viewport) => _Ground(
               groundLine: groundLine,
               viewport: viewport,

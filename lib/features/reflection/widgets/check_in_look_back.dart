@@ -33,8 +33,10 @@ class CheckInLookBack extends ConsumerStatefulWidget {
   final CheckInOffer offer;
   final GardenTicker ticker;
 
-  /// The answer is written; the sheet should move to the commit step.
-  final VoidCallback onAnswered;
+  /// The answer is written; the sheet should move on. Carries *how* it was
+  /// answered, because the done state says something different about an honest
+  /// blank than about an answer.
+  final void Function(InputMode inputMode) onAnswered;
 
   /// Recorded as skipped; the sheet should close.
   final VoidCallback onSkipped;
@@ -96,14 +98,23 @@ class _CheckInLookBackState extends ConsumerState<CheckInLookBack> {
   /// With motion off there is no auto-advance at all: the chip stays selected
   /// and a Next button appears, because a screen that moves on by itself is
   /// exactly what reduced motion is asking us not to do.
-  Future<void> _answer(String label, Future<void> Function() write) async {
-    setState(() => _held = label);
+  Future<void> _answer(
+    String label,
+    Future<void> Function() write, {
+    InputMode inputMode = InputMode.chip,
+  }) async {
+    setState(() {
+      _held = label;
+      _answeredWith = inputMode;
+    });
     await write();
     if (!mounted) return;
     if (widget.ticker.isStill) return;
     await Future<void>.delayed(CheckInChip.selectionHold);
-    if (mounted) widget.onAnswered();
+    if (mounted) widget.onAnswered(inputMode);
   }
+
+  InputMode _answeredWith = InputMode.chip;
 
   @override
   Widget build(BuildContext context) {
@@ -175,7 +186,7 @@ class _CheckInLookBackState extends ConsumerState<CheckInLookBack> {
           SizedBox(
             width: double.infinity,
             child: FilledButton(
-              onPressed: widget.onAnswered,
+              onPressed: () => widget.onAnswered(_answeredWith),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(48),
                 backgroundColor: GardenColors.accent,
@@ -374,13 +385,17 @@ class _CheckInLookBackState extends ConsumerState<CheckInLookBack> {
             child: FilledButton(
               onPressed: _typed.text.trim().isEmpty || isSaving
                   ? null
-                  : () => _answer(_typed.text.trim(), () async {
-                      if (framing == Framing.diagnosis) {
-                        await controller.answerWithTypedFriction(_typed.text);
-                      } else {
-                        await controller.answerWithTypedCue(_typed.text);
-                      }
-                    }),
+                  : () => _answer(
+                      _typed.text.trim(),
+                      inputMode: InputMode.typed,
+                      () async {
+                        if (framing == Framing.diagnosis) {
+                          await controller.answerWithTypedFriction(_typed.text);
+                        } else {
+                          await controller.answerWithTypedCue(_typed.text);
+                        }
+                      },
+                    ),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(46),
                 backgroundColor: GardenColors.accent,

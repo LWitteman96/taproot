@@ -90,7 +90,10 @@ class _PlantArtViewState extends ConsumerState<PlantArtView> {
     // Watched, not read: a watering changes vitality and a check-in changes
     // roots, and both have to reach the art.
     _vitality?.value = ref.watch(habitVitalityProvider(widget.habitId)) ?? 1;
-    _roots?.value = ref.watch(habitRootDepthProvider(widget.habitId)) ?? 0;
+    // Not the engine's value directly: while a check-in is being answered the
+    // roots are pinned at their pre-answer depth, so the growth lands with the
+    // done state rather than mid-question (check-in-design §7.2).
+    _roots?.value = ref.watch(drawnRootDepthProvider(widget.habitId));
 
     return ExcludeSemantics(
       child: SizedBox(

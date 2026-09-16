@@ -17,6 +17,8 @@ import 'package:taproot/features/reflection/domain/reflection_repository.dart';
 import 'package:taproot/features/reflection/providers/reflection_providers.dart';
 import 'package:taproot/features/reflection/widgets/check_in_chip.dart';
 import 'package:taproot/features/reflection/widgets/check_in_commit.dart';
+import 'package:taproot/features/reflection/widgets/check_in_done.dart';
+import 'package:taproot/features/reflection/widgets/check_in_sheet.dart';
 import 'package:taproot/features/reflection/widgets/check_in_look_back.dart';
 import 'package:taproot/features/reflection/widgets/check_in_sheet_host.dart';
 
@@ -338,6 +340,58 @@ void main() {
     // meta row rather than a chip, because both steps have a chip called "Yes".
     expect(find.textContaining('done'), findsOneWidget);
     expect(find.text('Tomorrow, then.'), findsNothing);
+  });
+
+  testWidgets('the roots grow when done appears, never earlier', (
+    tester,
+  ) async {
+    // The whole reason the check-in is a sheet over the garden: the reflection
+    // is written on *answer*, so the engine's root depth moves immediately.
+    // Pinning it until done is what makes the growth land with the payoff
+    // rather than while the user is still mid-question.
+    await plantAndWater();
+    await pumpCheckIn(tester);
+
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(CheckInSheet)),
+    );
+    final before = container.read(drawnRootDepthProvider('habit-1'));
+
+    await tester.tap(chip(CheckInLookBack.yesLabel));
+    await tester.pumpAndSettle();
+
+    // Answered and written, but the roots have not moved.
+    expect((await store.reflections.reflectionsFor('habit-1')), hasLength(1));
+    expect(container.read(drawnRootDepthProvider('habit-1')), before);
+
+    await tester.tap(
+      find.widgetWithText(FilledButton, CheckInLookBack.nextLabel),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text(CheckInDone.rootsTitle), findsOneWidget);
+    // Released, so Rive can ease them to their new depth.
+    expect(
+      container.read(drawnRootDepthProvider('habit-1')),
+      greaterThan(before),
+    );
+  });
+
+  testWidgets('done never shows a credit value or a reflection count', (
+    tester,
+  ) async {
+    await plantAndWater();
+    await pumpCheckIn(tester);
+    await tester.tap(chip(CheckInLookBack.yesLabel));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.widgetWithText(FilledButton, CheckInLookBack.nextLabel),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('credit'), findsNothing);
+    expect(find.textContaining('reflections'), findsNothing);
+    expect(find.text(CheckInDone.backLabel), findsOneWidget);
   });
 
   testWidgets('a retry after a failed save writes one reflection, not two', (
