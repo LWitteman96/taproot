@@ -25,6 +25,7 @@ Update this file in the same commit as the work it describes.
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | **Supabase sync** (`lib/app/sync/`) | **Built — connectivity trigger, paged pull with an overlap cursor, push, last-write-wins** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
+| **Notification permission** | **Built and reviewed — the invitation after the first habit, denial as a mode, resume-aware, restore-aware** |
 | **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule, and the question on the evening notification** |
 | Garden rendering | Not started (blocked on external illustrator) |
 | Insight surfacing | Not started |
@@ -35,8 +36,8 @@ The first four are done, and four stages have landed on top of them: habit creat
 the build order does not name, since every stage after it needs habits a user actually made — plus
 notifications, the reflection check-in and Supabase sync. That completes the build order up to its
 last two entries, so what remains is **garden rendering**, which is blocked on the external
-illustrator, and **insight surfacing**, which now has reflection data to surface. Two follow-ups sit
-alongside them: the notification-permission invitation and the check-in composer seam below.
+illustrator, and **insight surfacing**, which now has reflection data to surface. One follow-up sits
+alongside them: the check-in composer seam below.
 
 One thing the check-in **says** is narrower than the data behind it. An un-nudged occasion is
 autonomy's whole measurement, but `sent: false` is written for four different reasons — the fade
@@ -68,10 +69,10 @@ sent to plant something and only then gets a garden. The debug-only dev-flavor s
 to stand on the empty garden has been **removed**: the real flow supersedes it, and with the gate
 live the screen it sat on is only transiently reachable.
 
-The notification permission prompt is wired but not *placed* — nothing calls
-`requestNotificationAccess` yet, because onboarding is where it belongs and onboarding does not
-exist, so a real device runs in the denied mode until it does. Occasions are still recorded in that
-mode, so the engine keeps its inputs either way.
+The notification permission prompt is now placed: it is offered once, on the beat after the first
+habit is planted, and never again. Occasions are still recorded when it is declined, so the engine
+keeps its inputs either way — but only for days that have already passed, so a later change of mind
+in system settings finds the coming week still open.
 
 What the **backend** does not include, deliberately: any Dart that talks to it. There is no
 `supabaseClientProvider`, no remote service behind the repository interfaces and no sync — that is

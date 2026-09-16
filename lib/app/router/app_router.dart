@@ -9,6 +9,12 @@ import 'package:taproot/features/garden/pages/garden_page.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/pages/habit_creation_page.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
+import 'package:taproot/features/notifications/domain/notification_access.dart';
+import 'package:taproot/features/notifications/domain/notification_gateway.dart';
+import 'package:taproot/features/notifications/domain/notification_invitation.dart';
+import 'package:taproot/features/notifications/pages/notification_invitation_page.dart';
+import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
+import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 import 'package:taproot/features/reflection/pages/check_in_page.dart';
 import 'package:taproot/features/reflection/services/check_in_assembler.dart';
 
@@ -20,6 +26,9 @@ abstract final class AppRoutes {
   /// Where a user with no habits yet is sent.
   static const String habitCreation = '/habits/new';
 
+  /// The notification invitation, offered once, after the first habit.
+  static const String notificationInvitation = '/notifications/invitation';
+
   /// The evening check-in. Reached from the garden today, and from the evening
   /// notification once that seam is wired.
   static const String checkIn = '/check-in';
@@ -27,14 +36,12 @@ abstract final class AppRoutes {
 
 /// What the router needs to know about a user before letting them in.
 ///
-/// Guide §7's shape, with Taproot's contents. It is one field today because
-/// there is only one thing worth gating on that the app could ever answer;
-/// `hasProfile` joins it when auth lands, and `notificationsDecided` when the
-/// permission flow does.
-typedef AppGate = ({bool hasFirstHabit});
+/// Guide §7's shape, with Taproot's contents. `hasProfile` joins these when
+/// auth lands.
+typedef AppGate = ({bool hasFirstHabit, bool notificationsOffered});
 
 /// The gate that lets everything through.
-const AppGate openAppGate = (hasFirstHabit: true);
+const AppGate openAppGate = (hasFirstHabit: true, notificationsOffered: true);
 
 /// The gate used when the real one could not be resolved.
 ///
@@ -42,7 +49,17 @@ const AppGate openAppGate = (hasFirstHabit: true);
 /// user who *does* have habits into habit creation costs them one tap on the
 /// way back; refusing entry to a user whose profile read timed out costs them
 /// the app. So the safe answer is always the one that keeps moving.
-const AppGate failSafeAppGate = (hasFirstHabit: false);
+///
+/// The two fields fail in opposite directions, and deliberately. Habit
+/// creation is somewhere to *be* — a user with an empty garden has nowhere
+/// else — so an unresolved gate sends them there. The notification invitation
+/// is somewhere to be *asked*, and a failed read is not a reason to interrupt
+/// someone with a permission request they may already have answered, so that
+/// half fails as offered.
+const AppGate failSafeAppGate = (
+  hasFirstHabit: false,
+  notificationsOffered: true,
+);
 
 /// How the gate gets resolved. The seam tests override.
 ///
@@ -58,20 +75,77 @@ final appGateResolverProvider = Provider<Future<AppGate> Function()>((ref) {
   final startup = ref.watch(appStartupProvider.future);
   return () async {
     await startup;
-    return resolveAppGate(ref.read(habitServiceProvider));
+    return resolveAppGate(
+      habits: ref.read(habitServiceProvider),
+      invitations: ref.read(notificationInvitationStoreProvider),
+      notifications: ref.read(notificationGatewayProvider),
+    );
   };
 });
 
-/// Resolves the gate: has this user planted anything yet.
+/// Resolves the gate: has this user planted anything, and have they been asked
+/// about notifications.
 ///
-/// One habit is the whole question. A user with an empty garden has nowhere to
-/// be except habit creation — the garden leads with accumulated progress
-/// (design-spec §6), and there is none — so the first habit is what the app
-/// needs before it has a home screen worth showing.
+/// The first habit is what the app needs before it has a home screen worth
+/// showing — the garden leads with accumulated progress (design-spec §6), and
+/// an empty one has none.
 ///
-/// Takes the repository rather than a `Ref` so it can be tested as a function.
-Future<AppGate> resolveAppGate(HabitRepository habits) async =>
-    (hasFirstHabit: (await habits.allHabits()).isNotEmpty);
+/// The invitation is read from the app's own record rather than from the
+/// platform, because the platform cannot answer it: Android reports the same
+/// "not enabled" for a user who refused and a user nobody has asked. See
+/// [NotificationInvitationStore].
+///
+/// **The record is cross-checked against the platform**, because the record
+/// travels and the permission does not. See [_recordSurvivedARestore].
+///
+/// Takes the repositories rather than a `Ref` so it can be tested as a
+/// function.
+Future<AppGate> resolveAppGate({
+  required HabitRepository habits,
+  required NotificationInvitationStore invitations,
+  required NotificationGateway notifications,
+}) async {
+  final hasFirstHabit = (await habits.allHabits()).isNotEmpty;
+  final offered = await invitations.hasBeenOffered();
+  return (
+    hasFirstHabit: hasFirstHabit,
+    notificationsOffered:
+        offered && !await _recordSurvivedARestore(notifications),
+  );
+}
+
+/// Whether the invitation record arrived from another phone rather than from
+/// a conversation with this user.
+///
+/// The record is device-local and deliberately unsynced, but it is not
+/// unmoved: on iOS it lives in `NSUserDefaults`, which rides iCloud and
+/// encrypted local backups and cannot be excluded from either. Permission does
+/// not ride along — it is granted per install — so a restored phone can hold a
+/// record saying "already asked" on an install that has never prompted. Left
+/// alone, that user is never offered notifications again on any device: the
+/// exact harm [NotificationInvitationStore] is written to prevent, arrived by
+/// the one route its reasoning does not cover.
+///
+/// [NotificationMode.undecided] is what makes it detectable, and it means
+/// precisely "*this install* has never prompted". Record says offered, platform
+/// says undecided: that pair is unreachable without a restore, and treating it
+/// as not-yet-offered costs one screen on exactly the devices that should see
+/// it.
+///
+/// A platform that cannot be read answers *false* — trust the record. This is
+/// the opposite fail direction from [NotificationInvitationStore.hasBeenOffered],
+/// and deliberately: there, a failed read leaves no information at all, while
+/// here there is a positive record that simply could not be corroborated.
+/// Re-asking on a channel hiccup would put a once-ever question a second time
+/// to a user who already answered it.
+Future<bool> _recordSurvivedARestore(NotificationGateway notifications) async {
+  try {
+    final access = await notifications.currentAccess();
+    return access.mode == NotificationMode.undecided;
+  } catch (_) {
+    return false;
+  }
+}
 
 /// The gate, resolved, with the failure folded into a value.
 ///
@@ -97,10 +171,19 @@ final appGateProvider = FutureProvider.autoDispose<AppGate>((ref) async {
 /// - A `null` gate — not resolved yet — never redirects. Guessing during the
 ///   loading frame is how a guard bounces a user off a screen they were
 ///   entitled to.
+///
+/// The order of the two questions is the onboarding order, and it is the
+/// product decision rather than an implementation detail: nobody is asked to
+/// accept notifications before they have a habit worth being notified about.
+/// Habit creation leaves for the garden, lands on the root path, and this sends
+/// them on to the invitation — so the invitation arrives on the beat after
+/// planting, without habit creation having to know it exists.
 String? redirectFor(AppGate? gate, String location) {
   if (location != AppRoutes.garden) return null;
   if (gate == null) return null;
-  return gate.hasFirstHabit ? null : AppRoutes.habitCreation;
+  if (!gate.hasFirstHabit) return AppRoutes.habitCreation;
+  if (!gate.notificationsOffered) return AppRoutes.notificationInvitation;
+  return null;
 }
 
 /// The app's router: a flat route list plus one gate (guide §7).
@@ -119,6 +202,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.habitCreation,
         builder: (context, state) => const HabitCreationPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.notificationInvitation,
+        builder: (context, state) => const NotificationInvitationPage(),
       ),
       GoRoute(
         path: AppRoutes.checkIn,

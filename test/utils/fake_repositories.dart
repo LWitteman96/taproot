@@ -9,6 +9,7 @@ import 'package:taproot/core/utils/local_dates.dart';
 import 'package:taproot/features/habits/domain/completion_repository.dart';
 import 'package:taproot/features/habits/domain/completion_retraction.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
+import 'package:taproot/features/notifications/domain/notification_invitation.dart';
 import 'package:taproot/features/notifications/domain/nudge_repository.dart';
 import 'package:taproot/features/notifications/domain/occasion_collapse.dart';
 import 'package:taproot/features/reflection/domain/reflection_repository.dart';
@@ -328,6 +329,42 @@ class FakeNudgeService implements NudgeRepository {
     final existing = _nudges[nudgeId];
     if (existing == null) throw UnknownNudgeException(nudgeId);
     _nudges[nudgeId] = change(existing);
+  }
+}
+
+/// The invitation record, in memory.
+///
+/// `offered` is public so a test can set up "already asked" without having to
+/// drive the screen that asks.
+class FakeNotificationInvitationStore implements NotificationInvitationStore {
+  FakeNotificationInvitationStore({this.offered = false});
+
+  /// What [hasBeenOffered] answers.
+  bool offered;
+
+  /// Whether a write actually landed. Distinct from [offered], exactly as it
+  /// is in the real store: a failed write still leaves the question put for
+  /// the rest of the run, and only [persisted] survives a relaunch.
+  bool persisted = false;
+
+  int markCalls = 0;
+
+  /// Set to have [markOffered] throw, as a full disk or a failed platform
+  /// channel does. The real store rethrows on this path, so the caller has to
+  /// catch it.
+  bool failMarkOffered = false;
+
+  @override
+  Future<bool> hasBeenOffered() async => offered;
+
+  @override
+  Future<void> markOffered() async {
+    markCalls++;
+    offered = true;
+    if (failMarkOffered) {
+      throw StateError('the invitation record could not be written');
+    }
+    persisted = true;
   }
 }
 

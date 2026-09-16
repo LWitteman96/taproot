@@ -111,6 +111,19 @@ final notificationStartupProvider = FutureProvider<void>((ref) async {
 /// about *scheduling* rather than about the question reaches for — a nudge
 /// test should not have to satisfy the reflection gates to assert a delivery
 /// time.
+///
+/// **Two call sites read this, and they have to stay the same call.**
+/// `NudgeScheduler._queue` composes what is sent; `notificationPreviewProvider`
+/// composes what the invitation screen shows, and that screen's entire claim is
+/// that it cannot promise something the app does not send. The two drifted
+/// once already, invisibly: the preview omitted `reflectionPrompt` while the
+/// scheduler passed it, and with [NoReflectionPrompt] installed everywhere the
+/// prompt was always null — indistinguishable from an omitted argument at both
+/// ends, so no test could tell. Now that a real composer is the default the
+/// drift would be visible, which is precisely why the assertion has to stay:
+/// any change to what this composes belongs in
+/// `test/features/notifications/notification_invitation_page_test.dart` as well
+/// as in the scheduler's tests.
 final reflectionPromptComposerProvider = Provider<ReflectionPromptComposer>(
   (ref) => CheckInPromptComposer(
     loader: ref.watch(habitInputsLoaderProvider),

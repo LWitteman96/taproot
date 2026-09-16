@@ -9,6 +9,7 @@ import 'package:taproot/app/router/app_router.dart';
 import 'package:taproot/app/startup/app_startup_widget.dart';
 import 'package:taproot/app/supabase/supabase_config.dart';
 import 'package:taproot/app/theme/themedata.dart';
+import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
 
 /// Shared bootstrap for every flavor entry point.
 ///
@@ -65,6 +66,22 @@ class TaprootApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // **Held here, by the one widget that outlives every screen.** The
+    // provider's body is where the app's `AppLifecycleListener` is registered,
+    // and a provider nothing ever touches is never built — so without this
+    // line the listener does not exist, and the app goes on believing it may
+    // post notifications after the user switched them off in system settings.
+    //
+    // `watch` rather than `read` is convention rather than load-bearing today:
+    // the provider is not auto-dispose, so one read would keep it alive just
+    // as well. It stops being a matter of taste the moment that changes, which
+    // is the direction Riverpod 3 leans. What *is* load-bearing is that some
+    // widget of app lifetime holds it at all, and that is what
+    // `test/features/notifications/access_refresh_on_resume_test.dart` fails
+    // on — through this exact wiring, by driving a resume and checking the
+    // access value moved.
+    ref.watch(notificationAccessRefreshProvider);
+
     return MaterialApp.router(
       title: 'Taproot',
       // State restoration, so an in-progress reflection check-in survives

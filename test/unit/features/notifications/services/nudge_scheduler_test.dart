@@ -392,10 +392,11 @@ void main() {
       // not, so the engine keeps its inputs.
       gateway.grant(NotificationAccess.denied);
       await saveHabit();
+      clock.now = dayAfterCreation(14);
 
       final plan = await scheduler.planAll();
 
-      expect(await ledger(), hasLength(EngineConstants.nudgeHorizonDays + 1));
+      expect(await ledger(), hasLength(15));
       expect(gateway.queued, isEmpty);
       expect(
         plan.suppressedBy(NudgeSuppression.noPermission),
@@ -405,6 +406,89 @@ void main() {
             'choosing',
       );
       expect(plan.withheld, isEmpty);
+    });
+
+    test('but it does not decide days that have not happened', () async {
+      // The occasions it records are the ones already past: no notification
+      // reached the user, which is the truth autonomy is counted on. Days
+      // still ahead are left alone, because permission is one settings trip
+      // from changing and a week decided in advance against a user who then
+      // grants it is a week of silence they never chose — measured, worse, as
+      // evidence their habit stands on its own.
+      gateway.grant(NotificationAccess.denied);
+      await saveHabit();
+      clock.now = dayAfterCreation(14);
+
+      await scheduler.planAll();
+
+      expect(
+        (await ledger()).where(
+          (row) => row.expectedOccasionAt.isAfter(clock.now),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('and the span it covers is thirty days, not thirty-seven', () async {
+      // The cost of not writing days ahead, pinned rather than described.
+      //
+      // The old behaviour wrote `today - 30` through `today + 7`, so a denied
+      // user's forward rows from one visit met the backfill window of the
+      // next and the pair quietly covered absences up to 37 days. Now each
+      // pass covers 30, flat, and an absence longer than that leaves occasions
+      // with no ledger row at all — which autonomy reads as "this habit had
+      // fewer expected occasions", not as missing data.
+      //
+      // Thirty is still the right line; this exists so the comment above
+      // `windowEnd` cannot go back to claiming the backfill picks up anything
+      // unrecorded, and so that moving `nudgeBackfillDays` moves a test.
+      gateway.grant(NotificationAccess.denied);
+      await saveHabit();
+
+      clock.now = dayAfterCreation(1);
+      await scheduler.planAll();
+
+      // Back five weeks later.
+      clock.now = dayAfterCreation(36);
+      await scheduler.planAll();
+
+      final recorded = (await ledger())
+          .map((row) => LocalDate.from(row.expectedOccasionAt))
+          .toSet();
+
+      expect(
+        recorded,
+        contains(LocalDate.from(dayAfterCreation(6))),
+        reason: 'day 6 is exactly 30 days back from day 36',
+      );
+      expect(
+        recorded,
+        isNot(contains(LocalDate.from(dayAfterCreation(3)))),
+        reason:
+            'days 2-5 fall between the first pass and the second pass\'s '
+            'backfill — the hole the forward rows used to cover',
+      );
+    });
+
+    test('and a later grant finds those days still open', () async {
+      // The other half of the same decision, and the reason it matters: a user
+      // who turns notifications on in settings gets nudges from the next
+      // occasion, not after the horizon already written against them expires.
+      gateway.grant(NotificationAccess.denied);
+      await saveHabit();
+      clock.now = dayAfterCreation(14);
+      await scheduler.planAll();
+
+      gateway.grant(const NotificationAccess(mode: NotificationMode.granted));
+      await scheduler.planAll();
+
+      expect(gateway.queued, isNotEmpty);
+      expect(
+        (await ledger()).where(
+          (row) => row.sent && row.expectedOccasionAt.isAfter(clock.now),
+        ),
+        isNotEmpty,
+      );
     });
 
     test('a refused notification leaves the row honestly un-sent', () async {

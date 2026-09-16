@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:logging/logging.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/data/latest_all.dart' as timezone_data;
 import 'package:timezone/timezone.dart' as timezone;
 
@@ -21,8 +22,11 @@ import 'package:taproot/features/notifications/services/background_nudge_respons
 class LocalNotificationGateway implements NotificationGateway {
   LocalNotificationGateway({
     FlutterLocalNotificationsPlugin? plugin,
+    Future<PermissionStatus> Function()? notificationPermissionStatus,
     this.onResponse,
-  }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
+  }) : _plugin = plugin ?? FlutterLocalNotificationsPlugin(),
+       _permissionStatus =
+           notificationPermissionStatus ?? _askPermissionHandler;
 
   static final Logger _log = Logger('LocalNotificationGateway');
 
@@ -38,6 +42,16 @@ class LocalNotificationGateway implements NotificationGateway {
   );
 
   final FlutterLocalNotificationsPlugin _plugin;
+
+  /// Whether iOS has ever put the notification prompt to this install.
+  ///
+  /// A seam rather than a direct call, because it is the one thing here worth
+  /// a unit test: the [NotificationMode.undecided] it produces is what tells a
+  /// restored backup's invitation record from a real one.
+  final Future<PermissionStatus> Function() _permissionStatus;
+
+  static Future<PermissionStatus> _askPermissionHandler() =>
+      Permission.notification.status;
 
   /// Invoked when a notification is tapped or answered from the shade.
   final void Function(NudgeResponse response)? onResponse;
@@ -157,10 +171,10 @@ class LocalNotificationGateway implements NotificationGateway {
             IOSFlutterLocalNotificationsPlugin
           >()
           ?.checkPermissions();
-      final granted = options?.isEnabled ?? false;
-      return NotificationAccess(
-        mode: granted ? NotificationMode.granted : NotificationMode.denied,
-      );
+      if (options?.isEnabled ?? false) {
+        return const NotificationAccess(mode: NotificationMode.granted);
+      }
+      return NotificationAccess(mode: await _unGrantedIOSMode());
     }
 
     return const NotificationAccess(mode: NotificationMode.denied);
@@ -190,6 +204,47 @@ class LocalNotificationGateway implements NotificationGateway {
     }
 
     return currentAccess();
+  }
+
+  /// Which kind of "not granted" iOS is in.
+  ///
+  /// **iOS is the one platform that can tell "never asked" from "refused"**,
+  /// and it is worth the second plugin to ask it. `UNAuthorizationStatus` has
+  /// `notDetermined`; `flutter_local_notifications` does not surface it —
+  /// `checkPermissions` answers a flat `isEnabled` — so `permission_handler`
+  /// is asked instead, where iOS's `notDetermined` arrives as
+  /// [PermissionStatus.denied] ("needs to be asked first") and a real refusal
+  /// as `permanentlyDenied`.
+  ///
+  /// What that buys is the restore case. The invitation record lives in
+  /// `NSUserDefaults`, which rides iCloud and encrypted local backups and
+  /// cannot be excluded from either; permission does not restore, because it
+  /// is granted per install. So a restored phone has a record saying "already
+  /// asked" and a platform that has never prompted — and `undecided` is the
+  /// only evidence that ever existed of it. [resolveAppGate] is where it is
+  /// spent.
+  ///
+  /// Android gets `denied` and nothing better, which is why this is only half
+  /// of the fix: `areNotificationsEnabled()` reads the same for both, so that
+  /// side is covered by excluding the record from Auto Backup instead
+  /// (`android/app/src/main/res/xml/`).
+  Future<NotificationMode> _unGrantedIOSMode() async {
+    try {
+      final status = await _permissionStatus();
+      return status == PermissionStatus.denied
+          ? NotificationMode.undecided
+          : NotificationMode.denied;
+    } catch (error, stackTrace) {
+      // Denied is the safe wrong answer: it is what this method returned
+      // before it could tell the two apart, and it costs the user nothing
+      // beyond not being re-offered on a restored phone.
+      _log.warning(
+        'the notification authorization status could not be read',
+        error,
+        stackTrace,
+      );
+      return NotificationMode.denied;
+    }
   }
 
   /// Exactness is never *requested*, only observed.
