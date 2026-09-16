@@ -54,6 +54,15 @@ abstract final class GardenLayout {
   static const double stageGroundOffset =
       (stageCanvasSize - stageCanvasGroundY) * worldScale;
 
+  /// How much of a stage artboard sits *above* the ground line once scaled.
+  ///
+  /// This is what anchors the art: the plant stands on canvas y = 900, not on
+  /// the canvas's bottom edge, so the artboard's top goes this far above the
+  /// ground and the remaining [stageGroundOffset] hangs below it. The canvas is
+  /// larger than the plant and transparent, so it overlaps its neighbours on
+  /// purpose — a mature fern's outer fronds reach into the next slot.
+  static const double stageAboveGround = stageCanvasGroundY * worldScale;
+
   /// `FernRoots` is 1024 x 520 with its ground line at its **top** edge, so at
   /// world scale full roots reach this far below the ground line.
   ///

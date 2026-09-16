@@ -12,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rive/rive.dart' as rive;
 
 import 'package:taproot/app/theme/app_motion.dart';
+import 'package:taproot/app/theme/garden_layout.dart';
 import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
 import 'package:taproot/features/garden/domain/plant_art.dart';
@@ -64,13 +65,20 @@ void main() {
     ),
   );
 
-  testWidgets('a fern draws itself', (tester) async {
+  testWidgets('a fern draws itself, at world scale', (tester) async {
     await tester.pumpWidget(
       harness(plantType: 'fern', stage: Stage.mature, file: realFile),
     );
     await tester.pump();
 
     expect(find.byType(rive.RiveWidget), findsOneWidget);
+    // Square and exactly the artboard's scaled size, so `Fit.contain` maps the
+    // 1024 canvas onto it 1:1. Anything else silently rescales the plant and
+    // breaks the one-world-one-scale rule.
+    expect(
+      tester.getSize(find.byType(PlantArtView)),
+      const Size(GardenLayout.stageSize, GardenLayout.stageSize),
+    );
   });
 
   testWidgets('a species with no art takes no space at all', (tester) async {

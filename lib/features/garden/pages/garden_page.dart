@@ -9,6 +9,7 @@ import 'package:taproot/app/theme/garden_layout.dart';
 import 'package:taproot/core/utils/flavor.dart';
 import 'package:taproot/features/garden/controllers/garden_controller.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
+import 'package:taproot/features/garden/domain/plant_art.dart';
 import 'package:taproot/features/garden/domain/plant_descriptions.dart';
 import 'package:taproot/features/garden/providers/garden_scene_providers.dart';
 import 'package:taproot/features/garden/providers/garden_selectors.dart';
@@ -16,6 +17,7 @@ import 'package:taproot/features/garden/widgets/garden_header.dart';
 import 'package:taproot/features/garden/widgets/empty_plot.dart';
 import 'package:taproot/features/garden/widgets/garden_scene.dart';
 import 'package:taproot/features/garden/widgets/selection_glow.dart';
+import 'package:taproot/features/garden/widgets/plant_art_view.dart';
 import 'package:taproot/features/garden/widgets/plant_detail_card.dart';
 import 'package:taproot/features/garden/widgets/plant_silhouette.dart';
 import 'package:taproot/features/habits/domain/plant_choices.dart';
@@ -293,6 +295,14 @@ class _Plant extends ConsumerWidget {
 
     final growth = plant.growth;
     final species = plantChoiceById(plant.habit.plantType)?.label ?? 'Plant';
+    final drawn = hasPlantArt(plant.habit.plantType);
+
+    // How far the plant reaches above the ground, which is what the hit column
+    // is measured from. The art's is fixed by the canvas; a silhouette's is its
+    // own height.
+    final reach = drawn
+        ? GardenLayout.stageAboveGround
+        : PlantSilhouette.sizeFor(growth.stage).height;
 
     return Semantics(
       button: true,
@@ -307,38 +317,51 @@ class _Plant extends ConsumerWidget {
       onTap: onTap,
       child: PlantHitColumn(
         groundLine: groundLine,
-        plantHeight: PlantSilhouette.sizeFor(growth.stage).height,
+        plantHeight: reach,
         onTap: onTap,
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // The plant's base sits *on* the line, not above a caption that sits
-            // on it. Size differences between plants are growth, never layout
-            // (garden-design §2), and that only holds if they share a floor.
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: null,
-              top: groundLine - PlantSilhouette.sizeFor(growth.stage).height,
-              child: Center(
-                child: PlantSilhouette(
-                  species: species,
-                  stage: growth.stage,
-                  vitality: growth.vitality,
+            if (drawn)
+              // Anchored on canvas y = 900, not on the canvas bottom: the
+              // artboard is square and larger than the plant, so the rest of it
+              // hangs below the ground line where the soil covers it.
+              Positioned(
+                left: (GardenLayout.slotPitch - GardenLayout.stageSize) / 2,
+                top: groundLine - GardenLayout.stageAboveGround,
+                width: GardenLayout.stageSize,
+                height: GardenLayout.stageSize,
+                child: PlantArtView(habitId: habitId),
+              )
+            else ...[
+              // The plant's base sits *on* the line, not above a caption that
+              // sits on it. Size differences between plants are growth, never
+              // layout (garden-design §2), and that only holds if they share a
+              // floor.
+              Positioned(
+                left: 0,
+                right: 0,
+                top: groundLine - reach,
+                child: Center(
+                  child: PlantSilhouette(
+                    species: species,
+                    stage: growth.stage,
+                    vitality: growth.vitality,
+                  ),
                 ),
               ),
-            ),
-            Positioned(
-              left: 0,
-              right: 0,
-              top: groundLine + GardenLayout.grassBandHeight + 4,
-              child: Center(
-                child: PlantSilhouetteLabel(
-                  species: species,
-                  stage: growth.stage,
+              Positioned(
+                left: 0,
+                right: 0,
+                top: groundLine + GardenLayout.grassBandHeight + 4,
+                child: Center(
+                  child: PlantSilhouetteLabel(
+                    species: species,
+                    stage: growth.stage,
+                  ),
                 ),
               ),
-            ),
+            ],
           ],
         ),
       ),

@@ -66,6 +66,24 @@ void main() {
       },
     );
 
+    test('the art is anchored on its ground line, not its canvas bottom', () {
+      // The plant stands on canvas y=900 of a 1024 square. Anchoring on the
+      // canvas bottom instead would float every plant 18.6pt above the soil,
+      // which reads as a bug rather than as a plant.
+      expect(GardenLayout.stageAboveGround, closeTo(135, 1e-9));
+      expect(
+        GardenLayout.stageAboveGround + GardenLayout.stageGroundOffset,
+        closeTo(GardenLayout.stageSize, 1e-9),
+      );
+    });
+
+    test('a mature fern is about 115pt tall and its roots reach 78pt down', () {
+      // garden-design §4.2's own numbers, so a change to worldScale that
+      // quietly breaks the design's sense of scale fails here.
+      expect(GardenLayout.stageAboveGround, lessThan(140));
+      expect(GardenLayout.rootsDepth, closeTo(78, 1e-9));
+    });
+
     test('the scene is wide enough for the plants plus the empty plot', () {
       // Three plants means four slots: the plot always follows the last plant.
       expect(

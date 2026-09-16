@@ -3,28 +3,38 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:rive/rive.dart' as rive;
 
 import 'package:taproot/app/theme/app_motion.dart';
+import 'package:taproot/app/theme/garden_layout.dart';
 import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
 import 'package:taproot/features/garden/domain/plant_art.dart';
 import 'package:taproot/features/garden/providers/garden_selectors.dart';
 import 'package:taproot/features/garden/providers/plant_art_providers.dart';
 
-/// The drawn plant on a card, or nothing at all.
+/// The drawn plant, or nothing at all.
 ///
 /// Nothing is the common case for now — five of six species have no art, and a
-/// device without the native library has none either. The card behind this is a
-/// complete description either way, so this draws or it gets out of the way; it
-/// never shows an error or a spinner. A plant flickering in a second after the
-/// rest of the card would be worse than never seeing it.
+/// device without the native library has none either. The garden says the whole
+/// plant in words anyway, so this draws or it gets out of the way; it never
+/// shows an error or a spinner. A plant flickering in a second after the rest
+/// of the scene would be worse than never seeing it.
 ///
-/// It is wrapped in [ExcludeSemantics] because the card already carries the
-/// whole plant as a semantic label. The picture is a second rendering of what
-/// the label says, not another thing to announce.
+/// It renders the artboard at exactly [size] square, which the caller sets from
+/// [GardenLayout.stageSize] so every plant in the garden shares one world scale
+/// (garden-design §2). It does not position itself: where the artboard's ground
+/// line falls is the slot's business, not the art's.
+///
+/// Wrapped in [ExcludeSemantics] because the slot already carries the whole
+/// plant as a semantic label. The picture is a second rendering of what the
+/// label says, not another thing to announce.
 class PlantArtView extends ConsumerWidget {
-  const PlantArtView({required this.habitId, this.height = 176, super.key});
+  const PlantArtView({
+    required this.habitId,
+    this.size = GardenLayout.stageSize,
+    super.key,
+  });
 
   final String habitId;
-  final double height;
+  final double size;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -47,9 +57,8 @@ class PlantArtView extends ConsumerWidget {
     final ticker = gardenTickerOf(context, ref);
 
     return ExcludeSemantics(
-      child: SizedBox(
-        height: height,
-        width: double.infinity,
+      child: SizedBox.square(
+        dimension: size,
         child: AnimatedSwitcher(
           // A stage advance is the one moment the plant is allowed to be a
           // different plant. Cross-fading is what stops that reading as a
@@ -180,11 +189,13 @@ class _FernStageViewState extends ConsumerState<_FernStageView> {
 
     return rive.RiveWidget(
       controller: controller,
+      // The box is the artboard's own aspect and scale, so `contain` maps the
+      // 1024 canvas onto it 1:1 and every stage lands at the same world scale.
       fit: rive.Fit.contain,
-      // The plant grows from the bottom of its canvas and the headroom above it
-      // is deliberate, so bottom-aligning keeps the soil line steady across
-      // stages instead of letting a taller plant push the pot up.
-      alignment: Alignment.bottomCenter,
+      alignment: Alignment.center,
+      // The slot's hit column owns the tap. A plant that swallowed its own
+      // taps would be unselectable everywhere its transparent canvas overlaps
+      // a neighbour, which is most of the row.
       hitTestBehavior: rive.RiveHitTestBehavior.none,
     );
   }
