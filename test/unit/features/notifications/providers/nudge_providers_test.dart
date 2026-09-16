@@ -41,7 +41,14 @@ void main() {
   /// this the container is disposed underneath it, the database closes
   /// mid-query, and the failure surfaces as a confusing error from a pass
   /// nobody was waiting for.
-  Future<void> settle() => pumpEventQueue();
+  ///
+  /// Generously, and it had to grow: the pass now composes a reflection
+  /// question per queued occasion, and composing one is its own habit-inputs
+  /// load — four repository reads — so the chain is deeper than the default 20
+  /// turns reaches. Too few turns surfaces as `This database has already been
+  /// closed` from a pass nobody was waiting for, which reads like a bug in the
+  /// scheduler rather than a test that stopped early.
+  Future<void> settle() => pumpEventQueue(times: 200);
 
   test('startup initialises the platform and plans', () async {
     final container = containerWith(gateway);

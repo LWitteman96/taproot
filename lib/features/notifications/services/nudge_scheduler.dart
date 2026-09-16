@@ -109,7 +109,8 @@ class NudgeScheduler {
   /// cannot quietly queue five times the ceiling. Habits are planned in
   /// creation order, which means an overflow always drops the *newest* habit's
   /// furthest-out nudges — deterministic, and reported rather than silent.
-  Future<NudgePlan> planAll() async => _plan(await _habits.allHabits());
+  Future<NudgePlan> planAll() async =>
+      _plan(await _habits.allHabits(), partial: false);
 
   /// Re-plans one habit. Called after a completion or a habit being planted,
   /// when the stage — and so the fade rate — may just have changed.
@@ -121,7 +122,7 @@ class NudgeScheduler {
         occasions: <PlannedOccasion>[],
       );
     }
-    return _plan(<Habit>[habit]);
+    return _plan(<Habit>[habit], partial: true);
   }
 
   /// One planning pass, over one habit or all of them.
@@ -129,13 +130,41 @@ class NudgeScheduler {
   /// Both entry points share this so that the cap accounting cannot diverge
   /// between them, and so the next pass-wide step — cancelling the orphaned
   /// notifications of a deleted habit, say — cannot land on only one path.
-  Future<NudgePlan> _plan(List<Habit> habits) async {
+  Future<NudgePlan> _plan(List<Habit> habits, {required bool partial}) async {
     final access = await _gateway.currentAccess();
     final pending = access.canPost
         ? await _gateway.pendingNotificationIds()
         : const <int>{};
 
     final planned = <PlannedOccasion>[];
+
+    // **One question per evening, across every habit** (reflection spec §1).
+    // The app gets "one consistent conversational slot instead of two
+    // competing interruptions", and that is a statement about the user's
+    // evening rather than about one plant: three habits all clearing threshold
+    // for Thursday must not put three questions into Thursday's three
+    // notifications. Only the pass can enforce it, because only the pass sees
+    // every habit — the composer is asked about one habit at a time and would
+    // answer yes to all three.
+    //
+    // Habits are planned in creation order, so when two compete for an evening
+    // the older one keeps the question: deterministic, and the same tie-break
+    // the cap uses.
+    //
+    // A pass over *one* habit cannot see the other habits at all, so the set
+    // has to be seeded from what is already queued for them, or every
+    // completion would hand the evening's question out a second time: habit A
+    // takes Thursday on launch, the user waters B that afternoon, and B's
+    // single-habit pass starts with an empty set and composes a question onto
+    // its own Thursday notification too. The invariant is cross-pass by
+    // nature — it is a claim about the user's evening, not about one pass.
+    final questionedEvenings = partial
+        ? await _eveningsSpokenFor(
+            excluding: habits,
+            pending: pending,
+            now: _clock(),
+          )
+        : <LocalDate>{};
 
     // **One counter, incremented only when the OS actually took a
     // notification.** Recounting decisions afterwards is what made the cap
@@ -151,6 +180,7 @@ class NudgeScheduler {
           access: access,
           pending: pending,
           queuedSoFar: queued,
+          questionedEvenings: questionedEvenings,
         );
         planned.addAll(pass.occasions);
         queued = pass.queued;
@@ -175,11 +205,51 @@ class NudgeScheduler {
     return plan;
   }
 
+  /// The evenings other habits' pending notifications already speak for.
+  ///
+  /// Read from the ledger rather than from a column saying "this row carries
+  /// the question", because the notification the OS is holding cannot be read
+  /// back — only its id can. So the approximation is *an evening another habit
+  /// still has a pending notification on*, which is exactly the evening a
+  /// full pass would already have given the question to one of them.
+  ///
+  /// It yields to whoever holds the evening rather than to whoever is older,
+  /// and that is deliberate. Creation order is how a full pass breaks a tie,
+  /// but a single-habit pass cannot re-compose the *other* habit's queued
+  /// notification to take the question off it — so preferring the older habit
+  /// here would sometimes produce two questions instead of none, and one
+  /// question an evening is the rule the tie-break exists to serve.
+  Future<Set<LocalDate>> _eveningsSpokenFor({
+    required List<Habit> excluding,
+    required Set<int> pending,
+    required DateTime now,
+  }) async {
+    if (pending.isEmpty) return <LocalDate>{};
+
+    final planning = excluding.map((habit) => habit.id).toSet();
+    final evenings = <LocalDate>{};
+    for (final habit in await _habits.allHabits()) {
+      if (planning.contains(habit.id)) continue;
+      for (final nudge in await _nudges.nudgesFor(habit.id)) {
+        final deliverAt = nudge.scheduledFor;
+        if (!nudge.sent || deliverAt == null) continue;
+        if (!deliverAt.isAfter(now)) continue;
+        final queuedHere = nudge.occasionIds.any(
+          (nudgeId) => pending.contains(notificationIdFor(nudgeId)),
+        );
+        if (!queuedHere) continue;
+        evenings.add(LocalDate.from(deliverAt));
+      }
+    }
+    return evenings;
+  }
+
   Future<_HabitPass> _planHabit({
     required Habit habit,
     required NotificationAccess access,
     required Set<int> pending,
     required int queuedSoFar,
+    required Set<LocalDate> questionedEvenings,
   }) async {
     // A paused habit expects nothing. Writing occasions through a pause would
     // put days the engine has agreed not to count into the denominator the
@@ -290,21 +360,59 @@ class NudgeScheduler {
         // same evening — with nothing able to cancel the first, because the
         // scheduler never looks that id up again. See
         // [NudgeRecord.mergedIds].
+        final knownDeliverAt = nudgeDeliveryTime(occasion);
         final isPending = known.occasionIds.any(
           (nudgeId) => pending.contains(notificationIdFor(nudgeId)),
         );
-        if (known.sent &&
-            access.canPost &&
-            queued < EngineConstants.maximumPendingNudges &&
-            !isPending &&
-            nudgeDeliveryTime(occasion).isAfter(now)) {
-          final requeued = await _queue(
-            habit: habit,
-            occasion: occasion,
-            nudgeId: known.id,
-            deliverAt: nudgeDeliveryTime(occasion),
-          );
-          if (requeued) queued++;
+        if (known.sent && access.canPost && knownDeliverAt.isAfter(now)) {
+          if (!isPending) {
+            if (queued < EngineConstants.maximumPendingNudges) {
+              final requeued = await _queue(
+                habit: habit,
+                occasion: occasion,
+                nudgeId: known.id,
+                deliverAt: knownDeliverAt,
+                questionedEvenings: questionedEvenings,
+              );
+              if (requeued) queued++;
+            }
+          } else if (pending.contains(notificationIdFor(known.id)) &&
+              knownDeliverAt.difference(now) <=
+                  EngineConstants.nudgeQuestionRefreshWindow) {
+            // **Still queued, and close enough that its question is worth
+            // re-asking.** The reflection half looks back at the day the
+            // message arrives, and it was written when the notification was
+            // queued — possibly a week earlier, about a day that had not
+            // happened. Re-composing it here is what the note on
+            // `ReflectionPromptComposer` promises when it says re-planning
+            // keeps the question from going stale; without this, the promise
+            // was a comment, because nothing ever rewrote a notification the
+            // OS was already holding.
+            //
+            // Cost is bounded by the window: at one occasion a day, only the
+            // next evening's notification is ever in range. The same
+            // notification id replaces rather than adds, so the pending count
+            // does not move and the cap accounting is untouched — which is
+            // also why this asks about `known.id` specifically rather than
+            // reusing `isPending`. If what the OS holds is a *duplicate's*
+            // notification, re-queueing under this row's id would add a second
+            // one instead of replacing it, and a stale question is much the
+            // cheaper loss.
+            //
+            // The result is deliberately ignored, unlike every other call to
+            // `_queue`. A refusal here loses a *re-composition*, not a
+            // notification: the one already queued stays queued and still
+            // fires, carrying the older question. The row is already recorded
+            // as sent, and if the platform has in fact dropped it, the
+            // lost-notification branch above re-queues it on the next pass.
+            await _queue(
+              habit: habit,
+              occasion: occasion,
+              nudgeId: known.id,
+              deliverAt: knownDeliverAt,
+              questionedEvenings: questionedEvenings,
+            );
+          }
         }
 
         priorOccasions++;
@@ -373,6 +481,7 @@ class NudgeScheduler {
           occasion: occasion,
           nudgeId: nudgeId,
           deliverAt: deliverAt,
+          questionedEvenings: questionedEvenings,
         );
         if (sent) {
           await _nudges.markSent(nudgeId);
@@ -447,13 +556,18 @@ class NudgeScheduler {
     required ExpectedOccasion occasion,
     required String nudgeId,
     required DateTime deliverAt,
+    required Set<LocalDate> questionedEvenings,
   }) async {
     try {
-      final prompt = await _reflection.promptFor(
-        habit: habit,
-        occasion: occasion,
-        deliverAt: deliverAt,
-      );
+      final evening = LocalDate.from(deliverAt);
+      final prompt = questionedEvenings.contains(evening)
+          ? null
+          : await _reflection.promptFor(
+              habit: habit,
+              occasion: occasion,
+              deliverAt: deliverAt,
+            );
+      if (prompt != null) questionedEvenings.add(evening);
       await _gateway.schedule(
         ScheduledNudge(
           notificationId: notificationIdFor(nudgeId),

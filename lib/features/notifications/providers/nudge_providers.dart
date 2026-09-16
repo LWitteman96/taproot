@@ -15,6 +15,7 @@ import 'package:taproot/features/notifications/services/local_notification_gatew
 import 'package:taproot/features/notifications/services/local_nudge_service.dart';
 import 'package:taproot/features/notifications/services/nudge_response_recorder.dart';
 import 'package:taproot/features/notifications/services/nudge_scheduler.dart';
+import 'package:taproot/features/reflection/services/check_in_prompt_composer.dart';
 
 final nudgeServiceProvider = Provider<NudgeRepository>(
   (ref) => LocalNudgeService(database: ref.watch(appDatabaseProvider)),
@@ -100,22 +101,34 @@ final notificationStartupProvider = FutureProvider<void>((ref) async {
 
 /// The reflection question that rides along on the evening notification.
 ///
-/// Left as the no-op composer and overridden by the reflection feature when it
-/// lands — the point being that the *notification* is one object with one
-/// slot, not two features racing for the same evening (reflection spec §1).
+/// The seam this provider exists for is now filled: the notification carries
+/// the same question the check-in screen would ask, composed by the same
+/// functions, because reflection and the next-day nudge are deliberately *one*
+/// message and not two features racing for the same evening (reflection spec
+/// §1).
+///
+/// [NoReflectionPrompt] stays in the tree as the override every test that is
+/// about *scheduling* rather than about the question reaches for — a nudge
+/// test should not have to satisfy the reflection gates to assert a delivery
+/// time.
 ///
 /// **Two call sites read this, and they have to stay the same call.**
 /// `NudgeScheduler._queue` composes what is sent; `notificationPreviewProvider`
-/// composes what the invitation screen shows. That screen's entire claim is
-/// that it cannot promise something the app does not send, and overriding this
-/// provider is what makes the claim testable at all: while [NoReflectionPrompt]
-/// is installed the prompt is always null, and null is indistinguishable from
-/// an omitted argument at both ends — which is exactly how the two drifted the
-/// first time. Any change to what this composes belongs in
+/// composes what the invitation screen shows, and that screen's entire claim is
+/// that it cannot promise something the app does not send. The two drifted
+/// once already, invisibly: the preview omitted `reflectionPrompt` while the
+/// scheduler passed it, and with [NoReflectionPrompt] installed everywhere the
+/// prompt was always null — indistinguishable from an omitted argument at both
+/// ends, so no test could tell. Now that a real composer is the default the
+/// drift would be visible, which is precisely why the assertion has to stay:
+/// any change to what this composes belongs in
 /// `test/features/notifications/notification_invitation_page_test.dart` as well
 /// as in the scheduler's tests.
 final reflectionPromptComposerProvider = Provider<ReflectionPromptComposer>(
-  (ref) => const NoReflectionPrompt(),
+  (ref) => CheckInPromptComposer(
+    loader: ref.watch(habitInputsLoaderProvider),
+    clock: ref.watch(clockProvider),
+  ),
 );
 
 final nudgeSchedulerProvider = Provider<NudgeScheduler>(

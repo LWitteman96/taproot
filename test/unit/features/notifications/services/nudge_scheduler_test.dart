@@ -633,6 +633,141 @@ void main() {
       expect(queued.checkIn.body, contains('after breakfast'));
       expect(asked, isNotEmpty);
     });
+
+    test('but only one question an evening, however many habits', () async {
+      // §1 buys the app "one consistent conversational slot instead of two
+      // competing interruptions", and that is a claim about the user's
+      // evening, not about one plant. Three habits clearing threshold for
+      // Thursday must not put three questions into Thursday's notifications —
+      // and the composer cannot see that, because it is asked about one habit
+      // at a time and would answer yes to all three.
+      await saveHabit(id: 'habit-1', name: 'Morning run');
+      await saveHabit(id: 'habit-2', name: 'Read');
+      await saveHabit(id: 'habit-3', name: 'Stretch');
+      await buildScheduler(reflection: _RecordingComposer(asked));
+
+      await scheduler.planAll();
+
+      final withQuestions = gateway.everyScheduleCall
+          .where((nudge) => nudge.checkIn.body.startsWith('What got you going'))
+          .toList();
+      final evenings = withQuestions
+          .map((nudge) => LocalDate.from(nudge.deliverAt))
+          .toList();
+
+      expect(evenings, isNotEmpty);
+      expect(
+        evenings.toSet(),
+        hasLength(evenings.length),
+        reason: 'one evening carried more than one question',
+      );
+
+      // The older habit keeps it when two compete — the same creation-order
+      // tie-break the pending cap uses, so the answer is stable across passes
+      // rather than depending on which habit the store listed first.
+      final tonight = withQuestions.firstWhere(
+        (nudge) => LocalDate.from(nudge.deliverAt) == LocalDate.from(clock.now),
+        orElse: () => withQuestions.first,
+      );
+      expect(tonight.payload.habitId, 'habit-1');
+    });
+
+    test('and still only one when a watering re-plans a single habit', () async {
+      // The invariant is about the user's evening, not about one pass, so a
+      // pass that sees one habit cannot enforce it out of its own state.
+      // Every other test here drives `planAll`, where the set is built from
+      // scratch over every habit and the rule holds by construction — which is
+      // exactly why this hole stayed open: habit A takes tonight on launch,
+      // the user waters B that afternoon, and B's single-habit pass starts
+      // with an empty set and puts a second question into the same evening.
+      await saveHabit(id: 'habit-1', name: 'Morning run');
+      await saveHabit(id: 'habit-2', name: 'Read');
+      await buildScheduler(reflection: _RecordingComposer(asked));
+
+      await scheduler.planAll();
+      final tonight = LocalDate.from(clock.now);
+      final claimed = gateway.queued.values
+          .where((nudge) => LocalDate.from(nudge.deliverAt) == tonight)
+          .where((nudge) => nudge.checkIn.body.startsWith('What got you going'))
+          .toList();
+      expect(
+        claimed,
+        hasLength(1),
+        reason: 'the launch pass should have spoken for tonight exactly once',
+      );
+      expect(claimed.single.payload.habitId, 'habit-1');
+
+      // The watering. B is re-planned on its own, and tonight is already spoken
+      // for by a notification B's pass never looks at.
+      await scheduler.planHabit('habit-2');
+
+      final questionsTonight = gateway.queued.values
+          .where((nudge) => LocalDate.from(nudge.deliverAt) == tonight)
+          .where((nudge) => nudge.checkIn.body.startsWith('What got you going'))
+          .toList();
+      expect(
+        questionsTonight.map((nudge) => nudge.payload.habitId),
+        <String>['habit-1'],
+        reason: 'the single-habit pass handed tonight a second question',
+      );
+    });
+
+    test('re-composes a queued question as its evening comes round', () async {
+      // The promise on `ReflectionPromptComposer` — that re-planning keeps the
+      // question from going stale — was a comment until this. A notification
+      // queued a week out carries a question written against a day that had
+      // not happened; nothing ever rewrote one the OS was already holding, so
+      // the first pass's guess was what the user read.
+      await saveHabit();
+      final answers = <String>['an early guess', 'what actually happened'];
+      await buildScheduler(reflection: _ChangingComposer(answers));
+
+      await scheduler.planAll();
+      final nudgeId = gateway.everyScheduleCall.first.payload.nudgeId;
+      expect(gateway.forNudge(nudgeId)!.checkIn.body, startsWith(answers[0]));
+
+      // A second pass on the same day: the notification is still pending and
+      // still fires tonight, so it is re-composed in place.
+      await scheduler.planAll();
+
+      expect(gateway.forNudge(nudgeId)!.checkIn.body, startsWith(answers[1]));
+      expect(
+        gateway.queued.keys,
+        contains(notificationIdFor(nudgeId)),
+        reason: 'replaced at the same id, not queued twice',
+      );
+    });
+
+    test(
+      'and leaves the far end of the horizon alone until it is near',
+      () async {
+        // The bound on the cost. Only the notification about to fire is worth
+        // re-asking, so a pass re-queues at most one per habit rather than the
+        // whole horizon — which matters because a pass runs on every launch,
+        // every completion and every resume.
+        await saveHabit();
+        await buildScheduler(reflection: _ChangingComposer(<String>['first']));
+
+        await scheduler.planAll();
+        final scheduledFirstPass = gateway.everyScheduleCall.length;
+        gateway.everyScheduleCall.clear();
+
+        await scheduler.planAll();
+
+        expect(scheduledFirstPass, greaterThan(1));
+        expect(
+          gateway.everyScheduleCall,
+          hasLength(1),
+          reason: 'only tonight is inside the refresh window',
+        );
+        expect(
+          gateway.everyScheduleCall.single.deliverAt
+              .difference(clock.now)
+              .inHours,
+          lessThanOrEqualTo(EngineConstants.nudgeQuestionRefreshWindow.inHours),
+        );
+      },
+    );
   });
 
   test('the withheld occasions are what autonomy is measured over', () async {
@@ -674,6 +809,29 @@ class _RecordingComposer implements ReflectionPromptComposer {
   }) async {
     asked.add('${habit.id}@${occasion.date}');
     return 'What got you going today?';
+  }
+}
+
+/// A composer whose answer changes between passes, so a refresh is visible.
+///
+/// It returns each answer once and then repeats the last, which is what makes
+/// "the second pass re-composed it" a different string rather than an
+/// unobservable no-op.
+class _ChangingComposer implements ReflectionPromptComposer {
+  _ChangingComposer(this.answers);
+
+  final List<String> answers;
+  int _asked = 0;
+
+  @override
+  Future<String?> promptFor({
+    required Habit habit,
+    required ExpectedOccasion occasion,
+    required DateTime deliverAt,
+  }) async {
+    final answer = answers[_asked.clamp(0, answers.length - 1)];
+    _asked++;
+    return answer;
   }
 }
 

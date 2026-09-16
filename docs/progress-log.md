@@ -201,6 +201,87 @@ lib/main.dart                          watches the lifecycle refresh
 ### Next
 
 Reflection check-in, or the settings surface the two Left-opens above both point at.
+## 2026-09-16 — the question on the notification
+
+Branch: `feature/check-in-composer`, off develop with the check-in merged.
+
+### Landed
+
+The reflection half of the evening notification. `NoReflectionPrompt` is replaced by
+`CheckInPromptComposer`, which answers the same question the check-in screen answers, through the
+same functions — `occasionFor`, `selectCheckIn`, `checkInQuestion`. One message, two halves: look
+back at today, commit to tomorrow (reflection spec §1).
+
+```
+lib/features/reflection/services/  check_in_prompt_composer
+lib/features/notifications/        nudge_scheduler — one question an evening, and the refresh
+lib/core/engine/constants.dart     nudgeQuestionRefreshWindow
+```
+
+11 new tests — 776 in total. Three gates green.
+
+### Decided
+
+- **Two clocks, and they are not interchangeable.** A nudge for day D is delivered on the evening of
+  D − 1, and composed when it is queued — up to seven days before that. So detection runs at
+  `min(now, deliverAt)` and never later, while the *wording* is rendered at `deliverAt`. The first
+  is a correctness rule: the ledger holds rows for occasions that have not happened, which is the
+  scheduler's whole job, and detecting at a future `deliverAt` would read every one of them as a day
+  the user failed and queue *"No morning run on Thursday — what got in the way?"* about a Thursday
+  nobody has lived. The second is a wording rule: a question composed tonight and read tomorrow has
+  to say `yesterday` where the screen would have said `today`.
+- **One question an evening, across every habit, and the pass is the only place that can enforce
+  it.** §1 buys "one consistent conversational slot instead of two competing interruptions", which
+  is a claim about the user's evening rather than about one plant. The composer is asked about one
+  habit at a time and would say yes to all three; the planning pass sees them all, so it carries the
+  set of evenings already spoken for. Habits are planned in creation order, so the older habit keeps
+  the question — the same tie-break the pending-notification cap uses, and stable across passes.
+- **A queued notification is re-composed once it is within a day of firing.** The note on
+  `ReflectionPromptComposer` already said re-planning on every launch and after every completion is
+  what keeps the question from going stale. It was not true: the pass re-queued a notification only
+  when the OS had *lost* it, so the first pass's guess — written against a day that had not happened
+  — was what the user read a week later. The window is 24 hours because the question is about today,
+  and it is also what bounds the cost: at one occasion a day only the next evening's notification is
+  ever in range, so a pass re-queues at most one per habit. That matters because a pass now runs on
+  every launch, every completion *and* every resume.
+- **The seam is tested at the wire, not only at both ends.** The composer's own tests construct it
+  directly and the scheduler's tests inject a fake, which covers both sides and leaves the join
+  uncovered: swapping the provider back to `NoReflectionPrompt` left the whole suite green while
+  every notification lost its question. That is the same defect this branch fixes in the refresh
+  path, and the same one the review of PR #10 found twice — **a property that holds by default in
+  every scenario the tests create, so nothing can fail when it stops being true**. `NoReflectionPrompt`
+  answering null is the default; a test that never reads the real provider never disturbs it. The
+  useful question about a guard is not whether a test exists but whether a test exists that *could
+  fail*, which for a default-valued seam means exercising a non-default value. One test now reads
+  the real provider graph and asserts a real sentence.
+- **The question is scored, not attached.** Most evenings carry no question at all, and that is the
+  design: §2's priority threshold, the per-habit weekly budget and the 24-hour cooldown all gate it,
+  and most days nothing has happened that is worth asking about. The budget is counted at the
+  evening the message *arrives*, not the evening it was written, so a question queued on Monday for
+  Thursday is Thursday's spend.
+
+### Left open
+
+- **A question is composed per pass, not per delivery.** Inside the refresh window that distinction
+  does not matter; outside it, a notification the user reads without the app having been opened that
+  day carries the last answer the app could compute. There is no way around that without a
+  background task, and a background task to refine the wording of a notification is not worth what
+  it costs.
+- **The invitation preview on `feature/notification-onboarding` still composes with two arguments
+  where the scheduler passes three** — so it shows the nudge half only. Harmless until this branch
+  lands, and owned by that branch (PR #10), which is binding the preview to the composed sentence
+  and correcting the copy that promises a question on every message. Coordinated rather than fixed
+  from here, so the widget keeps one owner.
+- **Nothing reads the answer differently for having been asked by a notification.**
+  `Reflection.wasNudged` still records it faithfully and still nothing consumes it.
+
+### Next
+
+Supabase sync, per the build order, unless the settings surface #10's two Left-opens point at lands
+first.
+
+---
+
 ## 2026-09-16 — The secret scan could not see inside a binary file
 
 Branch: `fix/secret-scan-binary-blind`. Closes the item the sync entry below left open. CI only —
@@ -674,10 +755,8 @@ outranks something said once last night, which is correct — that *is* the user
   stand-in creation form would have front-run habit creation. What this stage contributes instead is
   recording `frictionType` faithfully, including the authored mappings that only make sense as
   routing signals — `didn't feel thirsty` → motivation, `skipped my workout` → forgot.
-- **The check-in is not wired to the evening notification.** Scheduling composes its question through
-  `ReflectionPromptComposer`; the stand-in `NoReflectionPrompt` is still installed, so notifications
-  fire without a question. `check_in_question.dart` is a pure function precisely so the same sentence
-  can be composed on screen and into a notification queued seven days earlier. Follow-up.
+- ~~**The check-in is not wired to the evening notification.**~~ Done on
+  `feature/check-in-composer`; see the entry above.
 - **Two authoring gaps in the library are now visible at run time.** Reading logged mid-morning
   cannot meet the non-event floor — §8 names it — and early-morning journaling has one event anchor.
   The rule reports falling short rather than falling short quietly; the fix is authoring 2–3 more
