@@ -2,142 +2,142 @@
     <Artboard defaultStateMachineId="0:3" viewModelId="9:2" viewModelInstanceId="9:4" x="0" y="0" width="1024" height="1024" styleId="0:4" name="FernSeed" id="0:2">
         <LayoutComponentStyle name="Artboard Style" id="0:4"/>
 
-        <Node name="plant" id="0:73">
-            <Node name="soil-front" id="0:17">
-                <Shape name="soil-front-clumps" id="0:18">
-                    <Ellipse x="485.12" y="892.61" width="6.80" height="5.20" name="Dot" id="0:19"/>
-                    <Ellipse x="534.40" y="894.58" width="5.60" height="4.20" name="Dot" id="0:20"/>
-                    <Ellipse x="514.24" y="897.04" width="4.40" height="3.40" name="Dot" id="0:21"/>
-                    <Fill name="Fill" id="0:23">
-                        <SolidColor colorValue="FF5E3F28" name="Color" id="0:22"/>
-                    </Fill>
-                </Shape>
-                <Shape name="soil-front-lip" id="0:24">
-                    <PointsPath isClosed="true" name="Path" id="0:25">
-                        <CubicDetachedVertex x="467.20" y="900.00" inRotation="0.08905" inDistance="29.99" outRotation="-0.28997" outDistance="18.70" id="0:26"/>
-                        <CubicDetachedVertex x="516.00" y="884.72" inRotation="-3.10939" inDistance="23.72" outRotation="0.04858" outDistance="15.73" id="0:27"/>
-                        <CubicDetachedVertex x="556.80" y="900.00" inRotation="-2.89121" inDistance="18.50" outRotation="3.05254" outDistance="29.99" id="0:28"/>
-                    </PointsPath>
-                    <Fill name="Fill" id="0:30">
-                        <SolidColor colorValue="FF7A5537" name="Color" id="0:29"/>
-                    </Fill>
-                    <Stroke thickness="2.6" join="round" name="Stroke" id="0:31">
-                        <SolidColor colorValue="FF4A3322" name="Color" id="0:32"/>
-                    </Stroke>
-                </Shape>
-            </Node>
-            <Node x="512" y="882" name="seed-droop" id="0:33">
-                <Node name="seed-sway" id="0:34">
-                    <Shape name="seed-shine" id="0:35">
-                        <Ellipse x="-17.94" y="-25.78" width="16.28" height="9.52" name="Dot" id="0:36"/>
-                        <Fill name="Fill" id="0:38">
-                            <SolidColor colorValue="FFD9B386" name="Color" id="0:37"/>
+        <Node name="soil-front" id="0:24">
+            <Shape name="soil-front-clumps" id="0:25">
+                <Ellipse x="485.12" y="892.61" width="6.80" height="5.20" name="Dot" id="0:26"/>
+                <Ellipse x="534.40" y="894.58" width="5.60" height="4.20" name="Dot" id="0:27"/>
+                <Ellipse x="514.24" y="897.04" width="4.40" height="3.40" name="Dot" id="0:28"/>
+                <Fill name="Fill" id="0:30">
+                    <SolidColor colorValue="FF5E3F28" name="Color" id="0:29"/>
+                </Fill>
+            </Shape>
+            <Shape name="soil-front-lip" id="0:31">
+                <PointsPath isClosed="true" name="Path" id="0:32">
+                    <CubicDetachedVertex x="467.20" y="900.00" inRotation="0.08905" inDistance="29.99" outRotation="-0.28997" outDistance="18.70" id="0:33"/>
+                    <CubicDetachedVertex x="516.00" y="884.72" inRotation="-3.10939" inDistance="23.72" outRotation="0.04858" outDistance="15.73" id="0:34"/>
+                    <CubicDetachedVertex x="556.80" y="900.00" inRotation="-2.89121" inDistance="18.50" outRotation="3.05254" outDistance="29.99" id="0:35"/>
+                </PointsPath>
+                <Fill name="Fill" id="0:37">
+                    <SolidColor colorValue="FF7A5537" name="Color" id="0:36"/>
+                </Fill>
+                <Stroke thickness="2.6" join="round" name="Stroke" id="0:38">
+                    <SolidColor colorValue="FF4A3322" name="Color" id="0:39"/>
+                </Stroke>
+            </Shape>
+        </Node>
+        <Node x="512" y="882" name="plant" id="0:23">
+            <Node name="seed-droop" id="0:40">
+                <Node name="seed-sway" id="0:41">
+                    <Shape name="seed-shine" id="0:42">
+                        <Ellipse x="-17.94" y="-25.78" width="16.28" height="9.52" name="Dot" id="0:43"/>
+                        <Fill name="Fill" id="0:45">
+                            <SolidColor colorValue="FFD9B386" name="Color" id="0:44"/>
                         </Fill>
                     </Shape>
-                    <Shape name="seed-outline" id="0:39">
-                        <PointsPath isClosed="true" name="Path" id="0:40">
-                            <CubicDetachedVertex x="-32.67" y="-4.63" inRotation="1.08210" inDistance="15.46" outRotation="-2.05949" outDistance="15.46" id="0:41"/>
-                            <CubicDetachedVertex x="-16.41" y="-44.99" inRotation="2.65290" inDistance="18.39" outRotation="-0.48869" outDistance="26.64" id="0:42"/>
-                            <CubicDetachedVertex x="32.67" y="-39.37" inRotation="-2.05949" inDistance="10.08" outRotation="1.08210" outDistance="10.08" id="0:43"/>
-                            <CubicDetachedVertex x="9.88" y="4.46" inRotation="-0.48869" inDistance="26.64" outRotation="2.65290" outDistance="18.39" id="0:44"/>
+                    <Shape name="seed-outline" id="0:46">
+                        <PointsPath isClosed="true" name="Path" id="0:47">
+                            <CubicDetachedVertex x="-32.67" y="-4.63" inRotation="1.08210" inDistance="15.46" outRotation="-2.05949" outDistance="15.46" id="0:48"/>
+                            <CubicDetachedVertex x="-16.41" y="-44.99" inRotation="2.65290" inDistance="18.39" outRotation="-0.48869" outDistance="26.64" id="0:49"/>
+                            <CubicDetachedVertex x="32.67" y="-39.37" inRotation="-2.05949" inDistance="10.08" outRotation="1.08210" outDistance="10.08" id="0:50"/>
+                            <CubicDetachedVertex x="9.88" y="4.46" inRotation="-0.48869" inDistance="26.64" outRotation="2.65290" outDistance="18.39" id="0:51"/>
                         </PointsPath>
-                        <Stroke thickness="2.6" join="round" name="Stroke" id="0:45">
-                            <SolidColor colorValue="FF4A3322" name="Color" id="0:46"/>
+                        <Stroke thickness="2.6" join="round" name="Stroke" id="0:52">
+                            <SolidColor colorValue="FF4A3322" name="Color" id="0:53"/>
                         </Stroke>
                     </Shape>
-                    <Shape name="seed-shade" id="0:47">
-                        <PointsPath isClosed="true" name="Path" id="0:48">
-                            <CubicDetachedVertex x="-26.18" y="2.07" inRotation="-0.20373" inDistance="11.95" outRotation="0.60741" outDistance="17.00" id="0:49"/>
-                            <CubicDetachedVertex x="9.75" y="4.21" inRotation="2.63128" inDistance="12.95" outRotation="-0.48869" outDistance="19.24" id="0:50"/>
-                            <CubicDetachedVertex x="31.77" y="-33.18" inRotation="1.51850" inDistance="10.50" outRotation="2.39904" outDistance="13.38" id="0:51"/>
-                            <CubicDetachedVertex x="3.62" y="-11.24" inRotation="-0.42153" inDistance="16.69" outRotation="2.69072" outDistance="14.81" id="0:52"/>
+                    <Shape name="seed-shade" id="0:54">
+                        <PointsPath isClosed="true" name="Path" id="0:55">
+                            <CubicDetachedVertex x="-26.18" y="2.07" inRotation="-0.20373" inDistance="11.95" outRotation="0.60741" outDistance="17.00" id="0:56"/>
+                            <CubicDetachedVertex x="9.75" y="4.21" inRotation="2.63128" inDistance="12.95" outRotation="-0.48869" outDistance="19.24" id="0:57"/>
+                            <CubicDetachedVertex x="31.77" y="-33.18" inRotation="1.51850" inDistance="10.50" outRotation="2.39904" outDistance="13.38" id="0:58"/>
+                            <CubicDetachedVertex x="3.62" y="-11.24" inRotation="-0.42153" inDistance="16.69" outRotation="2.69072" outDistance="14.81" id="0:59"/>
                         </PointsPath>
-                        <Fill name="Fill" id="0:54">
-                            <SolidColor colorValue="FF9A6E45" name="Color" id="0:53"/>
+                        <Fill name="Fill" id="0:61">
+                            <SolidColor colorValue="FF9A6E45" name="Color" id="0:60"/>
                         </Fill>
                     </Shape>
-                    <Shape name="seed-body" id="0:55">
-                        <PointsPath isClosed="true" name="Path" id="0:56">
-                            <CubicDetachedVertex x="-32.67" y="-4.63" inRotation="1.08210" inDistance="15.46" outRotation="-2.05949" outDistance="15.46" id="0:57"/>
-                            <CubicDetachedVertex x="-16.41" y="-44.99" inRotation="2.65290" inDistance="18.39" outRotation="-0.48869" outDistance="26.64" id="0:58"/>
-                            <CubicDetachedVertex x="32.67" y="-39.37" inRotation="-2.05949" inDistance="10.08" outRotation="1.08210" outDistance="10.08" id="0:59"/>
-                            <CubicDetachedVertex x="9.88" y="4.46" inRotation="-0.48869" inDistance="26.64" outRotation="2.65290" outDistance="18.39" id="0:60"/>
+                    <Shape name="seed-body" id="0:62">
+                        <PointsPath isClosed="true" name="Path" id="0:63">
+                            <CubicDetachedVertex x="-32.67" y="-4.63" inRotation="1.08210" inDistance="15.46" outRotation="-2.05949" outDistance="15.46" id="0:64"/>
+                            <CubicDetachedVertex x="-16.41" y="-44.99" inRotation="2.65290" inDistance="18.39" outRotation="-0.48869" outDistance="26.64" id="0:65"/>
+                            <CubicDetachedVertex x="32.67" y="-39.37" inRotation="-2.05949" inDistance="10.08" outRotation="1.08210" outDistance="10.08" id="0:66"/>
+                            <CubicDetachedVertex x="9.88" y="4.46" inRotation="-0.48869" inDistance="26.64" outRotation="2.65290" outDistance="18.39" id="0:67"/>
                         </PointsPath>
-                        <Fill name="Fill" id="0:62">
-                            <SolidColor colorValue="FFB8895A" name="Color" id="0:61"/>
+                        <Fill name="Fill" id="0:69">
+                            <SolidColor colorValue="FFB8895A" name="Color" id="0:68"/>
                         </Fill>
                     </Shape>
                 </Node>
             </Node>
-            <Node name="base" id="0:63">
-                <Shape name="base-mound" id="0:64">
-                    <PointsPath isClosed="true" name="Path" id="0:65">
-                        <CubicDetachedVertex x="456.00" y="900.00" inRotation="0.08905" inDistance="37.48" outRotation="-1.10312" outDistance="24.84" id="0:66"/>
-                        <CubicDetachedVertex x="512.00" y="875.36" inRotation="-3.05382" inDistance="28.11" outRotation="-0.08777" outDistance="28.11" id="0:67"/>
-                        <CubicDetachedVertex x="568.00" y="900.00" inRotation="-2.03848" inDistance="24.84" outRotation="3.05254" outDistance="37.48" id="0:68"/>
-                    </PointsPath>
-                    <Fill name="Fill" id="0:70">
-                        <SolidColor colorValue="FF5E3F28" name="Color" id="0:69"/>
-                    </Fill>
-                    <Stroke thickness="2.6" join="round" name="Stroke" id="0:71">
-                        <SolidColor colorValue="FF4A3322" name="Color" id="0:72"/>
-                    </Stroke>
-                </Shape>
-            </Node>
+        </Node>
+        <Node name="base" id="0:70">
+            <Shape name="base-mound" id="0:71">
+                <PointsPath isClosed="true" name="Path" id="0:72">
+                    <CubicDetachedVertex x="456.00" y="900.00" inRotation="0.08905" inDistance="37.48" outRotation="-1.10312" outDistance="24.84" id="0:73"/>
+                    <CubicDetachedVertex x="512.00" y="875.36" inRotation="-3.05382" inDistance="28.11" outRotation="-0.08777" outDistance="28.11" id="0:74"/>
+                    <CubicDetachedVertex x="568.00" y="900.00" inRotation="-2.03848" inDistance="24.84" outRotation="3.05254" outDistance="37.48" id="0:75"/>
+                </PointsPath>
+                <Fill name="Fill" id="0:77">
+                    <SolidColor colorValue="FF5E3F28" name="Color" id="0:76"/>
+                </Fill>
+                <Stroke thickness="2.6" join="round" name="Stroke" id="0:78">
+                    <SolidColor colorValue="FF4A3322" name="Color" id="0:79"/>
+                </Stroke>
+            </Shape>
         </Node>
 
         <LinearAnimation loopValue="loop" fps="60" duration="300" name="Sway" id="0:11">
-            <KeyedObject objectId="0:34" id="0:74">
-                <KeyedProperty propertyKey="15" id="0:75">
-                    <KeyFrameDouble frame="0" value="0.000000" interpolationType="linear" id="0:76"/>
-                    <KeyFrameDouble frame="12" value="0.008353" interpolationType="linear" id="0:77"/>
-                    <KeyFrameDouble frame="25" value="0.015551" interpolationType="linear" id="0:78"/>
-                    <KeyFrameDouble frame="38" value="0.020674" interpolationType="linear" id="0:79"/>
-                    <KeyFrameDouble frame="50" value="0.023217" interpolationType="linear" id="0:80"/>
-                    <KeyFrameDouble frame="62" value="0.023162" interpolationType="linear" id="0:81"/>
-                    <KeyFrameDouble frame="75" value="0.020944" interpolationType="linear" id="0:82"/>
-                    <KeyFrameDouble frame="88" value="0.017298" interpolationType="linear" id="0:83"/>
-                    <KeyFrameDouble frame="100" value="0.013059" interpolationType="linear" id="0:84"/>
-                    <KeyFrameDouble frame="112" value="0.008945" interpolationType="linear" id="0:85"/>
-                    <KeyFrameDouble frame="125" value="0.005393" interpolationType="linear" id="0:86"/>
-                    <KeyFrameDouble frame="138" value="0.002489" interpolationType="linear" id="0:87"/>
-                    <KeyFrameDouble frame="150" value="0.000000" interpolationType="linear" id="0:88"/>
-                    <KeyFrameDouble frame="162" value="-0.002489" interpolationType="linear" id="0:89"/>
-                    <KeyFrameDouble frame="175" value="-0.005393" interpolationType="linear" id="0:90"/>
-                    <KeyFrameDouble frame="188" value="-0.008945" interpolationType="linear" id="0:91"/>
-                    <KeyFrameDouble frame="200" value="-0.013059" interpolationType="linear" id="0:92"/>
-                    <KeyFrameDouble frame="212" value="-0.017298" interpolationType="linear" id="0:93"/>
-                    <KeyFrameDouble frame="225" value="-0.020944" interpolationType="linear" id="0:94"/>
-                    <KeyFrameDouble frame="238" value="-0.023162" interpolationType="linear" id="0:95"/>
-                    <KeyFrameDouble frame="250" value="-0.023217" interpolationType="linear" id="0:96"/>
-                    <KeyFrameDouble frame="262" value="-0.020674" interpolationType="linear" id="0:97"/>
-                    <KeyFrameDouble frame="275" value="-0.015551" interpolationType="linear" id="0:98"/>
-                    <KeyFrameDouble frame="288" value="-0.008353" interpolationType="linear" id="0:99"/>
-                    <KeyFrameDouble frame="300" value="-0.000000" interpolationType="linear" id="0:100"/>
+            <KeyedObject objectId="0:41" id="0:80">
+                <KeyedProperty propertyKey="15" id="0:81">
+                    <KeyFrameDouble frame="0" value="0.000000" interpolationType="linear" id="0:82"/>
+                    <KeyFrameDouble frame="12" value="0.008353" interpolationType="linear" id="0:83"/>
+                    <KeyFrameDouble frame="25" value="0.015551" interpolationType="linear" id="0:84"/>
+                    <KeyFrameDouble frame="38" value="0.020674" interpolationType="linear" id="0:85"/>
+                    <KeyFrameDouble frame="50" value="0.023217" interpolationType="linear" id="0:86"/>
+                    <KeyFrameDouble frame="62" value="0.023162" interpolationType="linear" id="0:87"/>
+                    <KeyFrameDouble frame="75" value="0.020944" interpolationType="linear" id="0:88"/>
+                    <KeyFrameDouble frame="88" value="0.017298" interpolationType="linear" id="0:89"/>
+                    <KeyFrameDouble frame="100" value="0.013059" interpolationType="linear" id="0:90"/>
+                    <KeyFrameDouble frame="112" value="0.008945" interpolationType="linear" id="0:91"/>
+                    <KeyFrameDouble frame="125" value="0.005393" interpolationType="linear" id="0:92"/>
+                    <KeyFrameDouble frame="138" value="0.002489" interpolationType="linear" id="0:93"/>
+                    <KeyFrameDouble frame="150" value="0.000000" interpolationType="linear" id="0:94"/>
+                    <KeyFrameDouble frame="162" value="-0.002489" interpolationType="linear" id="0:95"/>
+                    <KeyFrameDouble frame="175" value="-0.005393" interpolationType="linear" id="0:96"/>
+                    <KeyFrameDouble frame="188" value="-0.008945" interpolationType="linear" id="0:97"/>
+                    <KeyFrameDouble frame="200" value="-0.013059" interpolationType="linear" id="0:98"/>
+                    <KeyFrameDouble frame="212" value="-0.017298" interpolationType="linear" id="0:99"/>
+                    <KeyFrameDouble frame="225" value="-0.020944" interpolationType="linear" id="0:100"/>
+                    <KeyFrameDouble frame="238" value="-0.023162" interpolationType="linear" id="0:101"/>
+                    <KeyFrameDouble frame="250" value="-0.023217" interpolationType="linear" id="0:102"/>
+                    <KeyFrameDouble frame="262" value="-0.020674" interpolationType="linear" id="0:103"/>
+                    <KeyFrameDouble frame="275" value="-0.015551" interpolationType="linear" id="0:104"/>
+                    <KeyFrameDouble frame="288" value="-0.008353" interpolationType="linear" id="0:105"/>
+                    <KeyFrameDouble frame="300" value="-0.000000" interpolationType="linear" id="0:106"/>
                 </KeyedProperty>
             </KeyedObject>
         </LinearAnimation>
 
         <LinearAnimation fps="60" duration="60" name="Still" id="0:12">
-            <KeyedObject objectId="0:34" id="0:102">
-                <KeyedProperty propertyKey="15" id="0:103">
-                    <KeyFrameDouble frame="0" value="0" interpolationType="linear" id="0:101"/>
+            <KeyedObject objectId="0:41" id="0:108">
+                <KeyedProperty propertyKey="15" id="0:109">
+                    <KeyFrameDouble frame="0" value="0" interpolationType="linear" id="0:107"/>
                 </KeyedProperty>
             </KeyedObject>
         </LinearAnimation>
 
         <LinearAnimation fps="60" duration="60" name="Upright" id="0:13">
-            <KeyedObject objectId="0:33" id="0:105">
-                <KeyedProperty propertyKey="15" id="0:106">
-                    <KeyFrameDouble frame="0" value="0.000000" interpolationType="linear" id="0:104"/>
+            <KeyedObject objectId="0:40" id="0:111">
+                <KeyedProperty propertyKey="15" id="0:112">
+                    <KeyFrameDouble frame="0" value="0.000000" interpolationType="linear" id="0:110"/>
                 </KeyedProperty>
             </KeyedObject>
         </LinearAnimation>
 
         <LinearAnimation fps="60" duration="60" name="Drooped" id="0:14">
-            <KeyedObject objectId="0:33" id="0:108">
-                <KeyedProperty propertyKey="15" id="0:109">
-                    <KeyFrameDouble frame="0" value="0.000000" interpolationType="linear" id="0:107"/>
+            <KeyedObject objectId="0:40" id="0:114">
+                <KeyedProperty propertyKey="15" id="0:115">
+                    <KeyFrameDouble frame="0" value="0.000000" interpolationType="linear" id="0:113"/>
                 </KeyedProperty>
             </KeyedObject>
         </LinearAnimation>
@@ -182,34 +182,34 @@
     </Artboard>
 
     <DataConverterGroup name="Droop" id="0:15">
-        <DataConverterGroupItem converterId="0:110"/>
-        <DataConverterGroupItem converterId="0:111"/>
+        <DataConverterGroupItem converterId="0:116"/>
+        <DataConverterGroupItem converterId="0:117"/>
     </DataConverterGroup>
 
     <DataConverterInterpolator duration="0.6" interpolationType="cubic"
-                               name="Droop Smoothing" id="0:110">
-        <CubicEaseInterpolator x1="0" y1="0" x2="0.58" y2="1" id="0:112"/>
+                               name="Droop Smoothing" id="0:116">
+        <CubicEaseInterpolator x1="0" y1="0" x2="0.58" y2="1" id="0:118"/>
     </DataConverterInterpolator>
 
     <DataConverterRangeMapper minInput="0" maxInput="1" minOutput="0" maxOutput="100"
                               clampLower="true" clampUpper="true"
-                              interpolationType="cubic" name="Droop Range" id="0:111">
-        <CubicEaseInterpolator x1="0.4" y1="0" x2="1" y2="1" id="0:113"/>
+                              interpolationType="cubic" name="Droop Range" id="0:117">
+        <CubicEaseInterpolator x1="0.4" y1="0" x2="1" y2="1" id="0:119"/>
     </DataConverterRangeMapper>
 
     <DataConverterGroup name="Sway" id="0:16">
-        <DataConverterGroupItem converterId="0:114"/>
-        <DataConverterGroupItem converterId="0:115"/>
+        <DataConverterGroupItem converterId="0:120"/>
+        <DataConverterGroupItem converterId="0:121"/>
     </DataConverterGroup>
 
     <DataConverterInterpolator duration="0.6" interpolationType="cubic"
-                               name="Sway Smoothing" id="0:114">
-        <CubicEaseInterpolator x1="0" y1="0" x2="0.58" y2="1" id="0:116"/>
+                               name="Sway Smoothing" id="0:120">
+        <CubicEaseInterpolator x1="0" y1="0" x2="0.58" y2="1" id="0:122"/>
     </DataConverterInterpolator>
 
     <DataConverterRangeMapper minInput="0" maxInput="1" minOutput="100" maxOutput="100"
                               clampLower="true" clampUpper="true"
-                              interpolationType="cubic" name="Sway Range" id="0:115">
-        <CubicEaseInterpolator x1="0.4" y1="0" x2="1" y2="1" id="0:117"/>
+                              interpolationType="cubic" name="Sway Range" id="0:121">
+        <CubicEaseInterpolator x1="0.4" y1="0" x2="1" y2="1" id="0:123"/>
     </DataConverterRangeMapper>
 </Rive>

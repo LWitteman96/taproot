@@ -32,6 +32,7 @@ fern_generator.py     the source of truth: geometry, SVG writer, RML emitter
 pngdiff.py            dependency-free PNG reader, for measuring render changes
 preview.sh            renders every stage at every vitality into build/preview/
 fern-data.rml         generated — the shared Fern view model
+fern-roots.rml        generated — the root system, its own artboard
 fern-stage-*.rml      generated — one artboard per growth stage
 fern-stage-*.svg      generated — the same five, as flat art
 fern-roots-*.svg      generated — the four root levels
@@ -43,14 +44,18 @@ build/                gitignored: fern.riv, fern.png, logs
 them.** Nothing in `build/` is committed, and no `.riv` has been added to the
 Flutter app's assets yet.
 
-The art comes from `docs/design-spec.md`'s garden metaphor: five growth stages
-(sprout → seedling → young → mature → bloom) and four root levels, stacking so
-the ground lines meet. **All five stages are built**; the roots are not.
+The art comes from `docs/design-spec.md`'s garden metaphor: six growth stages
+(seed → sprout → seedling → young → mature → bloom) and four root levels,
+stacking so the ground lines meet. **All six stages and the roots are built.**
 
 A project compiles every `.rml` in it as one document, so the six files above
-produce one `.riv` with five artboards sharing one view model. `rive fern` opens
-`FernMature` (named in `rive.yaml`); the others are
-`rive fern --artboard=FernSprout` and so on.
+produce one `.riv` with **seven** artboards sharing one view model: six stages
+plus `FernRoots`. `rive fern` opens `FernMature` (named in `rive.yaml`); the
+others are `rive fern --artboard=FernSeed` and so on.
+
+The view model exposes two numbers, both 0–1: **`vitality`** (droop, colour,
+sway amplitude) and **`roots`** (root growth, and the stability lean on the two
+tall stages).
 
 ---
 
@@ -223,6 +228,33 @@ Two ways to consume a number:
 </BlendState1DViewModel>
 ```
 
+### Nested artboards
+
+`NestedArtboard artboardId=` embeds another artboard. The source must be marked
+`isComponent="true"` and listed by a `<ComponentAsset artboardId=...>` root
+element, or the file is malformed.
+
+**It does not carry data binding.** This was measured rather than assumed:
+`FernSprout` nested inside an otherwise empty artboard, `vitality` set to 0 and
+1, and the nested plant changed by **0 pixels** where the same artboard
+standalone changed by 8770. Clean verify, `problems: []`, and the data dump
+reports `"inherits": true` — it claims the parent's context and then ignores it.
+
+Two ways through, and only one is usable from data:
+
+| | |
+|---|---|
+| `NestedNumber.nestedValue` | animatable, **not bindable** — a view model number cannot reach a nested state machine input |
+| `NestedRemapAnimation.time` | animatable **and** bindable (key 202) — a parent can scrub a whole child timeline from one number, "with no state machine on either side". `time` is a fraction of the duration, not seconds |
+
+So a component driven by data has to be either a root artboard the host binds
+itself, or a single timeline scrubbed through `NestedRemapAnimation`. A blend
+state inside a nested child is inert.
+
+`NestedArtboard.artboardId` *is* bindable (key 197), and `ViewModelPropertyArtboard`
+exists, so **which** artboard is nested can be data-driven even though what is
+inside it cannot.
+
 **`cubic` and `cubicValue` are not variants of one thing.** They take the same
 four numbers and read them completely differently: `cubic` with a
 `CubicEaseInterpolator` shapes **time**, normalized 0–1, so the result stays
@@ -281,6 +313,7 @@ runtime. Ordered by how easy they are to hit.
 | **`Feather` inside a `Fill`** | the paint vanishes entirely | feather strokes; for a soft fill use a `RadialGradient` with an alpha-`00` outer stop |
 | **`GradientStop` with no `position`** | all stops sit at 0, gradient renders flat | always set `position` |
 | **A `ViewModelInstanceValue` whose `viewModelPropertyId` points at nothing** | silently inert; these ids are never resolved, so `inspect` says nothing | check by hand |
+| **A view-model bind inside a `NestedArtboard` does not resolve** | the child renders but never responds to data. Verify is clean, `problems: []`, and the data dump even reports `"inherits": true` | measured: nested 0px vs standalone 8770px for the same data change. Drive a nested child through `NestedRemapAnimation.time` (bindable) or keep it a root artboard and let the host bind both |
 | **`--data` cannot change a value mid-run** | it sets the property *before the scene runs*, so a converter that eases changes has nothing to ease | drive the change from a listener (see [Verification recipes](#verification-recipes)) |
 | **`sourcePathIds` is not emitted by `inspect --json`** | the bind's path is absent from the tree, like `interpolatorId` — you cannot eyeball it | read `problems` for `unresolved-bind-path`, and A/B with `--data` |
 | **`DataConverterRangeMapper.interpolationType` defaults to `linear`** | same attribute name as a keyframe's, opposite default (`hold`) | a converter eases by default once given an interpolator; a keyframe does not |
@@ -384,8 +417,9 @@ canvases put their ground line at y=0 so a plant canvas stacks directly on top.
 
 ## Previewing: a cheatsheet
 
-The five artboards are `FernSprout`, `FernSeedling`, `FernYoung`, `FernMature`,
-`FernBloom`. `vitality` is `0`–`1` and **defaults to `1`**, which is the upright,
+The artboards are `FernSeed`, `FernSprout`, `FernSeedling`, `FernYoung`,
+`FernMature`, `FernBloom` and `FernRoots`. `vitality` is `0`–`1` and
+**defaults to `1`**, which is the upright,
 full-colour pose — so a preview with no `--data` looks static on purpose.
 
 ### Live preview
@@ -957,3 +991,93 @@ One `.riv` holding all five artboards is **109 KB**. `rive fern --bench=600`:
 the two blend states cost. `render` is flat and dominated by canvas size rather
 than complexity. The worst case is 0.12 ms of a 16.7 ms frame. Earlier
 single-artboard numbers are superseded by these.
+
+
+### Step 7 — the seed, the roots, and the lean
+
+**Stage 0, the seed.** `stage_parts` returns `(parts, back, front)`: the seed is
+the only stage with a layer *behind* the plant as well as in front, and the
+front lip of soil is what hides its bottom edge. RML declares them in reverse of
+SVG — front first, back last.
+
+Three things the new stage forced:
+
+- the data file moved to id client **9**; `stage_rml` uses `Ids(client=n)` and
+  stage 0 had taken client 0;
+- the artboard row offset was `(n - 1)`, which put the seed a column left of the
+  sprout and off the stage;
+- `droop_angle` raised for any near-vertical part with no declared direction,
+  *including parts that cannot droop at all*. A zero-magnitude droop has no
+  direction to get wrong, so it returns early now.
+
+**The seed ignores vitality**, because the engine has no vitality before the
+first completion. `DROOP_KIND_SCALE["seed"] = 0` and no `DRY_FILL` entry were
+not enough — sway *amplitude* is vitality-bound too, and the seed still moved
+125 px between vitality 1 and 0. Stage 0 gets a sway range mapper whose floor
+equals its ceiling, which is a constant rather than a differently-shaped state
+machine. Measured 0 px across vitality, 301 px across frames.
+
+**The roots are a node tree, not a set of drawings.** Every root and branch is
+its own `Group` placed at its attachment point in its *parent's* local space,
+holding geometry that starts at its own origin. Nothing in the tree knows about
+levels: growing the system is a **scale** on these nodes, which is what lets one
+tree serve all four levels and animate between them. Scale composes down the
+hierarchy, so scaling a primary carries its branches and their attachment points
+— at level 2 the branches of primaries 4 and 5 carry scale 1 and still vanish,
+because their parent is 0.
+
+`Group` gained an optional `origin` and `scale`, honoured by both writers: SVG
+emits a `transform`, RML the Node's own `x`/`y`/`scaleX`/`scaleY`. Keeping it in
+the shared model rather than in the emitter is what stops the two outputs
+describing different plants. Verified: accumulating the nested transforms
+reproduces the old flat polylines to **0.000000 px over 3021 vertices**.
+
+`FernRoots` blends five poses at axis positions 0, 15, 30, 50 and 75 — bare
+soil, then `ROOT_LEVELS` 1–4. Uneven on purpose: bare soil to a first root
+should read as a bigger event than one established level to the next. Every one
+of the 53 root nodes is keyed in every pose, on both `scaleX` and `scaleY` —
+530 keyed objects — because a node keyed in one pose and absent from another
+pops instead of growing. A `DataConverterInterpolator` at 1.2s means roots
+visibly grow after a reflection rather than appearing.
+
+One thing the render caught that the numbers did not: **a root must be painted
+over its own branches.** Emitted the other way round, each branch's stroked end
+cut a visible notch across the root it grows from. The shape is appended after
+its children so both writers paint it last.
+
+**The stability lean.** A plant taller than its roots tips over. `FernYoung` and
+`FernMature` get a third layer, `Stability`, blending `Leaning` (5°) against
+`Steady` through a per-stage range mapper — `roots` at the stage's threshold
+(0.30 / 0.50) reads as steady, `roots` at 0 as a full lean. The mapper is
+linear, because the threshold is already the shaping. Direction is **declared**
+in `LEAN_DIRECTION`, since there is nothing in the art to read it off. Seed,
+sprout, seedling and bloom do not lean — the first three have nothing to tip,
+and the bloom is the reward pose and should not look precarious.
+
+This forced a structural change: the `plant` node moved from (0,0) to the base
+point (512, 882) so it rotates about the plant's base rather than the artboard's
+corner, **and the soil moved out of it**. The mound and the front lip are now
+siblings of `plant` rather than children. Rotating them with it tilted the
+ground line, which reads as the whole world leaning rather than the plant.
+
+Verified: `problems: []` across eight files. `FernYoung` and `FernMature` carry
+3 layers / 6 animations / 3 binds; the other four stages 2 / 4 / 2; `FernRoots`
+1 / 5 / 1. Roots at 0, 0.15, 0.3, 0.5 and 0.75 are five distinct renders.
+`FernMature` at roots 0 vs 0.5 differs across 168,645 px. And `FernMature` at
+vitality 1 renders **byte-identical** to before both the plant-node move and the
+seed stage — the check that all this restructuring changed nothing that was
+already right.
+
+#### Performance baseline
+
+One `.riv`, seven artboards, **171 KB**. `rive fern --bench=600`:
+
+| Artboard | advance mean | render mean | memory |
+|---|---|---|---|
+| `FernSeed` | 0.001 ms | 0.092 ms | +0 pages |
+| `FernMature` | 0.021 ms | 0.076 ms | +0 pages |
+| `FernRoots` | 0.002 ms | 0.090 ms | +0 pages |
+
+`FernRoots` holds 5004 objects and still advances in 0.002 ms, because a blend
+state resting on a static pose has nothing to recompute per frame. The cost of
+the root system is in the file, not in the frame.

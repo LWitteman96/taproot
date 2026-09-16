@@ -448,14 +448,19 @@ def root_forest(tree):
     """
     def node(r, prim_index):
         local = [(u * r.length, v * r.length) for u, v in r.unit]
-        body = [Path(f"{r.rid}-shape", [tapered(local, r.width, 1.4)], fill=ROOT,
-                     stroke=ROOT_OUTLINE, stroke_width=(2.2 if r.gen == 1 else 1.8))]
+        shape = Path(f"{r.rid}-shape", [tapered(local, r.width, 1.4)], fill=ROOT,
+                     stroke=ROOT_OUTLINE, stroke_width=(2.2 if r.gen == 1 else 1.8))
         lens = cumlen(local)
+        body = []
         for c in r.children:
             attach, _ = at_frac(local, lens, c.frac)
             child = node(c, prim_index)
             child.origin = attach
             body.append(child)
+        # The root's own shape goes last, which paints it *over* its branches in
+        # both writers. A branch has to emerge from behind the root it grows
+        # off; drawn on top, its stroked end cuts a visible notch across it.
+        body.append(shape)
         return Group(r.rid, body, kind="root", origin=(0.0, 0.0),
                      meta={"gen": r.gen, "prim": prim_index})
 
@@ -606,7 +611,7 @@ def rml_paint(item, ids, indent, paints=None):
         out.append(f'{indent}</Stroke>')
     return out
 
-def rml_item(item, origin, ids, depth, paints=None):
+def rml_item(item, origin, ids, depth, paints=None, groups=None):
     ind = "    " * depth
     if isinstance(item, Group):
         attrs = ""
@@ -614,10 +619,13 @@ def rml_item(item, origin, ids, depth, paints=None):
             attrs += f' x="{item.origin[0]:.2f}" y="{item.origin[1]:.2f}"'
         if item.scale is not None:
             attrs += f' scaleX="{item.scale:.4f}" scaleY="{item.scale:.4f}"'
-        out = [f'{ind}<Node{attrs} name="{item.gid}" id="{ids()}">']
+        node_id = ids()
+        if groups is not None:
+            groups[item.gid] = node_id
+        out = [f'{ind}<Node{attrs} name="{item.gid}" id="{node_id}">']
         # draw order is reversed from SVG: the first Shape declared paints on top
         for child in reversed(item.children):
-            out += rml_item(child, origin, ids, depth + 1, paints)
+            out += rml_item(child, origin, ids, depth + 1, paints, groups)
         out.append(f'{ind}</Node>')
         return out
     if isinstance(item, Dots):
@@ -650,7 +658,8 @@ def part_node(group, ids, depth, nodes, paints=None):
     ind = "    " * depth
     droop_id, sway_id = ids(), ids()
     nodes[group.gid] = {"droop": droop_id, "sway": sway_id}
-    out = [f'{ind}<Node x="{BASE[0]}" y="{BASE[1]}" name="{group.gid}-droop" id="{droop_id}">',
+    # (0,0) because the enclosing `plant` node is already at the base point
+    out = [f'{ind}<Node name="{group.gid}-droop" id="{droop_id}">',
            f'{ind}    <Node name="{group.gid}-sway" id="{sway_id}">']
     for child in reversed(group.children):
         out += rml_item(child, BASE, ids, depth + 2, paints)
@@ -868,28 +877,41 @@ SWAY_FLOOR = 40           # blend weight at vitality 0: the sway never fully sto
 # stage 0 a differently-shaped state machine from every other stage.
 SEED_SWAY_FLOOR = 100
 
-def converter_chain(name, ids, min_output, max_output, ease, group_id):
-    """A DataConverterGroup: smooth the incoming value, then remap its range."""
+def converter_chain(name, ids, min_output, max_output, ease, group_id,
+                    seconds=None, max_input=1):
+    """A DataConverterGroup: smooth the incoming value, then remap its range.
+
+    `ease` of None leaves the range mapper linear -- the roots axis is already
+    shaped by where its poses sit on the blend, so easing it there as well would
+    shape the same curve twice.
+    """
     smoother_id, mapper_id, interpolator_id, ease_id = ids(), ids(), ids(), ids()
-    x1, y1, x2, y2 = ease
-    return [
+    seconds = SMOOTHING_SECONDS if seconds is None else seconds
+    out = [
         f'    <DataConverterGroup name="{name}" id="{group_id}">',
         f'        <DataConverterGroupItem converterId="{smoother_id}"/>',
         f'        <DataConverterGroupItem converterId="{mapper_id}"/>',
         '    </DataConverterGroup>',
         '',
-        f'    <DataConverterInterpolator duration="{SMOOTHING_SECONDS}" interpolationType="cubic"',
+        f'    <DataConverterInterpolator duration="{seconds}" interpolationType="cubic"',
         f'                               name="{name} Smoothing" id="{smoother_id}">',
         f'        <CubicEaseInterpolator x1="0" y1="0" x2="0.58" y2="1" id="{interpolator_id}"/>',
         '    </DataConverterInterpolator>',
         '',
-        f'    <DataConverterRangeMapper minInput="0" maxInput="1" '
+        f'    <DataConverterRangeMapper minInput="0" maxInput="{max_input}" '
         f'minOutput="{min_output}" maxOutput="{max_output}"',
         '                              clampLower="true" clampUpper="true"',
+    ]
+    if ease is None:
+        out.append(f'                              name="{name} Range" id="{mapper_id}"/>')
+        return out
+    x1, y1, x2, y2 = ease
+    out += [
         f'                              interpolationType="cubic" name="{name} Range" id="{mapper_id}">',
         f'        <CubicEaseInterpolator x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" id="{ease_id}"/>',
         '    </DataConverterRangeMapper>',
     ]
+    return out
 
 # Asymmetric on purpose: steep at the top of the range so a small drop from full
 # vitality is visible immediately, flattening toward 0 so the fern settles into
@@ -938,15 +960,26 @@ def stage_rml(n, name):
     vitality_layer_id, droop_blend_id, droop_bindable_id = ids(), ids(), ids()
     sway_id, still_id, upright_id, drooped_id = ids(), ids(), ids(), ids()
     droop_group_id, sway_group_id = ids(), ids()
+    leans = n in LEAN_THRESHOLD
+    lean_layer_id, lean_blend_id, lean_bindable_id = ids(), ids(), ids()
+    steady_id, leaning_id, lean_group_id = ids(), ids(), ids()
     nodes, paints = {}, {}
+    plant_id = ids()
     body = []
     # RML draw order is the reverse of SVG's: the first Shape declared paints on
     # top. So the front soil goes first, the plant next, and whatever sits
     # behind the plant goes last.
+    #
+    # The soil sits *outside* the plant node rather than inside it, which is a
+    # change from earlier. The stability lean rotates the plant node, and the
+    # ground must not tilt with it -- a 5 degree tilt on the mound reads as the
+    # whole world leaning, not the plant.
     if front:
         body += rml_item(front, (0, 0), ids, 2, paints)
+    body.append(f'        <Node x="{BASE[0]}" y="{BASE[1]}" name="plant" id="{plant_id}">')
     for part in reversed(parts):
-        body += part_node(part, ids, 2, nodes, paints)
+        body += part_node(part, ids, 3, nodes, paints)
+    body.append('        </Node>')
     if back:
         body += rml_item(back, (0, 0), ids, 2, paints)
 
@@ -958,10 +991,8 @@ def stage_rml(n, name):
         f'width="{W}" height="{W}" styleId="{style_id}" name="{artboard}" id="{artboard_id}">',
         f'        <LayoutComponentStyle name="Artboard Style" id="{style_id}"/>',
         '',
-        f'        <Node name="plant" id="{ids()}">',
     ]
     tail = [
-        '        </Node>',
         '',
     ] + sway_animation(parts, nodes, ids, sway_id) + [
         '',
@@ -969,7 +1000,13 @@ def stage_rml(n, name):
         '',
     ] + droop_pose("Upright", upright_id, n, parts, False, nodes, paints, ids) + [
         '',
-    ] + droop_pose("Drooped", drooped_id, n, parts, True, nodes, paints, ids) + [
+    ] + droop_pose("Drooped", drooped_id, n, parts, True, nodes, paints, ids)
+    if leans:
+        tail += [''] + lean_pose('Steady', steady_id, 0.0, plant_id, ids)
+        tail += [''] + lean_pose(
+            'Leaning', leaning_id,
+            LEAN_DIRECTION[n] * math.radians(LEAN_DEGREES), plant_id, ids)
+    tail += [
         '',
         f'        <StateMachine name="Fern" id="{machine_id}">',
         '',
@@ -1009,18 +1046,166 @@ def stage_rml(n, name):
         f'                    <BlendAnimation1D animationId="{upright_id}" value="100"/>',
         '                </BlendState1DViewModel>',
         '            </StateMachineLayer>',
+    ]
+    if leans:
+        tail += [
+            '',
+            '            <!-- a plant taller than its roots leans. this layer owns',
+            '                 rotation on the plant node; nothing else touches it. -->',
+            f'            <StateMachineLayer name="Stability" id="{lean_layer_id}">',
+            '                <AnyState x="420" y="-120"/>',
+            '                <ExitState x="620" y="-120"/>',
+            '                <EntryState x="0" y="0">',
+            f'                    <StateTransition stateToId="{lean_blend_id}"/>',
+            '                </EntryState>',
+            f'                <BlendState1DViewModel x="160" y="0" id="{lean_blend_id}">',
+            f'                    <BindablePropertyNumber id="{lean_bindable_id}">',
+            f'                        <DataBindContext sourcePathIds="{VIEWMODEL_ID}-{ROOTS_ID}" '
+            f'propertyKey="636" converterId="{lean_group_id}"/>',
+            '                    </BindablePropertyNumber>',
+            f'                    <BlendAnimation1D animationId="{leaning_id}" value="0"/>',
+            f'                    <BlendAnimation1D animationId="{steady_id}" value="100"/>',
+            '                </BlendState1DViewModel>',
+            '            </StateMachineLayer>',
+        ]
+    tail += [
         '        </StateMachine>',
         '    </Artboard>',
         '',
     ] + converter_chain("Droop", ids, 0, 100, DROOP_EASE, droop_group_id) + [
         '',
     ] + converter_chain("Sway", ids, SEED_SWAY_FLOOR if n == 0 else SWAY_FLOOR,
-                        100, SWAY_EASE, sway_group_id) + [
+                        100, SWAY_EASE, sway_group_id)
+    if leans:
+        # roots at the stage's threshold read as steady, roots at 0 as a full
+        # lean. The mapper is linear: the threshold is the shaping.
+        tail += [''] + converter_chain('Stability', ids, 0, 100, None, lean_group_id,
+                                       seconds=ROOTS_SMOOTHING_SECONDS,
+                                       max_input=LEAN_THRESHOLD[n])
+    tail += [
         '</Rive>',
         '',
     ]
     # the shapes were emitted at depth 2; the wrapping plant Node sits at depth 2 too
-    return "\n".join(head + ["    " + line if line else line for line in body] + tail)
+    return "\n".join(head + body + tail)
+
+# ---------- the stability lean ----------
+# A plant taller than its roots leans. Below the stage's root threshold it tips
+# over; at or above it, it stands up. Only the two stages tall enough for the
+# lean to read carry it -- the seed and sprout have nothing to tip, and the
+# bloom is the reward pose and should not look precarious.
+LEAN_DEGREES = 5.0
+LEAN_THRESHOLD = {3: 0.30, 4: 0.50}   # roots at or above this = steady
+
+# Which way an under-rooted plant tips. There is nothing in the art to read this
+# off -- the lean is about the roots, not the silhouette -- so it is declared
+# rather than derived. +1 is to the right.
+LEAN_DIRECTION = {3: +1, 4: +1}
+
+def lean_pose(name, anim_id, angle, plant_id, ids, depth=2):
+    """One end of the stability blend: rotation on the whole plant.
+
+    Both poses key it, so the plant blends between leaning and upright rather
+    than snapping when the roots cross the threshold.
+    """
+    ind = "    " * depth
+    frame = (f'<KeyFrameDouble frame="0" value="{angle:.6f}" '
+             f'interpolationType="linear" id="{ids()}"/>')
+    return ([f'{ind}<LinearAnimation fps="60" duration="60" name="{name}" id="{anim_id}">']
+            + _keyed(plant_id, 15, frame, ids, ind + "    ")
+            + [f'{ind}</LinearAnimation>'])
+
+# ---------- the roots artboard ----------
+ROOTS_CLIENT = 6
+ROOTS_HEIGHT = 520          # level 4 reaches y=455; the rest is breathing room
+ROOTS_SMOOTHING_SECONDS = 1.2   # roots grow after a reflection; they do not snap
+
+# Blend axis positions for the five poses. Uneven on purpose: the gap from bare
+# soil to a first root should read as a bigger event than the gap between two
+# established levels, and roots past 0.75 stay at level 4.
+ROOTS_POSES = [(0, None), (15, 1), (30, 2), (50, 3), (75, 4)]
+
+def roots_pose(name, anim_id, level, parts, groups, ids, depth=2):
+    """One pose of the root blend: scaleX and scaleY on every root node.
+
+    Every node is keyed in every pose, including the ones that are 0 there. A
+    node keyed in one pose and absent from another has nothing to mix toward,
+    so it would pop into place instead of growing.
+    """
+    ind = "    " * depth
+    out = [f'{ind}<LinearAnimation fps="60" duration="60" name="{name}" id="{anim_id}">']
+    for part in parts:
+        value = root_scale(part, level)
+        for property_key in (16, 17):        # scaleX, scaleY
+            frame = (f'<KeyFrameDouble frame="0" value="{value:.4f}" '
+                     f'interpolationType="linear" id="{ids()}"/>')
+            out += _keyed(groups[part.gid], property_key, frame, ids, ind + "    ")
+    out.append(f'{ind}</LinearAnimation>')
+    return out
+
+def roots_rml():
+    """The root system as its own artboard.
+
+    Separate from the stage artboards because a view model bind inside a
+    NestedArtboard does not resolve -- measured, see NOTES.md -- so the roots
+    cannot be nested into each stage and driven by data. The host stacks this
+    artboard under a stage artboard and binds both to the same view model
+    instance.
+    """
+    ids = Ids(client=ROOTS_CLIENT)
+    artboard_id, machine_id, style_id = ids(), ids(), ids()
+    layer_id, blend_id, bindable_id, group_id = ids(), ids(), ids(), ids()
+    pose_ids = [ids() for _ in ROOTS_POSES]
+
+    forest = root_forest(build_root_tree())
+    parts = root_parts(forest)
+    for part in parts:
+        part.scale = root_scale(part, 4)   # what shows if anything renders it unbound
+
+    groups = {}
+    body = rml_item(forest, (0, 0), ids, 2, {}, groups)
+
+    head = [
+        '<Rive version="1" kind="fragment">',
+        f'    <Artboard defaultStateMachineId="{machine_id}" viewModelId="{VIEWMODEL_ID}" '
+        f'viewModelInstanceId="{INSTANCE_ID}" x="0" y="{W + 240}" '
+        f'width="{W}" height="{ROOTS_HEIGHT}" styleId="{style_id}" name="FernRoots" id="{artboard_id}">',
+        f'        <LayoutComponentStyle name="Artboard Style" id="{style_id}"/>',
+        '',
+    ]
+    tail = ['']
+    for (_, level), anim_id in zip(ROOTS_POSES, pose_ids):
+        name = "RootsNone" if level is None else f"RootsLevel{level}"
+        tail += roots_pose(name, anim_id, level, parts, groups, ids) + ['']
+    tail += [
+        f'        <StateMachine name="Fern" id="{machine_id}">',
+        f'            <StateMachineLayer name="Roots" id="{layer_id}">',
+        '                <AnyState x="420" y="-120"/>',
+        '                <ExitState x="620" y="-120"/>',
+        '                <EntryState x="0" y="0">',
+        f'                    <StateTransition stateToId="{blend_id}"/>',
+        '                </EntryState>',
+        f'                <BlendState1DViewModel x="160" y="0" id="{blend_id}">',
+        f'                    <BindablePropertyNumber id="{bindable_id}">',
+        f'                        <DataBindContext sourcePathIds="{VIEWMODEL_ID}-{ROOTS_ID}" '
+        f'propertyKey="636" converterId="{group_id}"/>',
+        '                    </BindablePropertyNumber>',
+        '                    <!-- ascending value order: the runtime binary-searches these -->',
+    ]
+    for (value, _), anim_id in zip(ROOTS_POSES, pose_ids):
+        tail.append(f'                    <BlendAnimation1D animationId="{anim_id}" value="{value}"/>')
+    tail += [
+        '                </BlendState1DViewModel>',
+        '            </StateMachineLayer>',
+        '        </StateMachine>',
+        '    </Artboard>',
+        '',
+    ] + converter_chain("Roots", ids, 0, 100, None, group_id,
+                        seconds=ROOTS_SMOOTHING_SECONDS) + [
+        '</Rive>',
+        '',
+    ]
+    return "\n".join(head + body + tail)
 
 STAGES = {0: "seed", 1: "sprout", 2: "seedling", 3: "young", 4: "mature", 5: "bloom"}
 
@@ -1043,6 +1228,7 @@ if __name__ == "__main__":
     for lv in ROOT_LEVELS:
         open(f"{out}/fern-roots-{lv}.svg", "w").write(svg(roots(lv, tree)))
     open(f"{out}/fern-data.rml", "w").write(data_rml())
+    open(f"{out}/fern-roots.rml", "w").write(roots_rml())
     for n, name in STAGES.items():
         open(f"{out}/fern-stage-{n}-{name}.rml", "w").write(stage_rml(n, name))
     print(f"written to {out}  (sway={SWAY_MODE}, amplitude={SWAY_AMPLITUDE})")
