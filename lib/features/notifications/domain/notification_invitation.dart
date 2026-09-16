@@ -19,6 +19,22 @@
 /// the platform, which is the only place that stays true when someone changes
 /// their mind in system settings; a second copy here would go stale the first
 /// time they did.
+///
+/// **"It must not sync" is enforced in two places, not asserted here.** The
+/// storage choice keeps the record out of Taproot's own sync; what it does not
+/// escape is platform backup, which carries it to a new phone while the
+/// permission it implies stays behind. Both halves of that are handled
+/// elsewhere, and both are needed because each platform only admits one:
+///
+/// - **Android** excludes the store from Auto Backup and device-to-device
+///   transfer (`android/app/src/main/res/xml/`), because
+///   `areNotificationsEnabled()` cannot tell "never asked" from "refused" and
+///   so nothing downstream could detect a restore.
+/// - **iOS** cannot exclude `NSUserDefaults` from iCloud or encrypted local
+///   backups at all, so the record does travel — and is caught on arrival by
+///   `resolveAppGate`, using the one thing iOS *can* report that Android
+///   cannot: `NotificationMode.undecided`, meaning this install has never
+///   prompted.
 abstract class NotificationInvitationStore {
   /// Whether the invitation has been offered before.
   ///

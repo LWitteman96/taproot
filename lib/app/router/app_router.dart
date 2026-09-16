@@ -9,9 +9,12 @@ import 'package:taproot/features/garden/pages/garden_page.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/pages/habit_creation_page.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
+import 'package:taproot/features/notifications/domain/notification_access.dart';
+import 'package:taproot/features/notifications/domain/notification_gateway.dart';
 import 'package:taproot/features/notifications/domain/notification_invitation.dart';
 import 'package:taproot/features/notifications/pages/notification_invitation_page.dart';
 import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
+import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 import 'package:taproot/features/reflection/pages/check_in_page.dart';
 import 'package:taproot/features/reflection/services/check_in_assembler.dart';
 
@@ -75,6 +78,7 @@ final appGateResolverProvider = Provider<Future<AppGate> Function()>((ref) {
     return resolveAppGate(
       habits: ref.read(habitServiceProvider),
       invitations: ref.read(notificationInvitationStoreProvider),
+      notifications: ref.read(notificationGatewayProvider),
     );
   };
 });
@@ -91,15 +95,57 @@ final appGateResolverProvider = Provider<Future<AppGate> Function()>((ref) {
 /// "not enabled" for a user who refused and a user nobody has asked. See
 /// [NotificationInvitationStore].
 ///
+/// **The record is cross-checked against the platform**, because the record
+/// travels and the permission does not. See [_recordSurvivedARestore].
+///
 /// Takes the repositories rather than a `Ref` so it can be tested as a
 /// function.
 Future<AppGate> resolveAppGate({
   required HabitRepository habits,
   required NotificationInvitationStore invitations,
-}) async => (
-  hasFirstHabit: (await habits.allHabits()).isNotEmpty,
-  notificationsOffered: await invitations.hasBeenOffered(),
-);
+  required NotificationGateway notifications,
+}) async {
+  final hasFirstHabit = (await habits.allHabits()).isNotEmpty;
+  final offered = await invitations.hasBeenOffered();
+  return (
+    hasFirstHabit: hasFirstHabit,
+    notificationsOffered:
+        offered && !await _recordSurvivedARestore(notifications),
+  );
+}
+
+/// Whether the invitation record arrived from another phone rather than from
+/// a conversation with this user.
+///
+/// The record is device-local and deliberately unsynced, but it is not
+/// unmoved: on iOS it lives in `NSUserDefaults`, which rides iCloud and
+/// encrypted local backups and cannot be excluded from either. Permission does
+/// not ride along — it is granted per install — so a restored phone can hold a
+/// record saying "already asked" on an install that has never prompted. Left
+/// alone, that user is never offered notifications again on any device: the
+/// exact harm [NotificationInvitationStore] is written to prevent, arrived by
+/// the one route its reasoning does not cover.
+///
+/// [NotificationMode.undecided] is what makes it detectable, and it means
+/// precisely "*this install* has never prompted". Record says offered, platform
+/// says undecided: that pair is unreachable without a restore, and treating it
+/// as not-yet-offered costs one screen on exactly the devices that should see
+/// it.
+///
+/// A platform that cannot be read answers *false* — trust the record. This is
+/// the opposite fail direction from [NotificationInvitationStore.hasBeenOffered],
+/// and deliberately: there, a failed read leaves no information at all, while
+/// here there is a positive record that simply could not be corroborated.
+/// Re-asking on a channel hiccup would put a once-ever question a second time
+/// to a user who already answered it.
+Future<bool> _recordSurvivedARestore(NotificationGateway notifications) async {
+  try {
+    final access = await notifications.currentAccess();
+    return access.mode == NotificationMode.undecided;
+  } catch (_) {
+    return false;
+  }
+}
 
 /// The gate, resolved, with the failure folded into a value.
 ///
