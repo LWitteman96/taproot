@@ -10,6 +10,8 @@ import 'package:taproot/core/models/nudge.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 import 'package:taproot/features/reflection/pages/check_in_page.dart';
+import 'package:taproot/core/models/reflection.dart';
+import 'package:taproot/features/reflection/domain/reflection_repository.dart';
 import 'package:taproot/features/reflection/providers/reflection_providers.dart';
 import 'package:taproot/features/reflection/widgets/cue_answers.dart';
 import 'package:taproot/features/reflection/widgets/friction_answers.dart';
@@ -30,16 +32,22 @@ void main() {
     addTearDown(store.dispose);
   });
 
-  Future<void> pumpCheckIn(WidgetTester tester) async {
+  Future<void> pumpCheckIn(
+    WidgetTester tester, {
+    ReflectionRepository? reflections,
+    String Function()? newId,
+  }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           habitServiceProvider.overrideWithValue(store.habits),
           completionServiceProvider.overrideWithValue(store.completions),
-          reflectionServiceProvider.overrideWithValue(store.reflections),
+          reflectionServiceProvider.overrideWithValue(
+            reflections ?? store.reflections,
+          ),
           nudgeServiceProvider.overrideWithValue(store.nudges),
           clockProvider.overrideWithValue(() => clock.now),
-          newIdProvider.overrideWithValue(() => 'reflection-1'),
+          newIdProvider.overrideWithValue(newId ?? () => 'reflection-1'),
         ],
         child: const MaterialApp(home: CheckInPage()),
       ),
@@ -201,4 +209,67 @@ void main() {
     final saved = (await store.reflections.reflectionsFor('habit-1')).single;
     expect(saved.inputMode, InputMode.skipped);
   });
+
+  testWidgets('a retry after a failed save writes one reflection, not two', (
+    tester,
+  ) async {
+    // `saveReflection` inserts or updates **by id**, so a retry is idempotent
+    // as long as it retries with the same id. Minting a fresh one per attempt
+    // threw that away: two rows for one check-in, `reflectionCount` up, the
+    // weekly budget spent twice, and the same cue counted twice in the
+    // convergence window — all off a single answer the user gave once.
+    var ids = 0;
+    final flaky = _FlakyReflections(store.reflections);
+
+    await plantAndWater();
+    await pumpCheckIn(
+      tester,
+      reflections: flaky,
+      newId: () => 'reflection-${++ids}',
+    );
+
+    await tester.tap(find.widgetWithText(ActionChip, 'after breakfast'));
+    await tester.pumpAndSettle();
+
+    // The first attempt wrote the row and then threw on the way out, so the
+    // screen is back on the question with the chips live again.
+    expect(find.text(CheckInPage.doneHeadline), findsNothing);
+    expect(find.byType(CueAnswers), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(ActionChip, 'after breakfast'));
+    await tester.pumpAndSettle();
+
+    expect(find.text(CheckInPage.doneHeadline), findsOneWidget);
+    final saved = await store.reflections.reflectionsFor('habit-1');
+    expect(saved, hasLength(1));
+    expect(ids, 1, reason: 'the id is minted once per offer, not per attempt');
+  });
+}
+
+/// Writes the row and *then* fails, once — the failure nobody can classify.
+///
+/// This is the shape that makes the id matter: the caller cannot tell whether
+/// the row landed, so the honest thing to do is offer a retry, and the retry
+/// has to be safe.
+class _FlakyReflections implements ReflectionRepository {
+  _FlakyReflections(this._inner);
+
+  final ReflectionRepository _inner;
+  bool _hasFailed = false;
+
+  @override
+  Future<void> saveReflection(Reflection reflection) async {
+    await _inner.saveReflection(reflection);
+    if (_hasFailed) return;
+    _hasFailed = true;
+    throw StateError('the connection dropped on the way out');
+  }
+
+  @override
+  Future<List<Reflection>> reflectionsFor(String habitId) =>
+      _inner.reflectionsFor(habitId);
+
+  @override
+  Future<List<Reflection>> recentReflections(String habitId, {int limit = 8}) =>
+      _inner.recentReflections(habitId, limit: limit);
 }

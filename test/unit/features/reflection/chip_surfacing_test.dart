@@ -69,12 +69,14 @@ void main() {
       final locked = surfaceStarterChips(
         category: HabitCategory.walking,
         logged: Daypart.afternoon,
+        hasDesignedCue: false,
       );
       expect(locked.labels, isNot(contains('the dog needed out')));
 
       final unlocked = surfaceStarterChips(
         category: HabitCategory.walking,
         logged: Daypart.afternoon,
+        hasDesignedCue: false,
         unlockedConditionalFamilies: const <String>{'dog'},
       );
       expect(unlocked.labels, contains('the dog needed out'));
@@ -87,6 +89,7 @@ void main() {
       final morning = surfaceStarterChips(
         category: HabitCategory.reading,
         logged: Daypart.evening,
+        hasDesignedCue: false,
       );
 
       expect(morning.labels, isNot(contains('got into bed')));
@@ -96,6 +99,7 @@ void main() {
       final surfaced = surfaceStarterChips(
         category: HabitCategory.exercise,
         logged: Daypart.early,
+        hasDesignedCue: true,
         designedCueFamily: 'gear',
       );
 
@@ -112,6 +116,7 @@ void main() {
           final surfaced = surfaceStarterChips(
             category: category,
             logged: logged,
+            hasDesignedCue: false,
           );
           final families = surfaced.chips
               .map((scored) => scored.chip.family)
@@ -135,6 +140,7 @@ void main() {
           final surfaced = surfaceStarterChips(
             category: category,
             logged: logged,
+            hasDesignedCue: false,
           );
           if (surfaced.relaxedTypeCeiling) continue;
 
@@ -170,6 +176,7 @@ void main() {
           final surfaced = surfaceStarterChips(
             category: category,
             logged: logged,
+            hasDesignedCue: false,
           );
           if (!surfaced.relaxedTypeCeiling) continue;
           everRelaxed = true;
@@ -202,13 +209,18 @@ void main() {
       for (final category in HabitCategory.values) {
         for (final logged in Daypart.values) {
           expect(
-            surfaceStarterChips(category: category, logged: logged),
+            surfaceStarterChips(
+              category: category,
+              logged: logged,
+              hasDesignedCue: false,
+            ),
             hasLength(lessThanOrEqualTo(5)),
           );
           expect(
             surfaceStarterChips(
               category: category,
               logged: logged,
+              hasDesignedCue: true,
               designedCueFamily: 'nothing-matches-this',
             ),
             hasLength(lessThanOrEqualTo(4)),
@@ -223,6 +235,7 @@ void main() {
           final surfaced = surfaceStarterChips(
             category: category,
             logged: logged,
+            hasDesignedCue: false,
           );
           for (final scored in surfaced.chips) {
             expect(
@@ -250,6 +263,7 @@ void main() {
             final surfaced = surfaceStarterChips(
               category: category,
               logged: logged,
+              hasDesignedCue: false,
             );
             final nonEvent = surfaced.chips
                 .where((scored) => scored.chip.cueType != CueType.event)
@@ -274,6 +288,7 @@ void main() {
           final surfaced = surfaceStarterChips(
             category: category,
             logged: logged,
+            hasDesignedCue: false,
           );
           if (surfaced.nonEventFloorUnmet) {
             thin.add('${category.name}/${logged.name}');
@@ -292,6 +307,7 @@ void main() {
       final surfaced = surfaceStarterChips(
         category: null,
         logged: Daypart.early,
+        hasDesignedCue: false,
       );
 
       expect(surfaced.chips, isNotEmpty);
@@ -299,6 +315,40 @@ void main() {
         surfaced.chips.every((scored) => globalCueChips.contains(scored.chip)),
         isTrue,
       );
+    });
+
+    test('never reports a backfill, because there is nothing to add', () {
+      // `cueChipsFor(null)` *is* `globalCueChips`, so the category pool and
+      // the backfill pool are one list: appending it produced a doubled list
+      // that the family dedupe collapsed straight back, and the flag reported
+      // a step that fired and bought nothing. The flags exist so a tuning pass
+      // can see which step fired, and one that is permanently true for a whole
+      // class of habits — every row whose category a newer build introduced,
+      // since `readOpenEnum` decodes those to null — is worse than absent.
+      for (final logged in Daypart.values) {
+        final surfaced = surfaceStarterChips(
+          category: null,
+          logged: logged,
+          hasDesignedCue: false,
+        );
+
+        expect(
+          surfaced.backfilledFromGlobalPool,
+          isFalse,
+          reason: 'no category pool to fall short of at ${logged.name}',
+        );
+      }
+    });
+
+    test('and a real category still reports one when it fires', () {
+      // The flag is not dead: reading at midday is §5.3's worked case.
+      final surfaced = surfaceStarterChips(
+        category: HabitCategory.reading,
+        logged: Daypart.midday,
+        hasDesignedCue: false,
+      );
+
+      expect(surfaced.backfilledFromGlobalPool, isTrue);
     });
 
     test('an unknown category resolves the same way', () {

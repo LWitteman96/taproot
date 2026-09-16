@@ -28,15 +28,15 @@ String? familyForCueText(String? text, {HabitCategory? category}) {
   if (normalised.isEmpty) return null;
 
   // An exact match against what the library already calls this cue. The
-  // habit's own category is searched first, so a label that two categories
-  // share resolves to the family that category means by it.
-  for (final chip in <StarterChip>[
-    ...cueChipsFor(category),
-    ...globalCueChips,
-    for (final entry in starterChipLibrary.values) ...entry.cues,
-  ]) {
-    if (chip.label.toLowerCase() == normalised) return chip.family;
+  // habit's own category is consulted first, so a label that two categories
+  // share resolves to the family *that* category means by it.
+  final withinCategory = _familiesByLabel[category];
+  if (withinCategory != null) {
+    final family = withinCategory[normalised];
+    if (family != null) return family;
   }
+  final anywhere = _familiesByLabel[null]?[normalised];
+  if (anywhere != null) return anywhere;
 
   for (final entry in _familyKeywords.entries) {
     for (final keyword in entry.value) {
@@ -44,6 +44,47 @@ String? familyForCueText(String? text, {HabitCategory? category}) {
     }
   }
   return null;
+}
+
+/// Lowercased label → family, built once per category and kept.
+///
+/// **The lookup used to be a rebuild.** Every call materialised the category's
+/// chips, the global pool and a spread of every category's cues — some three
+/// hundred entries, with the category and global chips appearing twice — and
+/// then walked it lowercasing labels one at a time to answer a single
+/// question. A first reflection asks it once; §3's conditional unlock will ask
+/// it per typed answer. The map is the same data with the work done once.
+///
+/// The `null` key holds the fallback order — global chips, then every
+/// category's — so a label the habit's own category does not know still
+/// resolves to whatever the library calls it elsewhere. Category maps are
+/// populated last-wins per category and consulted first, which keeps the
+/// "shared label, category decides" rule the eager version had.
+final Map<HabitCategory?, Map<String, String>> _familiesByLabel =
+    _buildFamiliesByLabel();
+
+Map<HabitCategory?, Map<String, String>> _buildFamiliesByLabel() {
+  final byLabel = <HabitCategory?, Map<String, String>>{};
+
+  void add(HabitCategory? key, Iterable<StarterChip> chips) {
+    final target = byLabel.putIfAbsent(key, () => <String, String>{});
+    for (final chip in chips) {
+      target.putIfAbsent(chip.label.toLowerCase(), () => chip.family);
+    }
+  }
+
+  for (final category in HabitCategory.values) {
+    add(category, cueChipsFor(category));
+  }
+
+  // The fallback: the global pool first, then every category's cues, which is
+  // the order the eager list searched in.
+  add(null, globalCueChips);
+  for (final entry in starterChipLibrary.values) {
+    add(null, entry.cues);
+  }
+
+  return byLabel;
 }
 
 /// Keyword per family, for the families a user is most likely to type their own

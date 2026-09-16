@@ -62,15 +62,26 @@ class CheckInController extends Notifier<CheckInState> {
   late final String Function() _newId;
   late final DateTime Function() _clock;
 
+  /// The id and timestamp for the answer being written, minted once.
+  ///
+  /// `saveReflection` inserts or updates **by id**, so a retry after a failure
+  /// nobody could classify — the write committed, the future threw on the way
+  /// out — lands on the same row. Minting a fresh id per attempt threw that
+  /// away and wrote a second reflection for one check-in: `reflectionCount`
+  /// up, the weekly budget spent twice, and the same cue counted twice in the
+  /// convergence window. Cleared when the offer changes.
+  String? _pendingId;
+  DateTime? _pendingAt;
+
   @override
   CheckInState build() {
     _assembler = ref.read(checkInAssemblerProvider);
     _newId = ref.read(newIdProvider);
     _clock = ref.read(clockProvider);
 
-    // Kicked off rather than awaited: `build` is synchronous, and the screen
-    // renders its looking state and fills in.
-    Future<void>.microtask(load);
+    // The first load is started by the screen rather than from here, because
+    // the screen is what knows whether the garden already assembled an offer
+    // to hand over. Until it does, this is the looking state.
     return const CheckInState();
   }
 
@@ -78,13 +89,26 @@ class CheckInController extends Notifier<CheckInState> {
       dev.log(message, name: 'CheckInController.$action');
 
   /// Works out whether there is a question worth asking.
-  Future<void> load() async {
+  ///
+  /// [offered] is the offer the garden already assembled and handed over. It is
+  /// re-verified rather than trusted — a notification answer written by a
+  /// background isolate can land in between — but re-verifying one habit is a
+  /// fraction of electing a winner among all of them a second time. Without
+  /// one, or on a retry, the whole assembly runs.
+  Future<void> load({CheckInOffer? offered}) async {
+    // A fresh answer replaces the last one: `_pendingId` belongs to the offer
+    // it was minted for.
+    _pendingId = null;
+    _pendingAt = null;
+
     state = state.copyWith(
       status: CheckInStatus.looking,
       errorMessage: () => null,
     );
     try {
-      final offer = await _assembler.nextCheckIn();
+      final offer = offered == null
+          ? await _assembler.nextCheckIn()
+          : await _assembler.reverify(offered);
       if (!ref.mounted) return;
       state = state.copyWith(
         status: offer == null
@@ -171,9 +195,9 @@ class CheckInController extends Notifier<CheckInState> {
 
     final designedCue = offer.habit.designedCue?.trim().toLowerCase();
     final reflection = Reflection(
-      id: _newId(),
+      id: _pendingId ??= _newId(),
       habitId: offer.habit.id,
-      createdAt: _clock(),
+      createdAt: _pendingAt ??= _clock(),
       occasion: offer.occasion,
       framing: offer.framing,
       inputMode: inputMode,
@@ -194,7 +218,14 @@ class CheckInController extends Notifier<CheckInState> {
     try {
       await ref.read(reflectionServiceProvider).saveReflection(reflection);
       _log('record', '${offer.habit.id}: ${inputMode.name}');
+
+      // The garden is still behind this screen — `push` leaves it in the stack,
+      // so its offer provider is never disposed and never re-runs. Without
+      // this the invitation chip sits there naming a habit that has just been
+      // answered, and tapping it lands on "nothing to ask", because the 24h
+      // cooldown this answer just started is what the assembler now sees.
       if (!ref.mounted) return;
+      ref.invalidate(checkInOfferProvider);
       state = state.copyWith(status: CheckInStatus.answered, isSaving: false);
     } catch (error, stackTrace) {
       _log('record', 'could not save: $error');

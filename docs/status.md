@@ -37,6 +37,15 @@ of the three share code. So **Supabase sync is next**: a pusher over the `pendin
 schema already carries. The backend now exists ahead of that order, but only as a schema: nothing in
 `lib/` talks to it yet.
 
+One thing the check-in **says** is narrower than the data behind it. An un-nudged occasion is
+autonomy's whole measurement, but `sent: false` is written for four different reasons — the fade
+rule choosing silence, an evening already past when the backfill ran, no notification permission,
+and the pending-notification cap — and the ledger does not keep which. So the autonomy framing, the
+one that tells the user *"you did this without us asking"*, is gated on separate evidence that the
+app was actually nudging that habit at the time. The engine's autonomy denominator still counts all
+four, as it has since it was written. A `suppression_reason` column on `nudges` closes both at once
+and is the next thing to do to that table.
+
 The check-in is reachable from the garden but **not yet from the evening notification**. Scheduling
 composes its question through `ReflectionPromptComposer`, and the stand-in `NoReflectionPrompt` is
 still the one installed — so the notification fires without a question attached. That seam is a

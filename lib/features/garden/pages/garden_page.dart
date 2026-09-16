@@ -167,7 +167,12 @@ class _CheckInInvitation extends ConsumerWidget {
                     '${GardenPage.checkInInvitation} '
                     '${value.habit.name.toLowerCase()}',
                   ),
-                  onPressed: () => context.push(AppRoutes.checkIn),
+                  // The offer goes with the tap. The screen re-verifies it —
+                  // a notification answer can land in between — but against
+                  // one habit rather than reassembling every habit's ledgers
+                  // and growth ladder to re-elect the one just named here.
+                  onPressed: () =>
+                      context.push(AppRoutes.checkIn, extra: value),
                 ),
               ),
             ),

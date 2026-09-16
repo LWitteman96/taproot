@@ -94,18 +94,28 @@ double scoreChip({required StarterChip chip, required Daypart logged}) =>
 /// the caller, which is what makes Validation a single tap (§0); passing its
 /// [designedCueFamily] here is how this knows to leave a duplicate out.
 ///
-/// A null [designedCueFamily] means Journey A — tracking an existing habit,
-/// where reverse-engineering the cue is the point. That surfaces one more chip,
-/// skips the family filter, and raises the non-event floor, because Journey A's
-/// job is discovering a cue *type* the user has not named and an event-heavy
-/// set biases that discovery toward the answer the app already prefers (§5.4).
+/// [hasDesignedCue] false means Journey A — tracking an existing habit, where
+/// reverse-engineering the cue is the point. That surfaces one more chip and
+/// raises the non-event floor, because Journey A's job is discovering a cue
+/// *type* the user has not named and an event-heavy set biases that discovery
+/// toward the answer the app already prefers (§5.4).
+///
+/// **It is a separate parameter from [designedCueFamily], and that separation
+/// is the point.** `familyForCueText` returns null for two unrelated states —
+/// this habit has no designed cue, and this habit has one the deliberately
+/// partial keyword table did not recognise — and the table is documented as
+/// partial, so the second is the expected case rather than the edge. Inferring
+/// the journey from the family made an unrecognised cue silently switch the
+/// user into Journey A: one chip too many next to the pinned cue, filter
+/// §5.2.2 never firing, and the non-event floor raised for a habit whose cue
+/// the user had already named. A lookup miss costs one filter, not a journey.
 StarterChipSet surfaceStarterChips({
   required HabitCategory? category,
   required Daypart logged,
+  required bool hasDesignedCue,
   String? designedCueFamily,
   Set<String> unlockedConditionalFamilies = const <String>{},
 }) {
-  final hasDesignedCue = designedCueFamily != null;
   final wanted = hasDesignedCue
       ? EngineConstants.starterChipCount
       : EngineConstants.starterChipCountWithoutDesignedCue;
@@ -139,13 +149,30 @@ StarterChipSet surfaceStarterChips({
   // trying to limit. Reading afternoon is the worked case: five chips clear the
   // floor, the ceiling holds three events, and backfilling adds `got home` — a
   // fourth event — which is the monoculture the ceiling exists to prevent.
-  final backfilled = fromCategory.length < wanted;
-  final pool = backfilled
+  //
+  // **An uncategorised habit has nothing to backfill *from*.**
+  // `cueChipsFor(null)` returns `globalCueChips` itself, so the category pool
+  // and the backfill pool are the same list: appending it produces a doubled
+  // list that `_select`'s family dedupe collapses straight back, and the flag
+  // then reports a step that fired and bought nothing. Since `Habit.fromJson`
+  // decodes an unrecognised category to null on purpose — a row synced from a
+  // newer build looks exactly like this — that would be permanently true for a
+  // whole class of habits, and this file's flags exist so a tuning pass can
+  // see which step fired.
+  final canBackfill = category != null;
+  final pool = canBackfill && fromCategory.length < wanted
       ? <ScoredChip>[...fromCategory, ...eligible(globalCueChips)]
       : fromCategory;
+  final backfilled = pool.length > fromCategory.length;
+
+  // Ranked once, here, rather than inside each `_select` call: the ranking is
+  // a property of the pool, and the relaxation step below runs over the same
+  // pool. Scoring and sorting ~150 chips twice to answer the same question is
+  // pure repetition, and it fires in exactly the cases where the ceiling binds.
+  final ranked = _ranked(pool);
 
   var selected = _select(
-    candidates: pool,
+    ranked: ranked,
     wanted: wanted,
     nonEventFloor: nonEventFloor,
     typeCeiling: EngineConstants.starterChipTypeCeiling,
@@ -154,7 +181,7 @@ StarterChipSet surfaceStarterChips({
   var relaxed = false;
   if (selected.length < wanted) {
     final lifted = _select(
-      candidates: pool,
+      ranked: ranked,
       wanted: wanted,
       nonEventFloor: nonEventFloor,
       typeCeiling: null,
@@ -214,13 +241,11 @@ List<ScoredChip> _eligible({
 /// [typeCeiling] of null is the relaxation step — the ceiling lifted because
 /// the pool could not fill the set with it in place.
 List<ScoredChip> _select({
-  required List<ScoredChip> candidates,
+  required List<ScoredChip> ranked,
   required int wanted,
   required int nonEventFloor,
   required int? typeCeiling,
 }) {
-  final ranked = _ranked(candidates);
-
   final chosen = <ScoredChip>[];
   final families = <String>{};
   final typeCounts = <CueType, int>{};
@@ -256,7 +281,11 @@ List<ScoredChip> _select({
     floor: nonEventFloor,
     typeCeiling: typeCeiling,
   );
-  _applyEventFloor(chosen: chosen, ranked: ranked);
+  _applyEventFloor(
+    chosen: chosen,
+    ranked: ranked,
+    nonEventFloor: nonEventFloor,
+  );
 
   // Re-rank: a promotion can leave the set out of score order, and the set is
   // shown in the order it is returned.
@@ -331,6 +360,7 @@ void _applyNonEventFloor({
 void _applyEventFloor({
   required List<ScoredChip> chosen,
   required List<ScoredChip> ranked,
+  required int nonEventFloor,
 }) {
   bool isEvent(ScoredChip scored) => scored.chip.cueType == CueType.event;
 
@@ -346,12 +376,18 @@ void _applyEventFloor({
         .toList();
     if (promotable.isEmpty) return;
 
+    // Never drop below the non-event floor to satisfy this one; the diversity
+    // guard outranks the preference. The guard is *checked* rather than
+    // asserted in a comment: it is unreachable today only because of an
+    // arithmetic coincidence — a full set ends on `wanted - eventFloor`
+    // non-events, comfortably clear of both floors, and a short set has
+    // already exhausted `ranked`, so `promotable` is empty before this runs.
+    // Raising `starterChipEventFloor` or lowering `starterChipCount` would
+    // turn the comment into a bug with nothing failing.
     final displaceable = chosen.where((scored) => !isEvent(scored)).toList();
-    if (displaceable.isEmpty) return;
+    if (displaceable.length <= nonEventFloor) return;
     displaceable.sort((a, b) => a.score.compareTo(b.score));
 
-    // Never drop below the non-event floor to satisfy this one; the diversity
-    // guard outranks the preference.
     chosen.remove(displaceable.first);
     chosen.add(promotable.first);
   }

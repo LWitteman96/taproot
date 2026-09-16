@@ -46,7 +46,8 @@ The authored library from starter-chip-library.md §6–§7 is in as data: 144 c
 chips, twelve categories. Everything that decides anything is a pure function over values, so the
 only part that touches a repository is the assembler.
 
-119 new tests. **The spec's 24 worked examples are a test file**, for the same reason the engine has
+135 new tests — 765 in total, with the review round below. **The spec's 24 worked examples are a
+test file**, for the same reason the engine has
 one: they were computed by hand from the rule, so they are a specification and a test suite at once,
 and every guard in §5.3 is exercised by at least one of them.
 
@@ -117,9 +118,67 @@ outranks something said once last night, which is correct — that *is* the user
   chips into each, not ranking.
 - **Insight surfacing (§6) is untouched.** Every detection rule there reads reflections this stage
   writes, so the data is now there; nothing reads it yet.
+- **The nudge ledger cannot say *why* a nudge was not sent, and that is the column this stage wants
+  most.** `NudgeScheduler._decide` distinguishes `withheld`, `deliveryPassed`, `noPermission` and
+  `overCap`; `NudgeRecord` persists `sent` and `scheduledFor`, and the reason is lost. Autonomy's
+  denominator has inherited that ambiguity since the engine was written (`autonomy.dart`), but this
+  is the first consumer that both scores it at the top weight *and* says it out loud to the user, so
+  the gate above is a stand-in, not a fix: it reads "was the app nudging this habit that week" as a
+  proxy for "was this silence chosen". A `suppression_reason` column on `nudges`, written from the
+  decision the scheduler already computes, closes it here and in the engine at once. It needs a
+  migration and a backfill decision for existing rows, which is why it is not in this branch.
 - `Reflection.wasNudged` is recorded faithfully but nothing consumes it. Kept honest because the
   question it answers later — do people reflect differently when asked? — cannot be reconstructed
   once the rows are written.
+
+### Then, the review round
+
+Two reviews on PR #9 — eight correctness findings and six efficiency ones — and the fixes for all of
+them are in this branch.
+
+The three that changed behaviour rather than shape:
+
+- **Today read as a miss from one minute past midnight.** The scheduler stores
+  `expectedOccasionAt` as `startOfDay`, so today's row is in the past all day: a 19:00 runner
+  opening the app at 08:00 got `Occasion.miss` → `Framing.diagnosis` → *"No running today — what got
+  in the way?"*, eleven hours early. An occasion is now missable only once its day is over **or** its
+  own evening check-in slot has passed, which is the moment reflection spec §1 says the app looks
+  back at today. The unit helpers built rows at 07:00 — a shape that does not exist on disk — which
+  is what hid it; they build `startOfDay` rows now, and the suite reads real ledger data.
+- **`sent: false` is four states, and only one of them is autonomy.** The fade rule choosing silence,
+  an evening already past when the backfill ran, no permission, and the pending cap all persist
+  identically, because `_decide`'s reason is dropped before the row is written. A user who declined
+  notifications had *every* completion scored at autonomy's top weight and answered with *"You did
+  this without us asking"* — an app claiming a restraint it was never allowed to exercise. The claim
+  is now gated on evidence that the app was demonstrably nudging that habit around the occasion: a
+  sent row within a horizon either side. The storage is unchanged deliberately; see Left open.
+- **One skip left every later check-in with nothing to tap.** "First reflection" meant *no rows at
+  all* while the remembered pool counts only cue-bearing answers, so a single `skip` — or a first
+  `Can't remember`, which §4 calls a first-class answer — moved a habit into the returning branch
+  with an empty pool and no pinned cue, permanently, because only a typed answer could seed the pool
+  again. `isFirstReflection` now asks the same question the pool does, and the pinned cue leads the
+  returning branch too unless the user has already said it back.
+
+And the rest, briefly: an unresolvable cue family no longer switches the habit into Journey A
+(`hasDesignedCue` is passed separately from the family — the keyword table is deliberately partial,
+so a miss is the expected case); a retry after an unclassifiable save failure reuses the id it
+already minted, so the upsert contract does its job instead of writing a second reflection; the
+garden's invitation is invalidated when the question is answered, so it stops advertising a check-in
+that now lands on "nothing to ask"; an uncategorised habit no longer reports a backfill that
+appended the global pool to itself; and `_applyEventFloor` checks the non-event floor its comment
+already promised.
+
+The efficiency round: `loadFor` instead of `load` for habits already in hand, the per-habit loads
+awaited together rather than in sequence, one fold for both reflection maxima, a built-once
+label→family map instead of rebuilding ~300 chips per lookup, the chip ranking hoisted out of
+`_select` so the relaxation step does not redo it, and — the largest — the garden's offer handed
+through the route so the screen re-verifies **one** habit instead of re-running the whole assembly
+seconds after the garden ran it.
+
+One test lands with them: `chip_library_matches_spec_test.dart` parses
+`docs/starter-chip-library.md` and asserts the hand-transcribed library agrees with it in both
+directions. The parser is strict and the row counts are asserted, so a row it cannot read is a
+failure rather than a silent skip.
 
 ### Next
 

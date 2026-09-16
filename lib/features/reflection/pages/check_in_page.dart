@@ -18,8 +18,15 @@ import 'package:taproot/features/reflection/widgets/friction_answers.dart';
 /// *check-in* of reflection". That is what the extra air, the sentence-shaped
 /// heading and the absence of a progress bar are doing here. This screen should
 /// not feel like the watering control, and it should not feel like a form.
-class CheckInPage extends ConsumerWidget {
-  const CheckInPage({super.key});
+class CheckInPage extends ConsumerStatefulWidget {
+  const CheckInPage({this.offered, super.key});
+
+  /// The offer the garden already assembled, handed over through the route.
+  ///
+  /// Re-verified rather than trusted — see [CheckInController.load] — but it
+  /// saves electing a winner among every habit a second time, seconds after
+  /// the garden did it, with the user watching the spinner for the repeat.
+  final CheckInOffer? offered;
 
   static const String title = 'Check in';
   static const String nothingHeadline = 'Nothing to ask today';
@@ -34,12 +41,30 @@ class CheckInPage extends ConsumerWidget {
   static const String skipLabel = 'Not now';
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CheckInPage> createState() => _CheckInPageState();
+}
+
+class _CheckInPageState extends ConsumerState<CheckInPage> {
+  @override
+  void initState() {
+    super.initState();
+    // The first load starts here rather than in the controller's `build`,
+    // because this is the layer that knows whether an offer came through the
+    // route with it.
+    Future<void>.microtask(
+      () => ref
+          .read(checkInControllerProvider.notifier)
+          .load(offered: widget.offered),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(checkInControllerProvider);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(title),
+        title: const Text(CheckInPage.title),
         actions: [
           if (state.status == CheckInStatus.asking)
             TextButton(
@@ -49,7 +74,7 @@ class CheckInPage extends ConsumerWidget {
               onPressed: state.isSaving
                   ? null
                   : () => ref.read(checkInControllerProvider.notifier).skip(),
-              child: const Text(skipLabel),
+              child: const Text(CheckInPage.skipLabel),
             ),
         ],
       ),
@@ -69,15 +94,15 @@ class CheckInPage extends ConsumerWidget {
                   child: CircularProgressIndicator(),
                 ),
                 CheckInStatus.nothingToAsk => const _Quiet(
-                  headline: nothingHeadline,
-                  body: nothingBody,
+                  headline: CheckInPage.nothingHeadline,
+                  body: CheckInPage.nothingBody,
                 ),
                 CheckInStatus.answered => const _Quiet(
-                  headline: doneHeadline,
-                  body: doneBody,
+                  headline: CheckInPage.doneHeadline,
+                  body: CheckInPage.doneBody,
                 ),
                 CheckInStatus.failed => _Failed(
-                  message: state.errorMessage ?? failedHeadline,
+                  message: state.errorMessage ?? CheckInPage.failedHeadline,
                 ),
                 CheckInStatus.asking => _Question(offer: state.offer!),
               },

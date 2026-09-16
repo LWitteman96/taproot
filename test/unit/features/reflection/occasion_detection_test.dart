@@ -4,6 +4,7 @@ import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/models/completion.dart';
 import 'package:taproot/core/models/nudge.dart';
 import 'package:taproot/core/models/reflection.dart';
+import 'package:taproot/core/utils/local_dates.dart';
 import 'package:taproot/features/reflection/domain/occasion_detection.dart';
 import 'package:taproot/features/reflection/domain/reflection_priority.dart';
 
@@ -19,11 +20,19 @@ void main() {
     source: CompletionSource.tap,
   );
 
+  /// A ledger row **in the shape the scheduler actually writes**.
+  ///
+  /// `NudgeScheduler` stores `occasion.date.startOfDay` — local midnight, not
+  /// the hour the user does the thing — so a helper that builds rows at 07:00
+  /// is testing a row that never exists on disk. That is what hid today
+  /// reading as a miss from one minute past midnight: the guards against a
+  /// future-dated row all passed, because a 07:00 stamp for today is in the
+  /// past by breakfast while the real 00:00 stamp is in the past all day.
   NudgeRecord occasionAt(DateTime at, {bool sent = true, String id = 'n'}) =>
       NudgeRecord(
         id: id,
         habitId: 'habit-1',
-        expectedOccasionAt: at,
+        expectedOccasionAt: LocalDate.from(at).startOfDay,
         sent: sent,
       );
 
@@ -65,14 +74,82 @@ void main() {
 
   test('a completion the app stayed silent on is an autonomy occasion', () {
     // The richest data the app ever gets: the habit fired without being asked.
+    // The sent row two days earlier is what makes the silence a *choice* — see
+    // the test below for what it looks like without one.
     final occasion = detect(
       completions: <Completion>[completionAt(DateTime(2026, 3, 10, 7))],
       nudges: <NudgeRecord>[
+        occasionAt(DateTime(2026, 3, 8), id: 'sent'),
         occasionAt(DateTime(2026, 3, 10, 6, 30), sent: false),
       ],
     );
 
     expect(occasion?.occasion, Occasion.autonomyCompletion);
+  });
+
+  test('but silence from an app that never nudges claims nothing', () {
+    // A user who declined notification permission. Every row in their ledger
+    // is `sent: false`, because the reason a row was not sent is computed in
+    // the scheduler and thrown away before the row is written — so without a
+    // gate, *every* completion they ever log would be answered with "you did
+    // this without us asking", from an app that was never allowed to ask.
+    final occasion = detect(
+      completions: <Completion>[completionAt(DateTime(2026, 3, 10, 7))],
+      nudges: <NudgeRecord>[
+        occasionAt(DateTime(2026, 3, 8), sent: false, id: 'n1'),
+        occasionAt(DateTime(2026, 3, 9), sent: false, id: 'n2'),
+        occasionAt(DateTime(2026, 3, 10), sent: false, id: 'n3'),
+      ],
+    );
+
+    expect(occasion?.occasion, Occasion.completion);
+  });
+
+  test('a backfilled week on its own is not evidence of autonomy either', () {
+    // The same gate covers the backfill: rows written after their evening had
+    // passed are `sent: false` for a reason that has nothing to do with the
+    // fade rule, and a phone that was off for a week produces a run of them.
+    final occasion = detect(
+      completions: <Completion>[completionAt(DateTime(2026, 3, 10, 7))],
+      nudges: <NudgeRecord>[
+        for (var day = 4; day <= 10; day++)
+          occasionAt(DateTime(2026, 3, day), sent: false, id: 'n$day'),
+      ],
+    );
+
+    expect(occasion?.occasion, Occasion.completion);
+  });
+
+  group('today is not a miss until today is over', () {
+    // The failure this guards: a 19:00 runner opens the app at 08:00, today's
+    // row is stamped 00:00, nothing is completed on today's date yet, and the
+    // garden invites them to explain what got in the way — eleven hours before
+    // the run they were always going to do.
+    CheckInOccasion? detectAt(DateTime at) => occasionFor(
+      habitId: 'habit-1',
+      completions: const <Completion>[],
+      nudges: <NudgeRecord>[occasionAt(DateTime(2026, 3, 10), sent: false)],
+      reflections: const <Reflection>[],
+      targetFrequency: 3,
+      at: at,
+    );
+
+    test('at breakfast there is nothing to ask', () {
+      expect(detectAt(DateTime(2026, 3, 10, 8)), isNull);
+    });
+
+    test('at one minute past midnight there is nothing to ask', () {
+      expect(detectAt(DateTime(2026, 3, 10, 0, 1)), isNull);
+    });
+
+    test('at the evening check-in slot it is a miss', () {
+      // The moment the app is entitled to look back at the day.
+      expect(detectAt(DateTime(2026, 3, 10, 20))?.occasion, Occasion.miss);
+    });
+
+    test('and the next morning it still is', () {
+      expect(detectAt(DateTime(2026, 3, 11, 9))?.occasion, Occasion.miss);
+    });
   });
 
   test('a dismissed notification does not make a completion un-nudged', () {
@@ -102,7 +179,9 @@ void main() {
     );
 
     expect(occasion?.occasion, Occasion.miss);
-    expect(occasion?.at, DateTime(2026, 3, 9, 7));
+    // Local midnight, because that is what the row carries — the occasion is a
+    // day, not an hour.
+    expect(occasion?.at, DateTime(2026, 3, 9));
   });
 
   test('an expected occasion in the future is not a miss', () {

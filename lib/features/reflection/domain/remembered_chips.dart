@@ -104,9 +104,20 @@ double _weightAt(int age) {
   return weight * (1 - 0.5 * within / _recencyHalfLife);
 }
 
-/// Whether this is the habit's first reflection — the one the starter library
-/// exists for.
-bool isFirstReflection(List<Reflection> reflections) => reflections.isEmpty;
+/// Whether this is the habit's first *cue-bearing* reflection — the one the
+/// starter library exists for.
+///
+/// **Not `reflections.isEmpty`, and the difference is the whole point.** The
+/// returning branch offers [rememberedCues], which counts only answers that
+/// carry a cue: a `skip` and a `Can't remember` are rows, but neither is
+/// something to offer back. Keying "first" off row count instead put a habit
+/// whose only answer was one of those into the returning branch with an empty
+/// pool — no chips at all, permanently, because only a typed answer could seed
+/// the pool again and there was nothing on screen to type into but
+/// `Something else`. Asking the same question the pool asks keeps the starter
+/// library covering exactly the case it exists for, `Can't remember` included.
+bool isFirstReflection(List<Reflection> reflections) =>
+    rememberedCues(reflections: reflections).isEmpty;
 
 /// The designed cue, as a chip pinned in slot 0.
 ///

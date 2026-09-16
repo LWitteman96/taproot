@@ -29,6 +29,9 @@ void main() {
       final surfaced = surfaceStarterChips(
         category: category,
         logged: daypartFor(loggedAt),
+        // The worked examples state the journey through the family, which is
+        // what §7 does; the production caller passes the two separately.
+        hasDesignedCue: designedCueFamily != null,
         designedCueFamily: designedCueFamily,
       );
 

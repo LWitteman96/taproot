@@ -10,6 +10,7 @@ import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/pages/habit_creation_page.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/reflection/pages/check_in_page.dart';
+import 'package:taproot/features/reflection/services/check_in_assembler.dart';
 
 /// Every path in the app, in one place.
 abstract final class AppRoutes {
@@ -121,7 +122,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.checkIn,
-        builder: (context, state) => const CheckInPage(),
+        // The garden hands its already-assembled offer over as `extra`, so the
+        // screen re-verifies one habit instead of re-electing a winner among
+        // all of them. Absent — a deep link, a cold start on this path — the
+        // screen assembles from scratch.
+        builder: (context, state) =>
+            CheckInPage(offered: state.extra as CheckInOffer?),
       ),
     ],
   );
