@@ -296,6 +296,13 @@ class NudgeScheduler {
             // next evening's notification is ever in range. The same
             // notification id replaces rather than adds, so the pending count
             // does not move and the cap accounting is untouched.
+            //
+            // The result is deliberately ignored, unlike every other call to
+            // `_queue`. A refusal here loses a *re-composition*, not a
+            // notification: the one already queued stays queued and still
+            // fires, carrying the older question. The row is already recorded
+            // as sent, and if the platform has in fact dropped it, the
+            // lost-notification branch above re-queues it on the next pass.
             await _queue(
               habit: habit,
               occasion: occasion,
