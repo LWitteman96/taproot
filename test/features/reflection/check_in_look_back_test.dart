@@ -16,6 +16,7 @@ import 'package:taproot/core/models/reflection.dart';
 import 'package:taproot/features/reflection/domain/reflection_repository.dart';
 import 'package:taproot/features/reflection/providers/reflection_providers.dart';
 import 'package:taproot/features/reflection/widgets/check_in_chip.dart';
+import 'package:taproot/features/reflection/widgets/check_in_commit.dart';
 import 'package:taproot/features/reflection/widgets/check_in_look_back.dart';
 import 'package:taproot/features/reflection/widgets/check_in_sheet_host.dart';
 
@@ -67,10 +68,15 @@ void main() {
   Future<void> plantAndWater({
     String? designedCue = 'after breakfast',
     HabitCategory? category = HabitCategory.exercise,
+    // Daily by default in the commit tests, so "the next occasion" is
+    // unambiguously tomorrow rather than whichever day a 3-a-week cadence
+    // happens to land on.
+    int targetFrequency = 3,
   }) async {
     await store.habits.saveHabit(
       testHabit(
         category: category,
+        targetFrequency: targetFrequency,
         designedCue: designedCue,
         designedCueType: designedCue == null ? null : CueType.event,
         createdAt: DateTime(2026, 1, 1),
@@ -247,6 +253,91 @@ void main() {
 
     final saved = (await store.reflections.reflectionsFor('habit-1')).single;
     expect(saved.inputMode, InputMode.skipped);
+  });
+
+  testWidgets('answering moves on to committing to the next occasion', (
+    tester,
+  ) async {
+    await plantAndWater(targetFrequency: 7);
+    // Every expected occasion gets a ledger row, including the ones
+    // deliberately not nudged — that is what autonomy is counted over.
+    await store.nudges.saveNudge(
+      NudgeRecord(
+        id: 'n-next',
+        habitId: 'habit-1',
+        expectedOccasionAt: DateTime(2026, 3, 13, 7),
+        sent: false,
+      ),
+    );
+    await pumpCheckIn(tester);
+
+    await tester.tap(chip(CheckInLookBack.yesLabel));
+    await tester.pumpAndSettle();
+    // Tests run with motion off, so there is no auto-advance and a Next button
+    // appears instead — which is the reduced-motion contract, not a detour.
+    await tester.tap(
+      find.widgetWithText(FilledButton, CheckInLookBack.nextLabel),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tomorrow, then.'), findsOneWidget);
+    expect(chip(CheckInCommit.differentDayLabel), findsOneWidget);
+  });
+
+  testWidgets('the commitment goes to the ledger, not onto the reflection', (
+    tester,
+  ) async {
+    // It is an answer about a *future* occasion, and the ledger is what the
+    // engine reads for autonomy and day-of-week preference.
+    await plantAndWater(targetFrequency: 7);
+    await store.nudges.saveNudge(
+      NudgeRecord(
+        id: 'n-next',
+        habitId: 'habit-1',
+        expectedOccasionAt: DateTime(2026, 3, 13, 7),
+        sent: false,
+      ),
+    );
+    await pumpCheckIn(tester);
+
+    await tester.tap(chip(CheckInLookBack.yesLabel));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.widgetWithText(FilledButton, CheckInLookBack.nextLabel),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(chip(CheckInCommit.differentDayLabel));
+    await tester.pumpAndSettle();
+
+    final ledger = await store.nudges.nudgesFor('habit-1');
+    final next = ledger.firstWhere((row) => row.id == 'n-next');
+    // A decline is not a failure, it is data.
+    expect(next.declined, isTrue);
+    expect(next.confirmed, isFalse);
+  });
+
+  testWidgets('there is no commit step when there is nothing to commit to', (
+    tester,
+  ) async {
+    // No ledger row means the planner has not reached the occasion, and
+    // recording against a row that does not exist would invent one.
+    await plantAndWater();
+    await pumpCheckIn(tester);
+
+    // The meta row promises one step, not two, before the answer lands.
+    expect(find.textContaining('1 of 1'), findsOneWidget);
+
+    await tester.tap(chip(CheckInLookBack.yesLabel));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.widgetWithText(FilledButton, CheckInLookBack.nextLabel),
+    );
+    await tester.pumpAndSettle();
+
+    // Straight to done, skipping the step it never promised. Asserted on the
+    // meta row rather than a chip, because both steps have a chip called "Yes".
+    expect(find.textContaining('done'), findsOneWidget);
+    expect(find.text('Tomorrow, then.'), findsNothing);
   });
 
   testWidgets('a retry after a failed save writes one reflection, not two', (

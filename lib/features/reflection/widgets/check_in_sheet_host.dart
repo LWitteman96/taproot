@@ -1,10 +1,16 @@
+import 'dart:developer' as dev;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:taproot/app/runtime/runtime_providers.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
+import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 import 'package:taproot/features/reflection/controllers/check_in_controller.dart';
 import 'package:taproot/features/reflection/services/check_in_assembler.dart';
+import 'package:taproot/features/reflection/domain/commit_target.dart';
+import 'package:taproot/features/reflection/widgets/check_in_commit.dart';
 import 'package:taproot/features/reflection/widgets/check_in_look_back.dart';
 import 'package:taproot/features/reflection/widgets/check_in_sheet.dart';
 
@@ -59,18 +65,83 @@ enum _SheetStep { lookBack, commit, done }
 class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
   _SheetStep _step = _SheetStep.lookBack;
 
+  /// The occasion step 2 asks about, resolved when the answer lands. Null means
+  /// there is nothing to commit to and the step is skipped entirely.
+  CommitTarget? _commit;
+
   @override
   void initState() {
     super.initState();
     // After the frame: `load` writes controller state, and doing that during
     // the build that is creating this widget rebuilds a provider mid-frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        ref
-            .read(checkInControllerProvider.notifier)
-            .load(offered: widget.offered);
-      }
+      if (!mounted) return;
+      ref
+          .read(checkInControllerProvider.notifier)
+          .load(offered: widget.offered);
+      _previewCommitStep();
     });
+  }
+
+  /// Whether step 2 has anything to ask.
+  ///
+  /// Resolved when the sheet opens, so the meta row can promise `1 of 2` or
+  /// `1 of 1` honestly *before* the answer lands — promising a second step and
+  /// then not having one is worse than never promising it. Starts false so the
+  /// first frame under-promises rather than over-promises.
+  bool _hasCommitStep = false;
+
+  /// Work out whether there will be a commit step, for the meta row.
+  ///
+  /// Deliberately separate from [_afterAnswer], which resolves it again: the
+  /// answer takes time, and the notification's own Yes can land in between —
+  /// which is one of the three cases §4.3 skips the step for.
+  Future<void> _previewCommitStep() async {
+    final offer = ref.read(checkInControllerProvider).offer ?? widget.offered;
+    if (offer == null) return;
+    final target = await _resolveCommitTarget(offer);
+    if (mounted) setState(() => _hasCommitStep = target != null);
+  }
+
+  /// Decide where to go after the look-back answer.
+  ///
+  /// The commit target is resolved *here* rather than when the sheet opened,
+  /// because answering takes time and the notification's own Yes can land in
+  /// between — which is one of the three cases §4.3 skips the step for.
+  Future<void> _afterAnswer(CheckInOffer offer) async {
+    final target = await _resolveCommitTarget(offer);
+    if (!mounted) return;
+    setState(() {
+      _commit = target;
+      _hasCommitStep = target != null;
+      _step = target == null ? _SheetStep.done : _SheetStep.commit;
+    });
+  }
+
+  Future<CommitTarget?> _resolveCommitTarget(CheckInOffer offer) async {
+    try {
+      final nudges = await ref
+          .read(nudgeServiceProvider)
+          .nudgesFor(offer.habit.id);
+      return commitTargetFor(
+        habit: offer.habit,
+        nudges: nudges,
+        pauses: const [],
+        now: ref.read(clockProvider)(),
+      );
+    } catch (error, stackTrace) {
+      // Not surfaced: the reflection is already written, and a ledger the app
+      // could not read is not a reason to tell the user their answer failed.
+      // Skipping the step is the same thing the rules do when there is nothing
+      // to ask.
+      dev.log(
+        'could not resolve a commit target',
+        name: 'CheckInSheetHost',
+        error: error,
+        stackTrace: stackTrace,
+      );
+      return null;
+    }
   }
 
   void _close() {
@@ -124,20 +195,36 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
         _SheetStep.lookBack => CheckInLookBack(
           offer: offer!,
           ticker: widget.ticker,
-          onAnswered: () => setState(() => _step = _SheetStep.commit),
+          onAnswered: () => _afterAnswer(offer),
           // Closing *is* the acknowledgement for a skip: there is no step 2
           // and no done state to show (check-in-design §4.4).
           onSkipped: _close,
         ),
-        // Build steps 4 and 5.
-        _SheetStep.commit || _SheetStep.done => const SizedBox(height: 120),
+        // `_commit` cannot be null here — the step is only entered when one
+        // was resolved — but the switch cannot know that, and a bang would be
+        // a promise rather than a check.
+        _SheetStep.commit => switch (_commit) {
+          final commit? => CheckInCommit(
+            habit: offer!.habit,
+            framing: offer.candidate.framing,
+            target: commit,
+            ticker: widget.ticker,
+            onCommitted: ({required bool declined}) =>
+                setState(() => _step = _SheetStep.done),
+          ),
+          null => const SizedBox.shrink(),
+        },
+        // Build step 5.
+        _SheetStep.done => const SizedBox(height: 120),
       },
     };
 
     return CheckInSheet(
       habitName: offer?.habit.name ?? '',
       step: switch (_step) {
-        _SheetStep.lookBack => '1 of 2',
+        // `1 of 1` when there is nothing to commit to: promising a second step
+        // and then not having one is worse than never promising it.
+        _SheetStep.lookBack => _hasCommitStep ? '1 of 2' : '1 of 1',
         _SheetStep.commit => '2 of 2',
         _SheetStep.done => 'done',
       },
