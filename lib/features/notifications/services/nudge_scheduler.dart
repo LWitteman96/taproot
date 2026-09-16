@@ -109,7 +109,8 @@ class NudgeScheduler {
   /// cannot quietly queue five times the ceiling. Habits are planned in
   /// creation order, which means an overflow always drops the *newest* habit's
   /// furthest-out nudges — deterministic, and reported rather than silent.
-  Future<NudgePlan> planAll() async => _plan(await _habits.allHabits());
+  Future<NudgePlan> planAll() async =>
+      _plan(await _habits.allHabits(), partial: false);
 
   /// Re-plans one habit. Called after a completion or a habit being planted,
   /// when the stage — and so the fade rate — may just have changed.
@@ -121,7 +122,7 @@ class NudgeScheduler {
         occasions: <PlannedOccasion>[],
       );
     }
-    return _plan(<Habit>[habit]);
+    return _plan(<Habit>[habit], partial: true);
   }
 
   /// One planning pass, over one habit or all of them.
@@ -129,7 +130,7 @@ class NudgeScheduler {
   /// Both entry points share this so that the cap accounting cannot diverge
   /// between them, and so the next pass-wide step — cancelling the orphaned
   /// notifications of a deleted habit, say — cannot land on only one path.
-  Future<NudgePlan> _plan(List<Habit> habits) async {
+  Future<NudgePlan> _plan(List<Habit> habits, {required bool partial}) async {
     final access = await _gateway.currentAccess();
     final pending = access.canPost
         ? await _gateway.pendingNotificationIds()
@@ -149,7 +150,21 @@ class NudgeScheduler {
     // Habits are planned in creation order, so when two compete for an evening
     // the older one keeps the question: deterministic, and the same tie-break
     // the cap uses.
-    final questionedEvenings = <LocalDate>{};
+    //
+    // A pass over *one* habit cannot see the other habits at all, so the set
+    // has to be seeded from what is already queued for them, or every
+    // completion would hand the evening's question out a second time: habit A
+    // takes Thursday on launch, the user waters B that afternoon, and B's
+    // single-habit pass starts with an empty set and composes a question onto
+    // its own Thursday notification too. The invariant is cross-pass by
+    // nature — it is a claim about the user's evening, not about one pass.
+    final questionedEvenings = partial
+        ? await _eveningsSpokenFor(
+            excluding: habits,
+            pending: pending,
+            now: _clock(),
+          )
+        : <LocalDate>{};
 
     // **One counter, incremented only when the OS actually took a
     // notification.** Recounting decisions afterwards is what made the cap
@@ -188,6 +203,42 @@ class NudgeScheduler {
     }
     _log.info('$plan');
     return plan;
+  }
+
+  /// The evenings other habits' pending notifications already speak for.
+  ///
+  /// Read from the ledger rather than from a column saying "this row carries
+  /// the question", because the notification the OS is holding cannot be read
+  /// back — only its id can. So the approximation is *an evening another habit
+  /// still has a pending notification on*, which is exactly the evening a
+  /// full pass would already have given the question to one of them.
+  ///
+  /// It yields to whoever holds the evening rather than to whoever is older,
+  /// and that is deliberate. Creation order is how a full pass breaks a tie,
+  /// but a single-habit pass cannot re-compose the *other* habit's queued
+  /// notification to take the question off it — so preferring the older habit
+  /// here would sometimes produce two questions instead of none, and one
+  /// question an evening is the rule the tie-break exists to serve.
+  Future<Set<LocalDate>> _eveningsSpokenFor({
+    required List<Habit> excluding,
+    required Set<int> pending,
+    required DateTime now,
+  }) async {
+    if (pending.isEmpty) return <LocalDate>{};
+
+    final planning = excluding.map((habit) => habit.id).toSet();
+    final evenings = <LocalDate>{};
+    for (final habit in await _habits.allHabits()) {
+      if (planning.contains(habit.id)) continue;
+      for (final nudge in await _nudges.nudgesFor(habit.id)) {
+        final deliverAt = nudge.scheduledFor;
+        if (!nudge.sent || deliverAt == null) continue;
+        if (!deliverAt.isAfter(now)) continue;
+        if (!pending.contains(notificationIdFor(nudge.id))) continue;
+        evenings.add(LocalDate.from(deliverAt));
+      }
+    }
+    return evenings;
   }
 
   Future<_HabitPass> _planHabit({

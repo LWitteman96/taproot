@@ -502,6 +502,46 @@ void main() {
       expect(tonight.payload.habitId, 'habit-1');
     });
 
+    test('and still only one when a watering re-plans a single habit', () async {
+      // The invariant is about the user's evening, not about one pass, so a
+      // pass that sees one habit cannot enforce it out of its own state.
+      // Every other test here drives `planAll`, where the set is built from
+      // scratch over every habit and the rule holds by construction — which is
+      // exactly why this hole stayed open: habit A takes tonight on launch,
+      // the user waters B that afternoon, and B's single-habit pass starts
+      // with an empty set and puts a second question into the same evening.
+      await saveHabit(id: 'habit-1', name: 'Morning run');
+      await saveHabit(id: 'habit-2', name: 'Read');
+      await buildScheduler(reflection: _RecordingComposer(asked));
+
+      await scheduler.planAll();
+      final tonight = LocalDate.from(clock.now);
+      final claimed = gateway.queued.values
+          .where((nudge) => LocalDate.from(nudge.deliverAt) == tonight)
+          .where((nudge) => nudge.checkIn.body.startsWith('What got you going'))
+          .toList();
+      expect(
+        claimed,
+        hasLength(1),
+        reason: 'the launch pass should have spoken for tonight exactly once',
+      );
+      expect(claimed.single.payload.habitId, 'habit-1');
+
+      // The watering. B is re-planned on its own, and tonight is already spoken
+      // for by a notification B's pass never looks at.
+      await scheduler.planHabit('habit-2');
+
+      final questionsTonight = gateway.queued.values
+          .where((nudge) => LocalDate.from(nudge.deliverAt) == tonight)
+          .where((nudge) => nudge.checkIn.body.startsWith('What got you going'))
+          .toList();
+      expect(
+        questionsTonight.map((nudge) => nudge.payload.habitId),
+        <String>['habit-1'],
+        reason: 'the single-habit pass handed tonight a second question',
+      );
+    });
+
     test('re-composes a queued question as its evening comes round', () async {
       // The promise on `ReflectionPromptComposer` — that re-planning keeps the
       // question from going stale — was a comment until this. A notification
