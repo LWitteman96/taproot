@@ -25,6 +25,17 @@ final plantStateProvider = Provider.family<PlantState?, String>(
   ),
 );
 
+/// Which plant the habit is. Fixed at creation, so this rebuilds nothing after
+/// the first frame — which is the point of reading it through a selector rather
+/// than off the whole [PlantState].
+final habitPlantTypeProvider = Provider.family<String?, String>(
+  (ref, habitId) => ref.watch(
+    gardenControllerProvider.select(
+      (state) => state.plants[habitId]?.habit.plantType,
+    ),
+  ),
+);
+
 final habitStageProvider = Provider.family<Stage?, String>(
   (ref, habitId) => ref.watch(
     gardenControllerProvider.select(

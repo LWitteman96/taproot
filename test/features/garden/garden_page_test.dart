@@ -10,6 +10,7 @@ import 'package:taproot/app/theme/app_motion.dart';
 import 'package:taproot/app/theme/themedata.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
 import 'package:taproot/features/garden/pages/garden_page.dart';
+import 'package:taproot/features/garden/providers/plant_art_providers.dart';
 import 'package:taproot/features/garden/widgets/plant_card.dart';
 import 'package:taproot/features/garden/controllers/garden_controller.dart';
 import 'package:taproot/features/garden/widgets/watering_control.dart';
@@ -133,6 +134,13 @@ class PageHarness {
       // settle, and a test that has to fight them is a test about the
       // animation rather than about the feature.
       gardenTickerProvider.overrideWith(() => _StillTicker()),
+      // No plant art here, explicitly. Left alone this would try to load the
+      // native library and the .riv, which is a real dependency on a setup
+      // step outside `flutter pub get` — and the async load happening to lose
+      // the race with the test's pumps is not the same thing as a test that
+      // does not depend on it. `plant_art_view_test.dart` covers the drawn
+      // path; these tests are about the card.
+      riveFernFileProvider.overrideWith((ref) async => null),
     ],
     child: MaterialApp(theme: AppTheme.light, home: const GardenPage()),
   );

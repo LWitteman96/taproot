@@ -39,4 +39,17 @@ abstract final class AppMotion {
 
   /// A plain state change — a card settling into its new stage.
   static const Duration stateChangeDuration = Duration(milliseconds: 240);
+
+  /// The cross-fade between two stages of plant art.
+  ///
+  /// Longer than [stateChangeDuration] on purpose. That one is a card settling;
+  /// this one is the plant becoming a visibly different plant, and at 240ms a
+  /// dissolve between two different silhouettes reads as a glitch rather than
+  /// as growth. It is also rare — a handful of times in a habit's life — so it
+  /// can afford to be seen.
+  ///
+  /// OPEN — a calibration question. A stage advance is an earned moment and
+  /// design-spec §4 does not say what it should feel like; a cross-fade is the
+  /// least it can be, not necessarily the right amount.
+  static const Duration stageAdvanceDuration = Duration(milliseconds: 700);
 }

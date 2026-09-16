@@ -7,6 +7,7 @@ import 'package:taproot/features/garden/controllers/garden_controller.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
 import 'package:taproot/features/garden/domain/plant_descriptions.dart';
 import 'package:taproot/features/garden/providers/garden_selectors.dart';
+import 'package:taproot/features/garden/widgets/plant_art_view.dart';
 import 'package:taproot/features/garden/widgets/watering_control.dart';
 
 /// One plant in the garden.
@@ -15,7 +16,7 @@ import 'package:taproot/features/garden/widgets/watering_control.dart';
 /// watering repaints the plant that was watered and leaves the rest of the
 /// garden alone.
 ///
-/// There is no plant art yet — it is with an external illustrator — so what
+/// The fern draws itself; the other five species have no art yet, so what so what
 /// stands in for it is the state in words. That is not purely a placeholder:
 /// the words are the semantics layer the illustration will still need, so they
 /// are worth getting right before there is anything to look at.
@@ -73,6 +74,10 @@ class PlantCard extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Above the words, not instead of them. The art draws itself
+              // or takes no space at all — five of six species have none —
+              // and the description below stays either way.
+              PlantArtView(habitId: habitId),
               ExcludeSemantics(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
