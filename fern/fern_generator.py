@@ -87,9 +87,17 @@ class Group:
     fiddlehead — and are what the droop and the sway read instead of a lookup
     table, so both work for any stage without knowing which one it is.
     """
-    def __init__(self, gid, children=(), tip=None, kind=None):
+    def __init__(self, gid, children=(), tip=None, kind=None, origin=None, scale=None,
+                 meta=None):
         self.gid, self.children = gid, list(children)
         self.tip, self.kind = tip, kind
+        # A group may carry its own transform. The roots need it: every root and
+        # branch is placed at its attachment point with its geometry local to
+        # that point, so growing one is a scale on its node rather than a
+        # different set of vertices. SVG writes it as a `transform`, RML as the
+        # Node's own x/y/scaleX/scaleY.
+        self.origin, self.scale = origin, scale
+        self.meta = meta or {}
 
 # ---------- geometry helpers ----------
 def cubic(p0, p1, p2, p3, t):
@@ -424,28 +432,71 @@ ROOT_LEVELS = {  # level: (length scale, max generation, number of primaries)
     4: (1.00, 3, 5),
 }
 
+ROOT_ORIGIN = (512, 0)       # the ground line; roots hang down from here
+
+def root_forest(tree):
+    """The whole root system as nested Groups, authored at full size.
+
+    Every root and every branch is its own node, placed at its attachment point
+    in its *parent's* local space, holding geometry that starts at its own
+    origin. Nothing here knows about levels: growing the system is a scale on
+    these nodes, which is what lets one tree serve every level.
+
+    Scale composes down the hierarchy, so scaling a primary carries its branches
+    and their attachment points with it — which is what a root growing longer
+    actually does.
+    """
+    def node(r, prim_index):
+        local = [(u * r.length, v * r.length) for u, v in r.unit]
+        body = [Path(f"{r.rid}-shape", [tapered(local, r.width, 1.4)], fill=ROOT,
+                     stroke=ROOT_OUTLINE, stroke_width=(2.2 if r.gen == 1 else 1.8))]
+        lens = cumlen(local)
+        for c in r.children:
+            attach, _ = at_frac(local, lens, c.frac)
+            child = node(c, prim_index)
+            child.origin = attach
+            body.append(child)
+        return Group(r.rid, body, kind="root", origin=(0.0, 0.0),
+                     meta={"gen": r.gen, "prim": prim_index})
+
+    return Group("roots", [node(r, i) for i, r in enumerate(tree)], origin=ROOT_ORIGIN)
+
+def root_scale(part, level):
+    """The scale one root node takes at one root level. 0 means "not yet there".
+
+    A primary carries the level's length factor; a branch is either present at
+    full size or absent, because a branch that is shown is shown whole. `level`
+    of None is the empty pose, before any roots exist at all.
+    """
+    if level is None:
+        return 0.0
+    length_factor, max_generation, primary_count = ROOT_LEVELS[level]
+    if part.meta["gen"] == 1:
+        return length_factor if part.meta["prim"] < primary_count else 0.0
+    return 1.0 if part.meta["gen"] <= max_generation else 0.0
+
+def root_parts(forest):
+    """Every root node in the forest, depth-first. One entry per keyed node."""
+    out = []
+    def walk(group):
+        if group.kind == "root":
+            out.append(group)
+        for child in group.children:
+            if isinstance(child, Group):
+                walk(child)
+    walk(forest)
+    return out
+
 def roots(level, tree):
-    """one group per primary root (with its branches) so each can get its own bone chain"""
-    s, gmax, nprim = ROOT_LEVELS[level]
-    groups = []
-    for r0 in tree[:nprim]:
-        contours = {1: [], 2: [], 3: []}
-        def walk(r, origin):
-            if r.gen > gmax: return
-            pts = r.pts(origin, s)
-            contours[r.gen].append(tapered(pts, r.width * (0.75 + 0.25*s), 1.4))
-            lens = cumlen(pts)
-            for c in r.children:
-                o, _ = at_frac(pts, lens, c.frac)
-                walk(c, o)
-        walk(r0, (512, 2))
-        body = []
-        for gen, name in ((3, "fine"), (2, "branches"), (1, "main")):
-            if contours[gen]:
-                body.append(Path(f"{r0.rid}-{name}", contours[gen], fill=ROOT, stroke=ROOT_OUTLINE,
-                                 stroke_width=(2.2 if gen == 1 else 1.8)))
-        groups.append(Group(r0.rid, body))
-    return [Group("roots", groups)]
+    """The root system posed at one level, for the SVG reference.
+
+    Reads the same forest and the same scale rule the RML poses use, so the two
+    cannot describe different plants.
+    """
+    forest = root_forest(tree)
+    for part in root_parts(forest):
+        part.scale = root_scale(part, level)
+    return [forest]
 
 # ---------- SVG writer ----------
 def contour_d(c):
@@ -468,9 +519,18 @@ def dot_d(d):
     return (f"M{d.cx - d.rx:.1f},{d.cy:.1f} a{d.rx:.1f},{d.ry:.1f} 0 1,0 {2*d.rx:.1f},0 "
             f"a{d.rx:.1f},{d.ry:.1f} 0 1,0 {-2*d.rx:.1f},0")
 
+def group_transform(item):
+    parts = []
+    if item.origin and item.origin != (0, 0):
+        parts.append(f"translate({item.origin[0]:.1f},{item.origin[1]:.1f})")
+    if item.scale is not None and item.scale != 1:
+        parts.append(f"scale({item.scale:.4f})")
+    return f' transform="{" ".join(parts)}"' if parts else ""
+
 def svg_item(item):
     if isinstance(item, Group):
-        return f'<g id="{item.gid}">' + "".join(svg_item(c) for c in item.children) + "</g>"
+        return (f'<g id="{item.gid}"{group_transform(item)}>'
+                + "".join(svg_item(c) for c in item.children) + "</g>")
     if isinstance(item, Dots):
         return f'<path id="{item.pid}" d="{" ".join(dot_d(d) for d in item.dots)}" fill="{item.fill}"/>'
     d = " ".join(contour_d(c) for c in item.contours)
@@ -549,7 +609,12 @@ def rml_paint(item, ids, indent, paints=None):
 def rml_item(item, origin, ids, depth, paints=None):
     ind = "    " * depth
     if isinstance(item, Group):
-        out = [f'{ind}<Node name="{item.gid}" id="{ids()}">']
+        attrs = ""
+        if item.origin:
+            attrs += f' x="{item.origin[0]:.2f}" y="{item.origin[1]:.2f}"'
+        if item.scale is not None:
+            attrs += f' scaleX="{item.scale:.4f}" scaleY="{item.scale:.4f}"'
+        out = [f'{ind}<Node{attrs} name="{item.gid}" id="{ids()}">']
         # draw order is reversed from SVG: the first Shape declared paints on top
         for child in reversed(item.children):
             out += rml_item(child, origin, ids, depth + 1, paints)
@@ -839,14 +904,17 @@ SWAY_EASE = (0.4, 0, 1, 1)
 # data file would collide with it.
 DATA_CLIENT = 9
 VIEWMODEL_ID, VITALITY_ID, INSTANCE_ID = "9:2", "9:3", "9:4"
+ROOTS_ID = "9:5"
 
 def data_rml():
     return "\n".join([
         '<Rive version="1" kind="fragment">',
         f'    <ViewModel defaultInstanceId="{INSTANCE_ID}" name="Fern" id="{VIEWMODEL_ID}">',
         f'        <ViewModelPropertyNumber name="vitality" id="{VITALITY_ID}"/>',
+        f'        <ViewModelPropertyNumber name="roots" id="{ROOTS_ID}"/>',
         f'        <ViewModelInstance exports="true" name="Default" id="{INSTANCE_ID}">',
         f'            <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="{VITALITY_ID}"/>',
+        f'            <ViewModelInstanceNumber propertyValue="0" viewModelPropertyId="{ROOTS_ID}"/>',
         '        </ViewModelInstance>',
         '    </ViewModel>',
         '</Rive>',
