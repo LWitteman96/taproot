@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:taproot/core/engine/adherence.dart';
+import 'package:taproot/core/engine/constants.dart';
 import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/engine/engine.dart';
 import 'package:taproot/core/engine/ladder.dart';
@@ -242,7 +243,7 @@ void main() {
       // nothing. 2 since the notification block joined the constants: the
       // occasion cadence decides which dates autonomy is counted over, so it
       // is a derivation input like any θ.
-      expect(growth.constantsVersion, 2);
+      expect(growth.constantsVersion, EngineConstants.version);
     });
 
     test('a Seed habit reports the Seedling window, not a phantom one', () {
