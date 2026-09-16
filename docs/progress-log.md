@@ -21,6 +21,75 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-16 — The secret scan could not see inside a binary file
+
+Branch: `fix/secret-scan-binary-blind`. Closes the item the sync entry below left open. CI only —
+no app code, no tests in the Flutter suite.
+
+### What was wrong
+
+The `secrets` job has scanned with `git grep -nIE` since it was written. **`-I` skips binary files**,
+so a credential committed inside any blob git classifies as binary was invisible to the job whose
+entire purpose is finding one — on a public repository, where a secret committed once is compromised
+even after it is removed. Nothing could have told us: a scan that finds nothing looks the same
+whether it is clean or blind.
+
+It was found sideways, while fixing the binary `sync_tables.dart` — the same `-I` that hid the file
+from `git grep` was hiding it from the scan.
+
+### The fix is two changes, and the second is the one reasoning misses
+
+Dropping `-I` **is not sufficient**, which only a test shows. Measured against the job's own pattern,
+on a PNG-shaped blob with a planted `AKIA…` key id:
+
+```
+git grep -nIE  → missed          LC_ALL=C            → found
+git grep -nE   → missed          LC_ALL=C.UTF-8      → missed
+git grep -naE  → missed          LC_ALL=en_US.UTF-8  → missed
+git grep -na -F AKIA… → found
+```
+
+A fixed-string search found it every time; the regex never did. **Under a UTF-8 locale the regex
+engine abandons content containing invalid UTF-8**, and a PNG header is `0x89 'PNG'`. So the pattern
+could not match inside a binary however the binary flags were set. `LC_ALL=C` makes the engine
+compare bytes as bytes; every pattern here is ASCII, so nothing is lost.
+
+One scan rather than a separate binary sweep — fewer moving parts to keep correct. Verified in both
+directions: it catches the plant, and produces no false positives across the repository's ~70 tracked
+binaries (the app-icon PNGs).
+
+The same `LC_ALL=C` went onto the `text-encoding` gate's `tr`, in CI and in the pre-commit hook.
+Without it BSD `tr` aborts with "Illegal byte sequence" on content that is not valid UTF-8 — most
+binary files, and what the hook meets on macOS. The check still reached the right answer through the
+error, by accident rather than by design.
+
+### Both gates now have to prove they can fail
+
+This is the vacuous-assertion lesson from the entry below, applied to CI. A gate that has never been
+shown to catch anything is a statement of belief, and this one **was wrong from the day it was
+written** — which is the strongest argument for the practice that could exist.
+
+So each gate now plants its own failure first and fails the build if the check does not fire. The
+credential pattern is defined once at job level and both the self-test and the scan read it, because
+a self-test carrying its own copy of the pattern proves only that the copy works.
+
+**The first version of the self-test was itself vacuous, and that is worth recording.** Its planted
+blob went green with `LC_ALL=C` removed. `git grep` splits on newlines before matching, and the PNG's
+own CRLF pushes the credential onto a later line — every byte of which was valid UTF-8, so the locale
+made no difference to it. An invalid byte has to be **on the credential's own line**, because one
+invalid byte anywhere on a line breaks matching for that whole line. Caught by running the two
+regressions against the plant rather than by looking at it: `-I` restored, and `LC_ALL=C.UTF-8`. Both
+now go red.
+
+### Still open
+
+**History is not scanned.** Both gates look at the working tree at HEAD. A credential committed and
+then removed in a later commit is still in the object graph and still indexed, which is the thing the
+job's own comment says about public repositories. Scanning history is a different job with different
+runtime characteristics — and if one is added, this finding says to write its self-test first.
+
+---
+
 ## 2026-09-16 — Sync review fixes
 
 Branch: `feature/supabase-sync`. Cross-review of PR #8 by another session; this entry records what
