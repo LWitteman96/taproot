@@ -11,7 +11,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(24);
+select plan(37);
 
 -- ── RLS is on, everywhere, with nothing reachable by anon ───────────────────
 
@@ -109,6 +109,50 @@ select lives_ok(
             'aaaaaaaa-0000-0000-0000-000000000001',
             'Run', 'fern', 3, 'event', now(), now())$$,
   'an event cue is admissible as a designed cue'
+);
+
+-- ── journey is closed, category is open ─────────────────────────────────────
+--
+-- The asymmetry is the point, and it is not an oversight on either side: the
+-- journey's two values are fixed by design-spec §2, while the categories are
+-- authored against the starter chip library and that set grows.
+
+select lives_ok(
+  $$update public.habits set journey = 'track'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  'journey accepts the camelCase wire values design-spec §2 fixes'
+);
+
+select throws_ok(
+  $$update public.habits set journey = 'Design'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  '23514',
+  null,
+  'and rejects anything else — the set is closed, so a value the app could '
+  'not decode must fail at write time'
+);
+
+select lives_ok(
+  $$update public.habits set journey = null
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  'journey is nullable, unlike the device''s fresh schema: a row that somehow '
+  'arrives without one has to land and be reconciled on the way back, rather '
+  'than becoming a 23502 the device retries forever'
+);
+
+select lives_ok(
+  $$update public.habits set category = 'languagePractice'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  'category carries Enum.name verbatim — camelCase, not snake_case, because '
+  'encodeEnum is value.name and a mismatch is a FormatException on pull'
+);
+
+select lives_ok(
+  $$update public.habits set category = 'aCategoryAuthoredLater'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000004'$$,
+  'and has no CHECK on purpose: the chip library widens the set, and a '
+  'constraint here would make the next authored category a failed push on '
+  'every device running the newer build'
 );
 
 -- ── Enum columns carry the Dart Enum.name verbatim ──────────────────────────
@@ -296,6 +340,113 @@ select ok(
      where id = 'bbbbbbbb-0000-0000-0000-000000000004') < now() + interval '1 hour',
   'a second device deleting an already-deleted habit keeps the first stamp '
   'rather than failing — first deletion wins, and it is still a union'
+);
+
+-- ── Last write wins, enforced rather than trusted ───────────────────────────
+--
+-- The sync drain pulls before it pushes so a stale row is reconciled away
+-- before it can be sent. These pin the same rule in the database, because the
+-- failure the ordering guards against — a stale push overwriting a newer edit
+-- from another device — is silent on both devices afterwards.
+
+insert into public.habits
+  (id, user_id, name, plant_type, target_frequency, created_at, updated_at)
+values ('bbbbbbbb-0000-0000-0000-000000000005',
+        'aaaaaaaa-0000-0000-0000-000000000001',
+        'Stretch', 'fern', 3, now(), '2026-03-05T00:00:00Z');
+
+select throws_ok(
+  $$update public.habits
+       set name = 'overwritten by a stale device',
+           updated_at = '2026-03-04T00:00:00Z'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000005'$$,
+  'PT409',
+  null,
+  'an update whose updated_at goes backwards is refused — the caller doing it '
+  'in the right order is a convention, and this is the constraint'
+);
+
+select is(
+  (select name from public.habits
+     where id = 'bbbbbbbb-0000-0000-0000-000000000005'),
+  'Stretch',
+  'and the newer row is still there, whole: the statement rolled back rather '
+  'than half-applying'
+);
+
+select lives_ok(
+  $$update public.habits
+       set name = 'an identical replay',
+           updated_at = '2026-03-05T00:00:00Z'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000005'$$,
+  'an equal updated_at is accepted — the overlap window re-reads covered '
+  'ground and a retried push resends a batch verbatim, so a replay is what '
+  'sync does all day rather than an anomaly'
+);
+
+select lives_ok(
+  $$update public.habits
+       set name = 'a genuinely newer edit',
+           updated_at = '2026-03-06T00:00:00Z'
+     where id = 'bbbbbbbb-0000-0000-0000-000000000005'$$,
+  'and a newer one is what the rule exists to let through'
+);
+
+-- ── The nudge ledger: exempt from the gate, but not ungoverned ─────────────
+--
+-- `nudges` is deliberately exempt from reject_stale_update, because a flag
+-- write from the device that did *not* create the row is legitimate and a
+-- strict `updated_at` gate would reject it. The exemption is only safe while
+-- merge_nudge_flags() supplies the rule it was justified by — OR'd monotonic
+-- flags — so these four assertions pin the exemption and the rule together.
+--
+-- The first one on its own used to be the whole test, and it was vacuous: it
+-- set `confirmed = true` on a row where `confirmed` was already true. It
+-- asserted that the exemption exists, which nothing threatened, and said
+-- nothing about the merge, which did not exist.
+
+update public.nudges
+   set sent = true, confirmed = true
+ where id = 'eeeeeeee-0000-0000-0000-000000000001';
+
+select lives_ok(
+  $$update public.nudges
+       set declined = true, updated_at = '1999-01-01T00:00:00Z'
+     where id = 'eeeeeeee-0000-0000-0000-000000000001'$$,
+  'the nudge ledger is exempt from the stale gate, because a flag write from '
+  'the device that did not create the row is legitimate and its merge rule is '
+  'not whole-row last-write-wins'
+);
+
+-- The write above carried the column defaults for sent and confirmed — false —
+-- which is exactly the shape of the failure: a device that has not heard about
+-- an answer pushes its whole row, and an unconditional ON CONFLICT DO UPDATE
+-- takes the cleared flag. Every device then pulls it back, and the device that
+-- holds the truth is no longer pending, so it never re-pushes it.
+select is(
+  (select confirmed from public.nudges
+     where id = 'eeeeeeee-0000-0000-0000-000000000001'),
+  true,
+  'and a stale write cannot clear an answer the user has already given — '
+  'without the merge the server stays wrong forever and a reinstall pulls the '
+  'answer as never given'
+);
+
+select is(
+  (select sent from public.nudges
+     where id = 'eeeeeeee-0000-0000-0000-000000000001'),
+  true,
+  'nor roll `sent` back, which is the worse half: an occasion that WAS nudged '
+  'moving into autonomy''s un-nudged denominator depresses the graduation gate'
+);
+
+select ok(
+  (select updated_at from public.nudges
+     where id = 'eeeeeeee-0000-0000-0000-000000000001')
+    > '2020-01-01T00:00:00Z',
+  'and updated_at is clamped forward rather than wound back — the stale writer '
+  'keeps its flag contribution without moving the timestamp every other device '
+  'compares against and pages on'
 );
 
 -- ── Deleting the auth user is the whole deletion ────────────────────────────

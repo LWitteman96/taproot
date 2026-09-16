@@ -234,7 +234,10 @@ class NudgeScheduler {
         final deliverAt = nudge.scheduledFor;
         if (!nudge.sent || deliverAt == null) continue;
         if (!deliverAt.isAfter(now)) continue;
-        if (!pending.contains(notificationIdFor(nudge.id))) continue;
+        final queuedHere = nudge.occasionIds.any(
+          (nudgeId) => pending.contains(notificationIdFor(nudgeId)),
+        );
+        if (!queuedHere) continue;
         evenings.add(LocalDate.from(deliverAt));
       }
     }
@@ -316,10 +319,20 @@ class NudgeScheduler {
         // table. Left alone it would be a nudge the ledger claims and the user
         // never gets, which is the one direction that corrupts the
         // measurement rather than just missing a reminder.
+        //
+        // **Every id the occasion accounts for, not just this row's.** A
+        // collapsed row's `sent` may have been OR'd in from a duplicate that
+        // another device minted, whose notification was queued under *that*
+        // id. Asking only about `known.id` reads a perfectly healthy pending
+        // notification as one the OS lost, and queues a second nudge for the
+        // same evening — with nothing able to cancel the first, because the
+        // scheduler never looks that id up again. See
+        // [NudgeRecord.mergedIds].
         final knownDeliverAt = nudgeDeliveryTime(occasion);
+        final isPending = known.occasionIds.any(
+          (nudgeId) => pending.contains(notificationIdFor(nudgeId)),
+        );
         if (known.sent && access.canPost && knownDeliverAt.isAfter(now)) {
-          final isPending = pending.contains(notificationIdFor(known.id));
-
           if (!isPending) {
             if (queued < EngineConstants.maximumPendingNudges) {
               final requeued = await _queue(
@@ -331,8 +344,9 @@ class NudgeScheduler {
               );
               if (requeued) queued++;
             }
-          } else if (knownDeliverAt.difference(now) <=
-              EngineConstants.nudgeQuestionRefreshWindow) {
+          } else if (pending.contains(notificationIdFor(known.id)) &&
+              knownDeliverAt.difference(now) <=
+                  EngineConstants.nudgeQuestionRefreshWindow) {
             // **Still queued, and close enough that its question is worth
             // re-asking.** The reflection half looks back at the day the
             // message arrives, and it was written when the notification was
@@ -346,7 +360,12 @@ class NudgeScheduler {
             // Cost is bounded by the window: at one occasion a day, only the
             // next evening's notification is ever in range. The same
             // notification id replaces rather than adds, so the pending count
-            // does not move and the cap accounting is untouched.
+            // does not move and the cap accounting is untouched — which is
+            // also why this asks about `known.id` specifically rather than
+            // reusing `isPending`. If what the OS holds is a *duplicate's*
+            // notification, re-queueing under this row's id would add a second
+            // one instead of replacing it, and a stale question is much the
+            // cheaper loss.
             //
             // The result is deliberately ignored, unlike every other call to
             // `_queue`. A refusal here loses a *re-composition*, not a

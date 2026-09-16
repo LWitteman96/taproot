@@ -240,6 +240,92 @@ void main() {
     });
   });
 
+  /// The seam between sync and the scheduler, which had nothing covering it:
+  /// `nudge_scheduler_test.dart` predates the collapse and
+  /// `occasion_collapse_test.dart` tests the function on its own.
+  group('a duplicate occasion pulled from another device', () {
+    /// The id has to sort **below** the scheduler's own, so the collapse makes
+    /// the duplicate canonical and the `sent` is OR'd onto an identity whose
+    /// notification was never queued. That is the whole failure: `known.id`
+    /// becomes an id the OS has never heard of.
+    const duplicateId = 'aaa-from-the-other-device';
+
+    late NudgeRecord nudged;
+
+    setUp(() async {
+      await saveHabit();
+      await scheduler.planAll();
+
+      // The occasion this device queued a notification for.
+      nudged = (await ledger()).firstWhere(
+        (row) => row.sent && row.expectedOccasionAt.isAfter(clock.now),
+      );
+      expect(gateway.forNudge(nudged.id), isNotNull);
+
+      // The other device planned the same evening, minted its own id, and its
+      // fade decision was to stay silent. Injected the way a pull writes it —
+      // by key, without the one-row-per-occasion guard.
+      (store.nudges as FakeNudgeService).injectPulled(
+        NudgeRecord(
+          id: duplicateId,
+          habitId: habitId,
+          expectedOccasionAt: nudged.expectedOccasionAt,
+          sent: false,
+        ),
+      );
+    });
+
+    test('does not produce a second notification for the same evening', () async {
+      final before = gateway.queued.length;
+
+      await scheduler.planAll();
+
+      expect(
+        gateway.queued.length,
+        before,
+        reason:
+            'the collapsed row carries `sent` from the row this device queued '
+            'and `id` from the other one, so a requeue check that asks only '
+            'about the canonical id reads a healthy pending notification as '
+            'one the OS lost — and nothing can cancel the first, because that '
+            'id is never looked up again',
+      );
+      expect(
+        gateway.forNudge(duplicateId),
+        isNull,
+        reason: 'and specifically not one under the absorbed id',
+      );
+    });
+
+    test('the collapsed row still knows which ids it absorbed', () async {
+      final collapsed = (await ledger()).firstWhere(
+        (row) => row.expectedOccasionAt == nudged.expectedOccasionAt,
+      );
+
+      expect(collapsed.id, duplicateId, reason: 'lowest id is canonical');
+      expect(collapsed.sent, isTrue, reason: 'and the flags are OR\'d');
+      expect(collapsed.mergedIds, <String>[nudged.id]);
+      expect(collapsed.occasionIds, <String>[duplicateId, nudged.id]);
+    });
+
+    test('a genuinely lost notification is still requeued', () async {
+      // The guard must not become "never requeue". With nothing pending under
+      // either id, the occasion really has lost its notification.
+      gateway.queued.clear();
+
+      await scheduler.planAll();
+
+      expect(
+        gateway.forNudge(duplicateId) ?? gateway.forNudge(nudged.id),
+        isNotNull,
+        reason:
+            'a nudge the ledger claims and the user never gets is the one '
+            'direction that corrupts the measurement rather than just missing '
+            'a reminder',
+      );
+    });
+  });
+
   group('idempotence', () {
     test(
       're-planning neither duplicates rows nor duplicates notifications',

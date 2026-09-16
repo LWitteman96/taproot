@@ -1,6 +1,31 @@
 #!/usr/bin/env bash
 set -e
 
+# ── Source must be text ─────────────────────────────────────────────────────
+#
+# Runs before the TTY guard below, deliberately: a literal NUL byte reached
+# `lib/app/sync/sync_tables.dart` through a non-interactive commit, which is the
+# path that returns early. A check that only runs when a human is watching is
+# not a check.
+#
+# Why it matters: git calls a blob with a NUL in it binary, so the file shows as
+# `Bin 2807 -> 3382 bytes` in every diff and PR view, and `git grep -I` — the
+# secret scan — skips it. `dart format` and `flutter analyze` both parse such a
+# file without complaint, so nothing else in the pipeline objects.
+staged_sources=$(git diff --cached --name-only --diff-filter=ACM -- lib test)
+offenders=""
+for f in $staged_sources; do
+  [ -f "$f" ] || continue
+  if ! LC_ALL=C tr -d '\000' < "$f" | cmp -s - "$f"; then
+    offenders="$offenders $f"
+  fi
+done
+if [ -n "$offenders" ]; then
+  echo "pre-commit: these staged files contain a NUL byte and are binary to git:$offenders" >&2
+  echo "pre-commit: write it as an escape (\\u0000) rather than as a literal." >&2
+  exit 1
+fi
+
 # Interactive version bumper. Bumps pubspec.yaml's version/build number and
 # stages it as part of the commit.
 #
