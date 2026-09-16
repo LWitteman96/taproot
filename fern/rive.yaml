@@ -1,4 +1,8 @@
 name: fern
+# the artboard `rive fern` opens. Without this it would be whichever file
+# sorts first, which is fern-data.rml's neighbour rather than a choice.
+# The others: rive fern --artboard=FernSprout (Seedling, Young, Bloom)
+main: FernMature
 logs:
   file: build/rive.log
   problems: build/problems.log

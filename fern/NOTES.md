@@ -27,19 +27,27 @@ builds clean, inspects clean, and does the wrong thing at runtime.
 
 ```
 fern_generator.py     the source of truth: geometry, SVG writer, RML emitter
-fern-mature.rml       generated — do not hand-edit
-fern-stage-*.svg      generated — the five growth stages
+pngdiff.py            dependency-free PNG reader, for measuring render changes
+fern-data.rml         generated — the shared Fern view model
+fern-stage-*.rml      generated — one artboard per growth stage
+fern-stage-*.svg      generated — the same five, as flat art
 fern-roots-*.svg      generated — the four root levels
-rive.yaml             project config (name, log paths)
+rive.yaml             project config: name, default artboard, log paths
 build/                gitignored: fern.riv, fern.png, logs
 ```
 
-Nothing in `build/` is committed, and no `.riv` has been added to the Flutter
-app's assets yet.
+**The `.rml` and `.svg` files are generated. Edit `fern_generator.py`, never
+them.** Nothing in `build/` is committed, and no `.riv` has been added to the
+Flutter app's assets yet.
 
 The art comes from `docs/design-spec.md`'s garden metaphor: five growth stages
 (sprout → seedling → young → mature → bloom) and four root levels, stacking so
-the ground lines meet. Only the **mature** stage has been taken to RML so far.
+the ground lines meet. **All five stages are built**; the roots are not.
+
+A project compiles every `.rml` in it as one document, so the six files above
+produce one `.riv` with five artboards sharing one view model. `rive fern` opens
+`FernMature` (named in `rive.yaml`); the others are
+`rive fern --artboard=FernSprout` and so on.
 
 ## The generator
 
@@ -332,7 +340,10 @@ other plants.
 
 **Ids.** One flat namespace across the whole document — `client:object`, no
 leading zeros, `0:0` reserved. The generator mints one for **every** element,
-vertices included, via a monotonic `Ids` allocator. `rive` does not rewrite ids
+vertices included, via a monotonic `Ids` allocator. **Each file gets its own id
+client** — `0` for the shared data, `1`–`5` for the stages — so ids cannot
+collide across files that share one namespace, without any file needing to know
+how many ids its neighbours used. `rive` does not rewrite ids
 on `--verify` or `inspect` (checked by checksum), but it does on export and
 push, so minting them up front keeps a generated file byte-stable and leaves the
 write-back nothing to do. A hand-written starter `scene.rml` was deleted for
@@ -366,32 +377,42 @@ canvases put their ground line at y=0 so a plant canvas stacks directly on top.
 
 ---
 
-## Adding a stage
+## Adding a stage, or another plant
 
-The mature stage is the only one emitted to RML so far. The path for the rest:
+All five fern stages are built, and the machinery that got there is generic. A
+new stage — or a whole new plant — needs:
 
-1. `stage(n)` already returns the drawables for every stage — the geometry
-   exists. Stages 1–3 add `fiddlehead()` parts, stage 5 adds spore `Dots`.
-2. `mature_rml()` is currently hard-wired to `MATURE_ORDER` and `base_mound(125)`.
-   Generalise it to take a stage number, reading the same `{1: 70, 2: 90, …}`
-   mound widths `stage()` uses.
-3. Fiddleheads have no `FRONDS` entry, so they need their own sway/droop
-   parameters. A coil probably wants to *uncurl* rather than sway.
-4. Decide one artboard per stage versus one artboard with a `Solo`. Separate
-   artboards are simpler and what `docs rigging` suggests `Solo` is *not* for;
-   a growth transition between stages would argue the other way.
-5. Roots are a second canvas with its own artboard, and the one place bones are
-   clearly worth it.
-6. `droop_angle()` reads `FRONDS`, so it generalises to any stage built from
-   those entries — but stages 1–3 scale their fronds, and fiddleheads are not in
-   `FRONDS` at all. Decide what a coil does as vitality drops before reusing the
-   blend wholesale.
-7. The view model is per-artboard. Five stage artboards each need their own
-   `viewModelId`/`viewModelInstanceId` wiring, or one shared `Fern` view model
-   with five instances — the ids are cheap, the naming is what matters, since
-   `vitality` is the app's public surface.
+1. **Geometry**, as a list of `Group` parts plus a mound, the way `stage_parts`
+   returns them.
+2. **`tip` and `kind` on every animatable part.** These are what the droop and
+   the sway read; nothing consults a per-stage table. `open_frond` and
+   `fiddlehead` set them, so anything built from those gets them free.
+3. **A `DROOP_DIRECTION` entry for each near-vertical part**, keyed
+   `(stage, part name)`. The generator **raises** without one rather than
+   guessing — see [Conventions](#conventions).
+4. **A `DRY_FILL` entry for any new fill that should fade.** Colour keying is
+   driven by membership of that dict, not by path name, so stems, midribs and
+   spores are left alone without anything listing them.
+5. Optionally a `SWAY` entry to hand-tune amplitude and phase. Without one a
+   part falls back to `SWAY_DEFAULT[kind]` and a deterministic phase spread.
 
----
+What is deliberately *not* needed: touching the emitter, the converters, the
+state machine, or the blend wiring. `stage_rml` takes a stage number and builds
+the rest.
+
+### Still open
+
+- **The roots.** A second canvas (ground line at y=0, so it stacks under a
+  plant canvas), four levels, and the one place bones are clearly worth it —
+  `roots()` already emits one group per primary root for exactly that.
+- **Growth transitions.** Five separate artboards cannot animate *between*
+  stages. If a plant should be seen growing, that is a different structure —
+  one artboard with a `Solo`, or a nested-artboard swap — and worth deciding
+  before anything depends on the current shape.
+- **The Flutter side.** Nothing sets `vitality` at runtime yet. The note about
+  `DataConverterInterpolator` under [Converters](#converters-and-the-one-the-app-will-need)
+  is already handled — the chains smooth by default — but the host still has to
+  pick an artboard per stage and write the property by name.
 
 ## Progress
 
@@ -739,3 +760,73 @@ under 1%, and the `max 2.862ms` render is the first frame warming up, not a
 recurring spike. No memory growth over 600 frames. Recorded so the next change
 has something to regress against — the number to watch is `advance`, since that
 is what the 1,500-object tree and two blend states cost.
+
+
+### Step 6 — the other four stages
+
+`mature_rml()` became `stage_rml(n, name)`, and the fern is now five artboards
+in one `.riv`.
+
+**What made it generic.** The droop and the sway used to read `FRONDS`, a table
+that only described the mature layout. They now read two attributes the parts
+carry themselves — `tip` and `kind` — set by `open_frond` and `fiddlehead` at
+construction. Nothing downstream knows which stage it is looking at, which is
+why stages 1–3 needed no new emitter code at all despite containing fiddleheads,
+scaled fronds and a frond that is in no table.
+
+Three things generalised along with it:
+
+- **`droop_angle`** takes a part and a stage number. `DROOP_KIND_SCALE` gives a
+  fiddlehead 0.6 of a frond's droop — a young shoot is springier than a laden
+  frond. `DROOP_DIRECTION` is keyed `(stage, part)` because the same part name
+  recurs across stages with different geometry; `fiddlehead-1` is near-vertical
+  in stage 1 and not in stages 2 or 3.
+- **Colour keying** is driven by `DRY_FILL` membership rather than by path name.
+  That picked up the fiddlehead coils (`#5E9150 → #8B9A7E`) without naming them,
+  and correctly left the bloom's ochre spores alone.
+- **Sway phases** fall back to a deterministic spread for parts with no
+  hand-tuned entry, so the five tuned mature values survive untouched while
+  stages 1–3 still get parts that do not move in lockstep.
+
+**Layout.** One file per stage plus `fern-data.rml` for the shared `Fern` view
+model — one `vitality`, whichever stage is on screen. Each file gets its own id
+client (0 for data, 1–5 for stages), which is what lets six files share one id
+namespace without coordinating. Artboards are spaced along the editor stage by
+their width plus a gutter; `rive.yaml` names `FernMature` as the default rather
+than letting file order decide.
+
+| Artboard | Objects | Parts | Paths | Fades |
+|---|---|---|---|---|
+| `FernSprout` | 303 | 1 fiddlehead | 2 | 1 |
+| `FernSeedling` | 864 | 2 fiddleheads + 1 frond | 36 | 4 |
+| `FernYoung` | 1188 | 3 fronds + 1 fiddlehead | 105 | 4 |
+| `FernMature` | 1751 | 5 fronds | 250 | 5 |
+| `FernBloom` | 1978 | 5 fronds + spores | 250 | 5 |
+
+Verified:
+
+- `problems: []` across all six files. Every artboard has 4 animations, 2 layers
+  and 2 binds — the same wiring, built by the same code.
+- **`FernMature` renders byte-identical to before the refactor**, which is the
+  check that generalising changed nothing about the stage that was already
+  right. Droop angles are unchanged too: ±20.6°, ±11.8°, +24.2°.
+- Every stage sways (frame 1 vs 40 at vitality 1) and droops (vitality 1 vs 0),
+  measured with `pngdiff.py`: 0.42%–12.14% of canvas for sway, 0.84%–21.54% for
+  droop, scaling with how much of the canvas the plant occupies.
+- Loop seams stay exact for the derived phases — worst case 2.08e-17 across all
+  stages and both modes.
+
+#### Performance baseline
+
+One `.riv` holding all five artboards is **109 KB**. `rive fern --bench=600`:
+
+| Artboard | advance mean | render mean | memory |
+|---|---|---|---|
+| `FernSprout` | 0.001 ms | 0.092 ms | +0 pages |
+| `FernMature` | 0.022 ms | 0.088 ms | +0 pages |
+| `FernBloom` | 0.041 ms | 0.079 ms | +0 pages |
+
+`advance` scales with the object count, as expected — it is what the tree and
+the two blend states cost. `render` is flat and dominated by canvas size rather
+than complexity. The worst case is 0.12 ms of a 16.7 ms frame. Earlier
+single-artboard numbers are superseded by these.

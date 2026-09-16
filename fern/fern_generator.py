@@ -1,3 +1,68 @@
+# ---------- the sway ----------
+SWAY_FRAMES = 300      # 5s at 60fps
+SWAY_SAMPLES = 24      # keyframes per part per loop
+
+# Hand-tuned amplitudes and phases for the mature layout. Any part not listed
+# -- a fiddlehead, a stage-2 frond -- falls back to SWAY_DEFAULT and a spread of
+# phases derived from its position in the stage.
+SWAY = {  # part: (degrees, phase in turns, second-harmonic phase in turns)
+    "frond-back-left":  (1.7, 0.00, 0.31),
+    "frond-back-right": (1.5, 0.37, 0.74),
+    "frond-left":       (2.6, 0.62, 0.12),
+    "frond-right":      (2.4, 0.18, 0.55),
+    "frond-center":     (1.9, 0.81, 0.93),
+}
+SWAY_DEFAULT = {"frond": 2.2, "fiddlehead": 1.3}   # degrees, by kind
+SWAY_HARMONIC = 0.28      # weight of the 2x component, relative to the fundamental
+SWAY_AMPLITUDE = 1.0      # global multiplier on every part's amplitude
+
+# How the parts of one plant relate to each other in time.
+#   "independent" -- each part carries its own phase. Reads as several plants in
+#                    still air, each doing its own thing.
+#   "wind"        -- one shared oscillation crossing the plant left to right,
+#                    each part lagging by its tip's x-position. Reads as one
+#                    plant in moving air.
+# Switchable so the two can be compared in the preview:
+#     python3 fern_generator.py --sway=wind
+SWAY_MODE = "independent"
+SWAY_WIND_LAG = 0.22      # phase lag in turns, across the full width of the plant
+SWAY_WIND_HARMONIC = 0.17 # fixed offset of the harmonic, in wind mode
+
+# Irrational-ish steps, so parts with no hand-tuned phase still spread out
+# rather than landing on top of each other.
+SWAY_PHASE_STEP = 0.37
+SWAY_HARMONIC_STEP = 0.61
+
+def sway_degrees(part):
+    if part.gid in SWAY:
+        return SWAY[part.gid][0]
+    return SWAY_DEFAULT[part.kind]
+
+def sway_phases(part, index, parts):
+    """(fundamental phase, harmonic phase) in turns, per the current mode."""
+    if SWAY_MODE == "wind":
+        xs = [p.tip[0] for p in parts]
+        span = (max(xs) - min(xs)) or 1
+        lag = (part.tip[0] - min(xs)) / span * SWAY_WIND_LAG
+        return lag, lag + SWAY_WIND_HARMONIC
+    if part.gid in SWAY:
+        _, phase, phase2 = SWAY[part.gid]
+        return phase, phase2
+    return (index * SWAY_PHASE_STEP) % 1.0, (index * SWAY_HARMONIC_STEP) % 1.0
+
+def sway_angle(part, index, parts, t):
+    """Rotation in radians at loop fraction t, for one part.
+
+    A fundamental plus a quarter-weight second harmonic. Both are whole numbers
+    of cycles per loop, so frame 0 and the last frame agree exactly and the loop
+    is seamless. The harmonic is what stops several parts on one period from
+    reading as a metronome, and it survives both phase modes.
+    """
+    amplitude = math.radians(sway_degrees(part)) * SWAY_AMPLITUDE
+    phase, phase2 = sway_phases(part, index, parts)
+    return (amplitude * math.sin(2*math.pi * (t + phase))
+            + amplitude * SWAY_HARMONIC * math.sin(4*math.pi * (t + phase2)))
+
 """Taproot fern generator — produces layered, animation-ready SVGs and RML.
 
 Plant canvases: 1024x1024, ground line at y=GROUND, stems emerge from (512, GROUND-18).
@@ -20,9 +85,12 @@ OCHRE = "#D9A441"
 # the thirsty end of the droop blend -- desaturated toward grey-green, not brown.
 # the plant should read as needing water, not as dead.
 LEAF_DRY = "#98A585"; LEAF_BACK_DRY = "#71806A"
+COIL = "#5E9150"; COIL_DRY = "#8B9A7E"
 W = 1024; GROUND = 900; BASE = (512, GROUND - 18)
 
-DRY_FILL = {LEAF: LEAF_DRY, LEAF_BACK: LEAF_BACK_DRY}
+# Every fill that fades as vitality drops, healthy -> thirsty. A fill not in
+# here is keyed by nobody and stays put: stems, midribs, soil, spores.
+DRY_FILL = {LEAF: LEAF_DRY, LEAF_BACK: LEAF_BACK_DRY, COIL: COIL_DRY}
 
 CAP_SAMPLES = 8  # straight vertices used to round a tapered tip
 
@@ -78,8 +146,15 @@ class Dots:
         self.pid, self.dots, self.fill = pid, list(dots), fill
 
 class Group:
-    def __init__(self, gid, children=()):
+    """A named group of drawables.
+
+    `tip` and `kind` are set on the parts that animate — a frond or a
+    fiddlehead — and are what the droop and the sway read instead of a lookup
+    table, so both work for any stage without knowing which one it is.
+    """
+    def __init__(self, gid, children=(), tip=None, kind=None):
         self.gid, self.children = gid, list(children)
+        self.tip, self.kind = tip, kind
 
 # ---------- geometry helpers ----------
 def cubic(p0, p1, p2, p3, t):
@@ -200,7 +275,7 @@ def open_frond(fid, ctrl1, ctrl2, tip, back=False, pairs=13, max_len=96, seed=0,
     ]
     if dots:
         parts.append(Dots(f"{fid}-spores", dots, OCHRE))
-    return Group(fid, parts)
+    return Group(fid, parts, tip=tp, kind="frond")
 
 def fiddlehead(fid, ctrl1, ctrl2, top, coil=34, turns=1.7, side=1, stem_w=10,
                buds=0, seed=0, back=False):
@@ -225,9 +300,9 @@ def fiddlehead(fid, ctrl1, ctrl2, top, coil=34, turns=1.7, side=1, stem_w=10,
     parts = []
     if leaves:
         parts.append(Path(f"{fid}-leaflets", leaves, fill=fill, stroke=OUTLINE, stroke_width=2.4))
-    parts.append(Path(f"{fid}-coil", [stem], fill=(fill if back else "#5E9150"),
+    parts.append(Path(f"{fid}-coil", [stem], fill=(fill if back else COIL),
                       stroke=OUTLINE, stroke_width=2.4))
-    return Group(fid, parts)
+    return Group(fid, parts, tip=top, kind="fiddlehead")
 
 def base_mound(width=120):
     x0, x1 = 512 - width/2, 512 + width/2
@@ -263,8 +338,15 @@ def frond_by_id(fid, scale=1.0, sori=False, pairs_override=None):
     pairs = pairs_override or pairs
     return open_frond(fid, c1, c2, tp, back, pairs, ml, seed, sori=sori, scale=scale)
 
-def stage(n):
-    """The drawables for one stage, in SVG order (first drawn = furthest back)."""
+STAGE_MOUND = {1: 70, 2: 90, 3: 105, 4: 125, 5: 125}
+
+def stage_parts(n):
+    """(animatable parts, mound) for one stage, in SVG order.
+
+    The parts are the things that sway and droop — fronds and fiddleheads. The
+    mound does neither, so it is kept separate rather than being filtered back
+    out of the list later.
+    """
     parts = []
     if n == 1:    # Sprout: one tight fiddlehead
         parts.append(fiddlehead("fiddlehead-1", (515, 800), (490, 730), (498, 680), coil=38, turns=1.75, side=1, stem_w=13))
@@ -280,8 +362,12 @@ def stage(n):
     else:         # Mature (4) / Bloom (5)
         for fid in MATURE_ORDER:
             parts.append(frond_by_id(fid, sori=(n == 5)))
-    mound = {1: 70, 2: 90, 3: 105}.get(n, 125)
-    return [Group("plant", parts), base_mound(mound)]
+    return parts, base_mound(STAGE_MOUND[n])
+
+def stage(n):
+    """The drawables for one stage, as the SVG writer wants them."""
+    parts, mound = stage_parts(n)
+    return [Group("plant", parts), mound]
 
 # ---------- roots ----------
 class Root:
@@ -477,8 +563,9 @@ def rml_item(item, origin, ids, depth, paints=None):
     out.append(f'{ind}</Shape>')
     return out
 
-def frond_node(group, ids, depth, nodes, paints=None):
-    """A frond gets two nested transforms, both pivoted on the shared base point.
+def part_node(group, ids, depth, nodes, paints=None):
+    """A frond or fiddlehead gets two nested transforms, both pivoted on the
+    shared base point.
 
     The outer one carries the vitality droop, the inner the sway loop. Keeping
     them separate means each rotation has exactly one owner, so the two
@@ -495,72 +582,23 @@ def frond_node(group, ids, depth, nodes, paints=None):
     out += [f'{ind}    </Node>', f'{ind}</Node>']
     return out
 
-# ---------- the sway ----------
-SWAY_FRAMES = 300      # 5s at 60fps
-SWAY_SAMPLES = 24      # keyframes per frond per loop
-
-SWAY = {  # frond: (degrees, phase in turns, second-harmonic phase in turns)
-    "frond-back-left":  (1.7, 0.00, 0.31),
-    "frond-back-right": (1.5, 0.37, 0.74),
-    "frond-left":       (2.6, 0.62, 0.12),
-    "frond-right":      (2.4, 0.18, 0.55),
-    "frond-center":     (1.9, 0.81, 0.93),
-}
-SWAY_HARMONIC = 0.28      # weight of the 2x component, relative to the fundamental
-SWAY_AMPLITUDE = 1.0      # global multiplier on every frond's amplitude
-
-# How the five fronds relate to each other in time.
-#   "independent" -- each frond carries its own phase from SWAY. Reads as five
-#                    plants in still air, each doing its own thing.
-#   "wind"        -- one shared oscillation crossing the plant left to right,
-#                    each frond lagging by its tip's x-position. Reads as one
-#                    plant in moving air.
-# Switchable so the two can be compared in the preview:
-#     python3 fern_generator.py --sway=wind
-SWAY_MODE = "independent"
-SWAY_WIND_LAG = 0.22      # phase lag in turns, across the full width of the plant
-SWAY_WIND_HARMONIC = 0.17 # fixed offset of the harmonic, in wind mode
-
-def sway_phases(fid):
-    """(fundamental phase, harmonic phase) in turns, per the current mode."""
-    if SWAY_MODE == "wind":
-        xs = [FRONDS[f][2][0] for f in MATURE_ORDER]
-        span = (max(xs) - min(xs)) or 1
-        lag = (FRONDS[fid][2][0] - min(xs)) / span * SWAY_WIND_LAG
-        return lag, lag + SWAY_WIND_HARMONIC
-    _, phase, phase2 = SWAY[fid]
-    return phase, phase2
-
-def sway_angle(fid, t):
-    """Rotation in radians at loop fraction t, for one frond.
-
-    A fundamental plus a quarter-weight second harmonic. Both are whole numbers
-    of cycles per loop, so frame 0 and the last frame agree exactly and the loop
-    is seamless. The harmonic is what stops five fronds on one period from
-    reading as a metronome, and it survives both phase modes.
-    """
-    amplitude = math.radians(SWAY[fid][0]) * SWAY_AMPLITUDE
-    phase, phase2 = sway_phases(fid)
-    return (amplitude * math.sin(2*math.pi * (t + phase))
-            + amplitude * SWAY_HARMONIC * math.sin(4*math.pi * (t + phase2)))
-
-def sway_animation(nodes, ids, anim_id, depth=2):
-    """Key rotation (propertyKey 15, radians) on every frond's inner sway node.
+def sway_animation(parts, nodes, ids, anim_id, depth=2):
+    """Key rotation (propertyKey 15, radians) on every part's inner sway node.
 
     The curve is sampled rather than keyed at its extremes: the two components
     have different phases, so there is no small set of frames where all the
-    turning points line up. At 24 samples the linear error is under 1% of the
+    turning points line up. At 24 samples the linear error is under 2% of the
     amplitude, which at a couple of degrees is nothing.
     """
     ind = "    " * depth
     out = [f'{ind}<LinearAnimation loopValue="loop" fps="60" duration="{SWAY_FRAMES}" '
            f'name="Sway" id="{anim_id}">']
-    for fid in MATURE_ORDER:
-        out.append(f'{ind}    <KeyedObject objectId="{nodes[fid]["sway"]}" id="{ids()}">')
+    for index, part in enumerate(parts):
+        out.append(f'{ind}    <KeyedObject objectId="{nodes[part.gid]["sway"]}" id="{ids()}">')
         out.append(f'{ind}        <KeyedProperty propertyKey="15" id="{ids()}">')
         for i in range(SWAY_SAMPLES + 1):
             frame = round(SWAY_FRAMES * i / SWAY_SAMPLES)
-            angle = sway_angle(fid, i / SWAY_SAMPLES)
+            angle = sway_angle(part, index, parts, i / SWAY_SAMPLES)
             # interpolationType defaults to hold, which would step the sway
             out.append(f'{ind}            <KeyFrameDouble frame="{frame}" value="{angle:.6f}" '
                        f'interpolationType="linear" id="{ids()}"/>')
@@ -570,38 +608,47 @@ def sway_animation(nodes, ids, anim_id, depth=2):
     return out
 
 # ---------- the vitality droop ----------
-DROOP_MAX_DEGREES = 25     # what a fully upright frond gives up at vitality 0
-NEAR_VERTICAL_DEGREES = 80 # above this, which way a frond leans is an accident
+DROOP_MAX_DEGREES = 25     # what a fully upright part gives up at vitality 0
+NEAR_VERTICAL_DEGREES = 80 # above this, which way a part leans is an accident
 
-# Which way a near-vertical frond falls. Above NEAR_VERTICAL_DEGREES the tip's
+# A fiddlehead is a young shoot, not a laden frond -- it gives less.
+DROOP_KIND_SCALE = {"frond": 1.0, "fiddlehead": 0.6}
+
+# Which way a near-vertical part falls. Above NEAR_VERTICAL_DEGREES the tip's
 # x-offset is too small to mean anything -- frond-center leans right by 36px out
 # of 743, so sign(dx) would flip on a trivial edit to the art. Declaring it
 # makes the choice survive the art changing. +1 is right, -1 is left.
+# Keyed by (stage, part) because the same part name recurs across stages with
+# different geometry.
 DROOP_DIRECTION = {
-    "frond-center": +1,    # falls to the right; matches the art as drawn
+    (1, "fiddlehead-1"): -1,   # the sprout's single shoot, leaning left as drawn
+    (3, "frond-center"): +1,   # the same art as stage 4, scaled
+    (4, "frond-center"): +1,   # falls to the right; matches the art as drawn
+    (5, "frond-center"): +1,
 }
 
-def droop_angle(fid):
-    """Rotation in radians at vitality 0, for one frond.
+def droop_angle(part, n):
+    """Rotation in radians at vitality 0, for one part of stage `n`.
 
-    Derived from the art rather than hand-tuned per frond, so it carries to the
-    other stages: a frond gives up `DROOP_MAX_DEGREES` scaled by how upright it
-    already is, in the direction it already leans. A near-horizontal frond has
-    little height to lose and droops least; the near-vertical centre one falls
-    furthest. The sign is the side the tip is on, which turns the rotation into
-    "outward and down" rather than "toward the middle" -- except for
-    near-vertical fronds, where it is declared in DROOP_DIRECTION instead.
+    Derived from the art rather than hand-tuned, so it carries across stages: a
+    part gives up `DROOP_MAX_DEGREES` scaled by how upright it already is and by
+    what kind of thing it is, in the direction it already leans. A
+    near-horizontal frond has little height to lose and droops least; the
+    near-vertical centre one falls furthest. The sign is the side the tip is on,
+    which turns the rotation into "outward and down" rather than "toward the
+    middle" -- except for near-vertical parts, where it is declared in
+    DROOP_DIRECTION instead.
     """
-    tip = FRONDS[fid][2]
-    dx, dy = tip[0] - BASE[0], tip[1] - BASE[1]
+    dx, dy = part.tip[0] - BASE[0], part.tip[1] - BASE[1]
     elevation = math.degrees(math.atan2(-dy, abs(dx)))          # 0 = flat, 90 = straight up
-    magnitude = math.radians(DROOP_MAX_DEGREES * elevation / 90)
+    magnitude = math.radians(DROOP_MAX_DEGREES * elevation / 90) * DROOP_KIND_SCALE[part.kind]
     if elevation >= NEAR_VERTICAL_DEGREES:
-        if fid not in DROOP_DIRECTION:
+        if (n, part.gid) not in DROOP_DIRECTION:
             raise ValueError(
-                f"{fid} is near-vertical ({elevation:.1f} deg), so which way it droops "
-                f"cannot be read off the art. Add it to DROOP_DIRECTION (+1 right, -1 left).")
-        return DROOP_DIRECTION[fid] * magnitude
+                f"stage {n}: {part.gid} is near-vertical ({elevation:.1f} deg), so which way "
+                f"it droops cannot be read off the art. Add ({n}, {part.gid!r}) to "
+                f"DROOP_DIRECTION (+1 right, -1 left).")
+        return DROOP_DIRECTION[(n, part.gid)] * magnitude
     return math.copysign(magnitude, dx)
 
 def _keyed(object_id, property_key, keyframe, ids, ind):
@@ -611,45 +658,51 @@ def _keyed(object_id, property_key, keyframe, ids, ind):
             f'{ind}    </KeyedProperty>',
             f'{ind}</KeyedObject>']
 
-def droop_pose(name, anim_id, angle_of, colour_of, nodes, paints, ids, depth=2):
-    """One end of the droop blend: rotation on each frond, and its leaflet fill.
+def dry_fills(part):
+    """[(path name, healthy colour)] for every fill in this part that fades.
 
-    Both poses key *every* property on *every* frond. A property keyed in one
+    Driven by DRY_FILL membership rather than by path name, so stems, midribs
+    and spores are left alone without anything having to list them.
+    """
+    return [(c.pid, c.fill) for c in part.children
+            if getattr(c, "fill", None) in DRY_FILL]
+
+def droop_pose(name, anim_id, n, parts, dry, nodes, paints, ids, depth=2):
+    """One end of the droop blend: rotation on each part, and its fading fills.
+
+    Both poses key *every* property on *every* part. A property keyed in one
     pose and missing from the other has nothing to mix toward, and blends by
     jumping rather than mixing.
     """
     ind = "    " * depth
     out = [f'{ind}<LinearAnimation fps="60" duration="60" name="{name}" id="{anim_id}">']
-    for fid in MATURE_ORDER:
-        rotation = (f'<KeyFrameDouble frame="0" value="{angle_of(fid):.6f}" '
+    for part in parts:
+        angle = droop_angle(part, n) if dry else 0.0
+        rotation = (f'<KeyFrameDouble frame="0" value="{angle:.6f}" '
                     f'interpolationType="linear" id="{ids()}"/>')
-        out += _keyed(nodes[fid]["droop"], 15, rotation, ids, ind + "    ")
-        # the leaflets' fill: propertyKey 37 on the SolidColor, KeyFrameColor
-        leaflets = f"{fid}-leaflets"
-        colour = (f'<KeyFrameColor frame="0" value="{argb(colour_of(fid))}" '
-                  f'interpolationType="linear" id="{ids()}"/>')
-        out += _keyed(paints[leaflets], 37, colour, ids, ind + "    ")
+        out += _keyed(nodes[part.gid]["droop"], 15, rotation, ids, ind + "    ")
+        for path_name, healthy in dry_fills(part):
+            # propertyKey 37 on the SolidColor, and a KeyFrameColor to match it
+            value = argb(DRY_FILL[healthy] if dry else healthy)
+            colour = (f'<KeyFrameColor frame="0" value="{value}" '
+                      f'interpolationType="linear" id="{ids()}"/>')
+            out += _keyed(paints[path_name], 37, colour, ids, ind + "    ")
     out.append(f'{ind}</LinearAnimation>')
     return out
 
-def still_pose(anim_id, nodes, ids, depth=2):
+def still_pose(anim_id, parts, nodes, ids, depth=2):
     """The zero end of the sway blend: every sway node held at rest.
 
     Blending this against Sway scales the sway's amplitude. It has to key the
-    same five rotations Sway does, for the same reason the droop poses do.
+    same rotations Sway does, for the same reason the droop poses do.
     """
     ind = "    " * depth
     out = [f'{ind}<LinearAnimation fps="60" duration="60" name="Still" id="{anim_id}">']
-    for fid in MATURE_ORDER:
+    for part in parts:
         rotation = f'<KeyFrameDouble frame="0" value="0" interpolationType="linear" id="{ids()}"/>'
-        out += _keyed(nodes[fid]["sway"], 15, rotation, ids, ind + "    ")
+        out += _keyed(nodes[part.gid]["sway"], 15, rotation, ids, ind + "    ")
     out.append(f'{ind}</LinearAnimation>')
     return out
-
-def leaflet_fill(fid, dry):
-    """The leaflet fill for one frond, healthy or thirsty."""
-    healthy = LEAF_BACK if FRONDS[fid][3] else LEAF
-    return DRY_FILL[healthy] if dry else healthy
 
 # ---------- converters ----------
 # vitality is 0-1; a blend axis is 0-100. Two chains read the same property:
@@ -690,26 +743,55 @@ def converter_chain(name, ids, min_output, max_output, ease, group_id):
 DROOP_EASE = (0.4, 0, 1, 1)
 SWAY_EASE = (0.4, 0, 1, 1)
 
-def mature_rml():
-    ids = Ids()
+# The view model is shared by every stage artboard, declared once in its own
+# file. Names are the host's surface: one `Fern` with one `vitality`, whichever
+# stage is on screen.
+DATA_CLIENT = 0
+VIEWMODEL_ID, VITALITY_ID, INSTANCE_ID = "0:2", "0:3", "0:4"
+
+def data_rml():
+    return "\n".join([
+        '<Rive version="1" kind="fragment">',
+        f'    <ViewModel defaultInstanceId="{INSTANCE_ID}" name="Fern" id="{VIEWMODEL_ID}">',
+        f'        <ViewModelPropertyNumber name="vitality" id="{VITALITY_ID}"/>',
+        f'        <ViewModelInstance exports="true" name="Default" id="{INSTANCE_ID}">',
+        f'            <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="{VITALITY_ID}"/>',
+        '        </ViewModelInstance>',
+        '    </ViewModel>',
+        '</Rive>',
+        '',
+    ])
+
+# Artboards are laid out in a row on the editor's stage so they do not stack on
+# the origin. The CLI ignores these; the editor does not.
+STAGE_GUTTER = 120
+
+def stage_rml(n, name):
+    """One stage as its own artboard, in its own file.
+
+    Each file gets its own id client, so ids cannot collide across the five even
+    though they share one document and one namespace.
+    """
+    parts, mound = stage_parts(n)
+    ids = Ids(client=n)
     artboard_id, machine_id, style_id = ids(), ids(), ids()
     sway_layer_id, sway_blend_id, sway_bindable_id = ids(), ids(), ids()
     vitality_layer_id, droop_blend_id, droop_bindable_id = ids(), ids(), ids()
     sway_id, still_id, upright_id, drooped_id = ids(), ids(), ids(), ids()
     droop_group_id, sway_group_id = ids(), ids()
-    viewmodel_id, vitality_id, instance_id = ids(), ids(), ids()
     nodes, paints = {}, {}
     body = []
-    # reversed: base is painted last in SVG, so it is declared first here
-    body += rml_item(base_mound(125), (0, 0), ids, 2, paints)
-    for fid in reversed(MATURE_ORDER):
-        body += frond_node(frond_by_id(fid), ids, 2, nodes, paints)
+    # reversed: the mound is painted last in SVG, so it is declared first here
+    body += rml_item(mound, (0, 0), ids, 2, paints)
+    for part in reversed(parts):
+        body += part_node(part, ids, 2, nodes, paints)
 
+    artboard = f"Fern{name.capitalize()}"
     head = [
         '<Rive version="1" kind="fragment">',
-        f'    <Artboard defaultStateMachineId="{machine_id}" viewModelId="{viewmodel_id}" '
-        f'viewModelInstanceId="{instance_id}" width="{W}" height="{W}" '
-        f'styleId="{style_id}" name="FernMature" id="{artboard_id}">',
+        f'    <Artboard defaultStateMachineId="{machine_id}" viewModelId="{VIEWMODEL_ID}" '
+        f'viewModelInstanceId="{INSTANCE_ID}" x="{(n - 1) * (W + STAGE_GUTTER)}" y="0" '
+        f'width="{W}" height="{W}" styleId="{style_id}" name="{artboard}" id="{artboard_id}">',
         f'        <LayoutComponentStyle name="Artboard Style" id="{style_id}"/>',
         '',
         f'        <Node name="plant" id="{ids()}">',
@@ -717,15 +799,13 @@ def mature_rml():
     tail = [
         '        </Node>',
         '',
-    ] + sway_animation(nodes, ids, sway_id) + [
+    ] + sway_animation(parts, nodes, ids, sway_id) + [
         '',
-    ] + still_pose(still_id, nodes, ids) + [
+    ] + still_pose(still_id, parts, nodes, ids) + [
         '',
-    ] + droop_pose("Upright", upright_id, lambda fid: 0.0,
-                   lambda fid: leaflet_fill(fid, dry=False), nodes, paints, ids) + [
+    ] + droop_pose("Upright", upright_id, n, parts, False, nodes, paints, ids) + [
         '',
-    ] + droop_pose("Drooped", drooped_id, droop_angle,
-                   lambda fid: leaflet_fill(fid, dry=True), nodes, paints, ids) + [
+    ] + droop_pose("Drooped", drooped_id, n, parts, True, nodes, paints, ids) + [
         '',
         f'        <StateMachine name="Fern" id="{machine_id}">',
         '',
@@ -739,7 +819,7 @@ def mature_rml():
         '                </EntryState>',
         f'                <BlendState1DViewModel x="160" y="0" id="{sway_blend_id}">',
         f'                    <BindablePropertyNumber id="{sway_bindable_id}">',
-        f'                        <DataBindContext sourcePathIds="{viewmodel_id}-{vitality_id}" '
+        f'                        <DataBindContext sourcePathIds="{VIEWMODEL_ID}-{VITALITY_ID}" '
         f'propertyKey="636" converterId="{sway_group_id}"/>',
         '                    </BindablePropertyNumber>',
         f'                    <BlendAnimation1D animationId="{still_id}" value="0"/>',
@@ -748,7 +828,7 @@ def mature_rml():
         '            </StateMachineLayer>',
         '',
         '            <!-- vitality owns rotation on the outer *-droop nodes,',
-        '                 and the leaflet fills -->',
+        '                 and the fills that fade -->',
         f'            <StateMachineLayer name="Vitality" id="{vitality_layer_id}">',
         '                <AnyState x="420" y="-120"/>',
         '                <ExitState x="620" y="-120"/>',
@@ -757,7 +837,7 @@ def mature_rml():
         '                </EntryState>',
         f'                <BlendState1DViewModel x="160" y="0" id="{droop_blend_id}">',
         f'                    <BindablePropertyNumber id="{droop_bindable_id}">',
-        f'                        <DataBindContext sourcePathIds="{viewmodel_id}-{vitality_id}" '
+        f'                        <DataBindContext sourcePathIds="{VIEWMODEL_ID}-{VITALITY_ID}" '
         f'propertyKey="636" converterId="{droop_group_id}"/>',
         '                    </BindablePropertyNumber>',
         '                    <!-- ascending value order: the runtime binary-searches these -->',
@@ -771,13 +851,6 @@ def mature_rml():
     ] + converter_chain("Droop", ids, 0, 100, DROOP_EASE, droop_group_id) + [
         '',
     ] + converter_chain("Sway", ids, SWAY_FLOOR, 100, SWAY_EASE, sway_group_id) + [
-        '',
-        f'    <ViewModel defaultInstanceId="{instance_id}" name="Fern" id="{viewmodel_id}">',
-        f'        <ViewModelPropertyNumber name="vitality" id="{vitality_id}"/>',
-        f'        <ViewModelInstance exports="true" name="Default" id="{instance_id}">',
-        f'            <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="{vitality_id}"/>',
-        '        </ViewModelInstance>',
-        '    </ViewModel>',
         '</Rive>',
         '',
     ]
@@ -804,5 +877,7 @@ if __name__ == "__main__":
     tree = build_root_tree()
     for lv in ROOT_LEVELS:
         open(f"{out}/fern-roots-{lv}.svg", "w").write(svg(roots(lv, tree)))
-    open(f"{out}/fern-mature.rml", "w").write(mature_rml())
+    open(f"{out}/fern-data.rml", "w").write(data_rml())
+    for n, name in STAGES.items():
+        open(f"{out}/fern-stage-{n}-{name}.rml", "w").write(stage_rml(n, name))
     print(f"written to {out}  (sway={SWAY_MODE}, amplitude={SWAY_AMPLITUDE})")

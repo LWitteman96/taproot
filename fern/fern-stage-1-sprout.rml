@@ -1,0 +1,390 @@
+<Rive version="1" kind="fragment">
+    <Artboard defaultStateMachineId="1:3" viewModelId="0:2" viewModelInstanceId="0:4" x="0" y="0" width="1024" height="1024" styleId="1:4" name="FernSprout" id="1:2">
+        <LayoutComponentStyle name="Artboard Style" id="1:4"/>
+
+        <Node name="plant" id="1:250">
+            <Node name="base" id="1:17">
+                <Shape name="base-clumps" id="1:18">
+                    <Ellipse x="496.60" y="892.65" width="4.90" height="3.68" name="Dot" id="1:19"/>
+                    <Ellipse x="524.60" y="890.55" width="3.92" height="2.94" name="Dot" id="1:20"/>
+                    <Ellipse x="513.40" y="896.22" width="3.08" height="2.31" name="Dot" id="1:21"/>
+                    <Fill name="Fill" id="1:23">
+                        <SolidColor colorValue="FF5E3F28" name="Color" id="1:22"/>
+                    </Fill>
+                </Shape>
+                <Shape name="base-mound" id="1:24">
+                    <PointsPath isClosed="true" name="Path" id="1:25">
+                        <CubicDetachedVertex x="477.00" y="900.00" inRotation="0.14190" inDistance="23.57" outRotation="-1.28274" outDistance="19.71" id="1:26"/>
+                        <CubicDetachedVertex x="512.00" y="879.00" inRotation="-2.93983" inDistance="15.72" outRotation="-0.23554" outDistance="18.00" id="1:27"/>
+                        <CubicDetachedVertex x="547.00" y="900.00" inRotation="-1.81577" inDistance="17.32" outRotation="2.99970" outDistance="23.57" id="1:28"/>
+                    </PointsPath>
+                    <Fill name="Fill" id="1:30">
+                        <SolidColor colorValue="FF7A5537" name="Color" id="1:29"/>
+                    </Fill>
+                    <Stroke thickness="2.6" join="round" name="Stroke" id="1:31">
+                        <SolidColor colorValue="FF4A3322" name="Color" id="1:32"/>
+                    </Stroke>
+                </Shape>
+            </Node>
+            <Node x="512" y="882" name="fiddlehead-1-droop" id="1:33">
+                <Node name="fiddlehead-1-sway" id="1:34">
+                    <Shape name="fiddlehead-1-coil" id="1:35">
+                        <PointsPath isClosed="true" name="Path" id="1:36">
+                            <StraightVertex x="6.50" y="0.18" id="1:37"/>
+                            <StraightVertex x="6.60" y="-6.00" id="1:38"/>
+                            <StraightVertex x="6.61" y="-12.18" id="1:39"/>
+                            <StraightVertex x="6.53" y="-18.31" id="1:40"/>
+                            <StraightVertex x="6.35" y="-24.39" id="1:41"/>
+                            <StraightVertex x="6.10" y="-30.41" id="1:42"/>
+                            <StraightVertex x="5.76" y="-36.38" id="1:43"/>
+                            <StraightVertex x="5.36" y="-42.29" id="1:44"/>
+                            <StraightVertex x="4.89" y="-48.14" id="1:45"/>
+                            <StraightVertex x="4.36" y="-53.94" id="1:46"/>
+                            <StraightVertex x="3.78" y="-59.68" id="1:47"/>
+                            <StraightVertex x="3.15" y="-65.36" id="1:48"/>
+                            <StraightVertex x="2.48" y="-70.98" id="1:49"/>
+                            <StraightVertex x="1.77" y="-76.54" id="1:50"/>
+                            <StraightVertex x="1.04" y="-82.04" id="1:51"/>
+                            <StraightVertex x="0.28" y="-87.49" id="1:52"/>
+                            <StraightVertex x="-0.50" y="-92.86" id="1:53"/>
+                            <StraightVertex x="-1.29" y="-98.18" id="1:54"/>
+                            <StraightVertex x="-2.09" y="-103.43" id="1:55"/>
+                            <StraightVertex x="-2.88" y="-108.62" id="1:56"/>
+                            <StraightVertex x="-3.67" y="-113.74" id="1:57"/>
+                            <StraightVertex x="-4.46" y="-118.80" id="1:58"/>
+                            <StraightVertex x="-5.22" y="-123.80" id="1:59"/>
+                            <StraightVertex x="-5.96" y="-128.72" id="1:60"/>
+                            <StraightVertex x="-6.68" y="-133.58" id="1:61"/>
+                            <StraightVertex x="-7.36" y="-138.37" id="1:62"/>
+                            <StraightVertex x="-8.00" y="-143.08" id="1:63"/>
+                            <StraightVertex x="-8.59" y="-147.73" id="1:64"/>
+                            <StraightVertex x="-9.14" y="-152.31" id="1:65"/>
+                            <StraightVertex x="-9.63" y="-156.81" id="1:66"/>
+                            <StraightVertex x="-10.06" y="-161.24" id="1:67"/>
+                            <StraightVertex x="-10.42" y="-165.60" id="1:68"/>
+                            <StraightVertex x="-10.71" y="-169.88" id="1:69"/>
+                            <StraightVertex x="-10.92" y="-174.09" id="1:70"/>
+                            <StraightVertex x="-11.05" y="-178.22" id="1:71"/>
+                            <StraightVertex x="-11.09" y="-182.27" id="1:72"/>
+                            <StraightVertex x="-11.03" y="-186.24" id="1:73"/>
+                            <StraightVertex x="-10.88" y="-190.13" id="1:74"/>
+                            <StraightVertex x="-10.62" y="-193.95" id="1:75"/>
+                            <StraightVertex x="-10.26" y="-197.68" id="1:76"/>
+                            <StraightVertex x="-9.89" y="-200.86" id="1:77"/>
+                            <StraightVertex x="-7.87" y="-206.76" id="1:78"/>
+                            <StraightVertex x="-4.90" y="-212.01" id="1:79"/>
+                            <StraightVertex x="-1.12" y="-216.54" id="1:80"/>
+                            <StraightVertex x="3.34" y="-220.22" id="1:81"/>
+                            <StraightVertex x="8.30" y="-222.98" id="1:82"/>
+                            <StraightVertex x="13.56" y="-224.75" id="1:83"/>
+                            <StraightVertex x="18.95" y="-225.51" id="1:84"/>
+                            <StraightVertex x="24.27" y="-225.28" id="1:85"/>
+                            <StraightVertex x="29.36" y="-224.12" id="1:86"/>
+                            <StraightVertex x="34.05" y="-222.08" id="1:87"/>
+                            <StraightVertex x="38.21" y="-219.29" id="1:88"/>
+                            <StraightVertex x="41.71" y="-215.85" id="1:89"/>
+                            <StraightVertex x="44.48" y="-211.92" id="1:90"/>
+                            <StraightVertex x="46.43" y="-207.63" id="1:91"/>
+                            <StraightVertex x="47.56" y="-203.16" id="1:92"/>
+                            <StraightVertex x="47.84" y="-198.65" id="1:93"/>
+                            <StraightVertex x="47.30" y="-194.25" id="1:94"/>
+                            <StraightVertex x="46.00" y="-190.11" id="1:95"/>
+                            <StraightVertex x="44.01" y="-186.36" id="1:96"/>
+                            <StraightVertex x="41.43" y="-183.10" id="1:97"/>
+                            <StraightVertex x="38.35" y="-180.42" id="1:98"/>
+                            <StraightVertex x="34.92" y="-178.39" id="1:99"/>
+                            <StraightVertex x="31.24" y="-177.04" id="1:100"/>
+                            <StraightVertex x="27.46" y="-176.41" id="1:101"/>
+                            <StraightVertex x="23.71" y="-176.47" id="1:102"/>
+                            <StraightVertex x="20.10" y="-177.19" id="1:103"/>
+                            <StraightVertex x="16.76" y="-178.54" id="1:104"/>
+                            <StraightVertex x="13.79" y="-180.43" id="1:105"/>
+                            <StraightVertex x="11.26" y="-182.78" id="1:106"/>
+                            <StraightVertex x="9.24" y="-185.50" id="1:107"/>
+                            <StraightVertex x="7.78" y="-188.48" id="1:108"/>
+                            <StraightVertex x="6.91" y="-191.61" id="1:109"/>
+                            <StraightVertex x="6.63" y="-194.78" id="1:110"/>
+                            <StraightVertex x="6.92" y="-197.88" id="1:111"/>
+                            <StraightVertex x="7.76" y="-200.81" id="1:112"/>
+                            <StraightVertex x="9.09" y="-203.49" id="1:113"/>
+                            <StraightVertex x="10.85" y="-205.83" id="1:114"/>
+                            <StraightVertex x="12.96" y="-207.77" id="1:115"/>
+                            <StraightVertex x="15.34" y="-209.26" id="1:116"/>
+                            <StraightVertex x="17.89" y="-210.27" id="1:117"/>
+                            <StraightVertex x="20.53" y="-210.79" id="1:118"/>
+                            <StraightVertex x="23.17" y="-210.81" id="1:119"/>
+                            <StraightVertex x="25.72" y="-210.37" id="1:120"/>
+                            <StraightVertex x="28.09" y="-209.49" id="1:121"/>
+                            <StraightVertex x="30.21" y="-208.21" id="1:122"/>
+                            <StraightVertex x="32.03" y="-206.61" id="1:123"/>
+                            <StraightVertex x="33.49" y="-204.74" id="1:124"/>
+                            <StraightVertex x="34.57" y="-202.68" id="1:125"/>
+                            <StraightVertex x="35.24" y="-200.50" id="1:126"/>
+                            <StraightVertex x="35.50" y="-198.28" id="1:127"/>
+                            <StraightVertex x="35.35" y="-196.11" id="1:128"/>
+                            <StraightVertex x="34.81" y="-194.03" id="1:129"/>
+                            <StraightVertex x="33.93" y="-192.14" id="1:130"/>
+                            <StraightVertex x="32.74" y="-190.46" id="1:131"/>
+                            <StraightVertex x="31.30" y="-189.07" id="1:132"/>
+                            <StraightVertex x="29.67" y="-187.98" id="1:133"/>
+                            <StraightVertex x="27.89" y="-187.22" id="1:134"/>
+                            <StraightVertex x="26.06" y="-186.81" id="1:135"/>
+                            <StraightVertex x="24.21" y="-186.75" id="1:136"/>
+                            <StraightVertex x="22.28" y="-187.04" id="1:137"/>
+                            <StraightVertex x="22.87" y="-186.82" id="1:138"/>
+                            <StraightVertex x="23.33" y="-186.40" id="1:139"/>
+                            <StraightVertex x="23.59" y="-185.83" id="1:140"/>
+                            <StraightVertex x="23.61" y="-185.21" id="1:141"/>
+                            <StraightVertex x="23.39" y="-184.62" id="1:142"/>
+                            <StraightVertex x="22.97" y="-184.16" id="1:143"/>
+                            <StraightVertex x="22.40" y="-183.90" id="1:144"/>
+                            <StraightVertex x="21.78" y="-183.88" id="1:145"/>
+                            <StraightVertex x="24.00" y="-183.51" id="1:146"/>
+                            <StraightVertex x="26.44" y="-183.54" id="1:147"/>
+                            <StraightVertex x="28.88" y="-184.03" id="1:148"/>
+                            <StraightVertex x="31.24" y="-184.98" id="1:149"/>
+                            <StraightVertex x="33.43" y="-186.36" id="1:150"/>
+                            <StraightVertex x="35.37" y="-188.16" id="1:151"/>
+                            <StraightVertex x="36.98" y="-190.32" id="1:152"/>
+                            <StraightVertex x="38.19" y="-192.78" id="1:153"/>
+                            <StraightVertex x="38.94" y="-195.48" id="1:154"/>
+                            <StraightVertex x="39.20" y="-198.33" id="1:155"/>
+                            <StraightVertex x="38.93" y="-201.23" id="1:156"/>
+                            <StraightVertex x="38.12" y="-204.09" id="1:157"/>
+                            <StraightVertex x="36.78" y="-206.80" id="1:158"/>
+                            <StraightVertex x="34.93" y="-209.28" id="1:159"/>
+                            <StraightVertex x="32.61" y="-211.42" id="1:160"/>
+                            <StraightVertex x="29.89" y="-213.13" id="1:161"/>
+                            <StraightVertex x="26.84" y="-214.34" id="1:162"/>
+                            <StraightVertex x="23.56" y="-214.99" id="1:163"/>
+                            <StraightVertex x="20.15" y="-215.03" id="1:164"/>
+                            <StraightVertex x="16.72" y="-214.43" id="1:165"/>
+                            <StraightVertex x="13.40" y="-213.20" id="1:166"/>
+                            <StraightVertex x="10.29" y="-211.35" id="1:167"/>
+                            <StraightVertex x="7.52" y="-208.91" id="1:168"/>
+                            <StraightVertex x="5.19" y="-205.95" id="1:169"/>
+                            <StraightVertex x="3.41" y="-202.55" id="1:170"/>
+                            <StraightVertex x="2.25" y="-198.81" id="1:171"/>
+                            <StraightVertex x="1.79" y="-194.85" id="1:172"/>
+                            <StraightVertex x="2.06" y="-190.78" id="1:173"/>
+                            <StraightVertex x="3.09" y="-186.75" id="1:174"/>
+                            <StraightVertex x="4.86" y="-182.91" id="1:175"/>
+                            <StraightVertex x="7.36" y="-179.38" id="1:176"/>
+                            <StraightVertex x="10.53" y="-176.31" id="1:177"/>
+                            <StraightVertex x="14.27" y="-173.81" id="1:178"/>
+                            <StraightVertex x="18.49" y="-172.01" id="1:179"/>
+                            <StraightVertex x="23.05" y="-170.98" id="1:180"/>
+                            <StraightVertex x="27.82" y="-170.80" id="1:181"/>
+                            <StraightVertex x="32.64" y="-171.50" id="1:182"/>
+                            <StraightVertex x="37.34" y="-173.10" id="1:183"/>
+                            <StraightVertex x="41.76" y="-175.59" id="1:184"/>
+                            <StraightVertex x="45.73" y="-178.89" id="1:185"/>
+                            <StraightVertex x="49.10" y="-182.95" id="1:186"/>
+                            <StraightVertex x="51.72" y="-187.65" id="1:187"/>
+                            <StraightVertex x="53.48" y="-192.84" id="1:188"/>
+                            <StraightVertex x="54.27" y="-198.38" id="1:189"/>
+                            <StraightVertex x="54.04" y="-204.09" id="1:190"/>
+                            <StraightVertex x="52.75" y="-209.77" id="1:191"/>
+                            <StraightVertex x="50.40" y="-215.22" id="1:192"/>
+                            <StraightVertex x="47.03" y="-220.26" id="1:193"/>
+                            <StraightVertex x="42.71" y="-224.68" id="1:194"/>
+                            <StraightVertex x="37.55" y="-228.32" id="1:195"/>
+                            <StraightVertex x="31.71" y="-231.00" id="1:196"/>
+                            <StraightVertex x="25.34" y="-232.61" id="1:197"/>
+                            <StraightVertex x="18.66" y="-233.04" id="1:198"/>
+                            <StraightVertex x="11.88" y="-232.23" id="1:199"/>
+                            <StraightVertex x="5.22" y="-230.16" id="1:200"/>
+                            <StraightVertex x="-1.06" y="-226.84" id="1:201"/>
+                            <StraightVertex x="-6.76" y="-222.34" id="1:202"/>
+                            <StraightVertex x="-11.63" y="-216.78" id="1:203"/>
+                            <StraightVertex x="-15.48" y="-210.28" id="1:204"/>
+                            <StraightVertex x="-18.11" y="-203.14" id="1:205"/>
+                            <StraightVertex x="-18.82" y="-198.75" id="1:206"/>
+                            <StraightVertex x="-19.30" y="-194.76" id="1:207"/>
+                            <StraightVertex x="-19.66" y="-190.70" id="1:208"/>
+                            <StraightVertex x="-19.91" y="-186.57" id="1:209"/>
+                            <StraightVertex x="-20.06" y="-182.39" id="1:210"/>
+                            <StraightVertex x="-20.11" y="-178.14" id="1:211"/>
+                            <StraightVertex x="-20.07" y="-173.82" id="1:212"/>
+                            <StraightVertex x="-19.95" y="-169.44" id="1:213"/>
+                            <StraightVertex x="-19.75" y="-165.01" id="1:214"/>
+                            <StraightVertex x="-19.47" y="-160.51" id="1:215"/>
+                            <StraightVertex x="-19.13" y="-155.94" id="1:216"/>
+                            <StraightVertex x="-18.74" y="-151.32" id="1:217"/>
+                            <StraightVertex x="-18.28" y="-146.64" id="1:218"/>
+                            <StraightVertex x="-17.78" y="-141.90" id="1:219"/>
+                            <StraightVertex x="-17.23" y="-137.10" id="1:220"/>
+                            <StraightVertex x="-16.65" y="-132.25" id="1:221"/>
+                            <StraightVertex x="-16.04" y="-127.33" id="1:222"/>
+                            <StraightVertex x="-15.40" y="-122.36" id="1:223"/>
+                            <StraightVertex x="-14.75" y="-117.34" id="1:224"/>
+                            <StraightVertex x="-14.08" y="-112.26" id="1:225"/>
+                            <StraightVertex x="-13.40" y="-107.12" id="1:226"/>
+                            <StraightVertex x="-12.72" y="-101.93" id="1:227"/>
+                            <StraightVertex x="-12.04" y="-96.69" id="1:228"/>
+                            <StraightVertex x="-11.37" y="-91.39" id="1:229"/>
+                            <StraightVertex x="-10.72" y="-86.05" id="1:230"/>
+                            <StraightVertex x="-10.09" y="-80.65" id="1:231"/>
+                            <StraightVertex x="-9.48" y="-75.20" id="1:232"/>
+                            <StraightVertex x="-8.90" y="-69.71" id="1:233"/>
+                            <StraightVertex x="-8.37" y="-64.16" id="1:234"/>
+                            <StraightVertex x="-7.87" y="-58.57" id="1:235"/>
+                            <StraightVertex x="-7.42" y="-52.93" id="1:236"/>
+                            <StraightVertex x="-7.03" y="-47.25" id="1:237"/>
+                            <StraightVertex x="-6.70" y="-41.52" id="1:238"/>
+                            <StraightVertex x="-6.43" y="-35.75" id="1:239"/>
+                            <StraightVertex x="-6.23" y="-29.93" id="1:240"/>
+                            <StraightVertex x="-6.11" y="-24.08" id="1:241"/>
+                            <StraightVertex x="-6.07" y="-18.18" id="1:242"/>
+                            <StraightVertex x="-6.12" y="-12.24" id="1:243"/>
+                            <StraightVertex x="-6.26" y="-6.26" id="1:244"/>
+                            <StraightVertex x="-6.50" y="-0.18" id="1:245"/>
+                        </PointsPath>
+                        <Fill name="Fill" id="1:247">
+                            <SolidColor colorValue="FF5E9150" name="Color" id="1:246"/>
+                        </Fill>
+                        <Stroke thickness="2.4" join="round" name="Stroke" id="1:248">
+                            <SolidColor colorValue="FF2F4A2C" name="Color" id="1:249"/>
+                        </Stroke>
+                    </Shape>
+                </Node>
+            </Node>
+        </Node>
+
+        <LinearAnimation loopValue="loop" fps="60" duration="300" name="Sway" id="1:11">
+            <KeyedObject objectId="1:34" id="1:251">
+                <KeyedProperty propertyKey="15" id="1:252">
+                    <KeyFrameDouble frame="0" value="0.000000" interpolationType="linear" id="1:253"/>
+                    <KeyFrameDouble frame="12" value="0.009049" interpolationType="linear" id="1:254"/>
+                    <KeyFrameDouble frame="25" value="0.016846" interpolationType="linear" id="1:255"/>
+                    <KeyFrameDouble frame="38" value="0.022397" interpolationType="linear" id="1:256"/>
+                    <KeyFrameDouble frame="50" value="0.025151" interpolationType="linear" id="1:257"/>
+                    <KeyFrameDouble frame="62" value="0.025093" interpolationType="linear" id="1:258"/>
+                    <KeyFrameDouble frame="75" value="0.022689" interpolationType="linear" id="1:259"/>
+                    <KeyFrameDouble frame="88" value="0.018740" interpolationType="linear" id="1:260"/>
+                    <KeyFrameDouble frame="100" value="0.014148" interpolationType="linear" id="1:261"/>
+                    <KeyFrameDouble frame="112" value="0.009691" interpolationType="linear" id="1:262"/>
+                    <KeyFrameDouble frame="125" value="0.005843" interpolationType="linear" id="1:263"/>
+                    <KeyFrameDouble frame="138" value="0.002696" interpolationType="linear" id="1:264"/>
+                    <KeyFrameDouble frame="150" value="0.000000" interpolationType="linear" id="1:265"/>
+                    <KeyFrameDouble frame="162" value="-0.002696" interpolationType="linear" id="1:266"/>
+                    <KeyFrameDouble frame="175" value="-0.005843" interpolationType="linear" id="1:267"/>
+                    <KeyFrameDouble frame="188" value="-0.009691" interpolationType="linear" id="1:268"/>
+                    <KeyFrameDouble frame="200" value="-0.014148" interpolationType="linear" id="1:269"/>
+                    <KeyFrameDouble frame="212" value="-0.018740" interpolationType="linear" id="1:270"/>
+                    <KeyFrameDouble frame="225" value="-0.022689" interpolationType="linear" id="1:271"/>
+                    <KeyFrameDouble frame="238" value="-0.025093" interpolationType="linear" id="1:272"/>
+                    <KeyFrameDouble frame="250" value="-0.025151" interpolationType="linear" id="1:273"/>
+                    <KeyFrameDouble frame="262" value="-0.022397" interpolationType="linear" id="1:274"/>
+                    <KeyFrameDouble frame="275" value="-0.016846" interpolationType="linear" id="1:275"/>
+                    <KeyFrameDouble frame="288" value="-0.009049" interpolationType="linear" id="1:276"/>
+                    <KeyFrameDouble frame="300" value="-0.000000" interpolationType="linear" id="1:277"/>
+                </KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <LinearAnimation fps="60" duration="60" name="Still" id="1:12">
+            <KeyedObject objectId="1:34" id="1:279">
+                <KeyedProperty propertyKey="15" id="1:280">
+                    <KeyFrameDouble frame="0" value="0" interpolationType="linear" id="1:278"/>
+                </KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <LinearAnimation fps="60" duration="60" name="Upright" id="1:13">
+            <KeyedObject objectId="1:33" id="1:282">
+                <KeyedProperty propertyKey="15" id="1:283">
+                    <KeyFrameDouble frame="0" value="0.000000" interpolationType="linear" id="1:281"/>
+                </KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="1:246" id="1:285">
+                <KeyedProperty propertyKey="37" id="1:286">
+                    <KeyFrameColor frame="0" value="FF5E9150" interpolationType="linear" id="1:284"/>
+                </KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <LinearAnimation fps="60" duration="60" name="Drooped" id="1:14">
+            <KeyedObject objectId="1:33" id="1:288">
+                <KeyedProperty propertyKey="15" id="1:289">
+                    <KeyFrameDouble frame="0" value="-0.250267" interpolationType="linear" id="1:287"/>
+                </KeyedProperty>
+            </KeyedObject>
+            <KeyedObject objectId="1:246" id="1:291">
+                <KeyedProperty propertyKey="37" id="1:292">
+                    <KeyFrameColor frame="0" value="FF8B9A7E" interpolationType="linear" id="1:290"/>
+                </KeyedProperty>
+            </KeyedObject>
+        </LinearAnimation>
+
+        <StateMachine name="Fern" id="1:3">
+
+            <!-- the sway owns rotation on the inner *-sway nodes.
+                 vitality scales its amplitude between Still and Sway. -->
+            <StateMachineLayer name="Sway" id="1:5">
+                <AnyState x="420" y="-120"/>
+                <ExitState x="620" y="-120"/>
+                <EntryState x="0" y="0">
+                    <StateTransition stateToId="1:6"/>
+                </EntryState>
+                <BlendState1DViewModel x="160" y="0" id="1:6">
+                    <BindablePropertyNumber id="1:7">
+                        <DataBindContext sourcePathIds="0:2-0:3" propertyKey="636" converterId="1:16"/>
+                    </BindablePropertyNumber>
+                    <BlendAnimation1D animationId="1:12" value="0"/>
+                    <BlendAnimation1D animationId="1:11" value="100"/>
+                </BlendState1DViewModel>
+            </StateMachineLayer>
+
+            <!-- vitality owns rotation on the outer *-droop nodes,
+                 and the fills that fade -->
+            <StateMachineLayer name="Vitality" id="1:8">
+                <AnyState x="420" y="-120"/>
+                <ExitState x="620" y="-120"/>
+                <EntryState x="0" y="0">
+                    <StateTransition stateToId="1:9"/>
+                </EntryState>
+                <BlendState1DViewModel x="160" y="0" id="1:9">
+                    <BindablePropertyNumber id="1:10">
+                        <DataBindContext sourcePathIds="0:2-0:3" propertyKey="636" converterId="1:15"/>
+                    </BindablePropertyNumber>
+                    <!-- ascending value order: the runtime binary-searches these -->
+                    <BlendAnimation1D animationId="1:14" value="0"/>
+                    <BlendAnimation1D animationId="1:13" value="100"/>
+                </BlendState1DViewModel>
+            </StateMachineLayer>
+        </StateMachine>
+    </Artboard>
+
+    <DataConverterGroup name="Droop" id="1:15">
+        <DataConverterGroupItem converterId="1:293"/>
+        <DataConverterGroupItem converterId="1:294"/>
+    </DataConverterGroup>
+
+    <DataConverterInterpolator duration="0.6" interpolationType="cubic"
+                               name="Droop Smoothing" id="1:293">
+        <CubicEaseInterpolator x1="0" y1="0" x2="0.58" y2="1" id="1:295"/>
+    </DataConverterInterpolator>
+
+    <DataConverterRangeMapper minInput="0" maxInput="1" minOutput="0" maxOutput="100"
+                              clampLower="true" clampUpper="true"
+                              interpolationType="cubic" name="Droop Range" id="1:294">
+        <CubicEaseInterpolator x1="0.4" y1="0" x2="1" y2="1" id="1:296"/>
+    </DataConverterRangeMapper>
+
+    <DataConverterGroup name="Sway" id="1:16">
+        <DataConverterGroupItem converterId="1:297"/>
+        <DataConverterGroupItem converterId="1:298"/>
+    </DataConverterGroup>
+
+    <DataConverterInterpolator duration="0.6" interpolationType="cubic"
+                               name="Sway Smoothing" id="1:297">
+        <CubicEaseInterpolator x1="0" y1="0" x2="0.58" y2="1" id="1:299"/>
+    </DataConverterInterpolator>
+
+    <DataConverterRangeMapper minInput="0" maxInput="1" minOutput="40" maxOutput="100"
+                              clampLower="true" clampUpper="true"
+                              interpolationType="cubic" name="Sway Range" id="1:298">
+        <CubicEaseInterpolator x1="0.4" y1="0" x2="1" y2="1" id="1:300"/>
+    </DataConverterRangeMapper>
+</Rive>
