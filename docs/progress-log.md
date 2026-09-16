@@ -152,9 +152,61 @@ number that had never once been true. `drain()` now returns a `DrainOutcome`, an
 Every fix above was confirmed by reverting it and watching a named test go red, not by reasoning —
 four in the drain tests, one in the scheduler. 701 tests, up from 686.
 
-**Not verified locally: the two migrations.** `supabase db reset` is destructive and this repo shares
-one local Supabase instance across every worktree, so it was left to the `supabase.yml` workflow,
-which runs `scripts/supabase-verify.sh` on any `supabase/**` change. The pgTAP plan went 34 → 37.
+The two migrations were **not** verified locally: `supabase db reset` is destructive and this repo
+runs one local Supabase instance shared across every worktree, so running it would have wiped
+whatever another worktree had in flight. They were left to the `supabase.yml` workflow, which runs
+`scripts/supabase-verify.sh` on any `supabase/**` change — including the second-application
+idempotency check both are written for. It has since run and passed. The pgTAP plan went 34 → 37.
+
+### Deliberately not fixed, and why
+
+Both were raised in review, both are real, and neither is fixed here — recorded so the next reader
+finds the reasoning rather than the gap.
+
+- **`_reconciled`'s `category` leniency has the same losing-side hole `deleted_at` had.** A category
+  set on one device and beaten by a newer edit on another is discarded rather than merged. Not fixed
+  with the deletion, because it is a different decision: `deleted_at` has one true reading, whereas
+  merging a null `category` from the losing side means choosing between "the user cleared it" and
+  "that build could not decode it" — the ambiguity `readOpenEnum` creates. It wants the open-enum
+  question answered, not a symmetry argument. It also self-heals on the next edit, which the deletion
+  did not.
+- **`priorSent` counts a collapsed duplicate pair as one sent occasion.** This looks like the fade
+  accounting being skewed by every collapsed pair, and it is instead the documented OR applied
+  consistently: one occasion, one entry, sent if either device sent. Changing it would change what
+  the collapse *means*, so it belongs to growth-engine §6 rather than to a bug fix.
+
+### A repeat finding: assertions that cannot fail
+
+The `nudges` exemption was pinned by a pgTAP assertion that set `confirmed = true` on a row where
+`confirmed` was already true — it asserted that the exemption exists, which nothing threatened, and
+nothing about the merge rule, which did not exist. **This is the fourth vacuous assertion this
+project has caught**, which makes it a pattern rather than a coincidence, so the general lesson
+belongs here rather than in one more branch entry:
+
+> A test that passes against the bug is worse than no test, because it is *counted*. The three that
+> have produced one here are always the same shapes:
+>
+> - **Asserting a state the fixture already had.** Setting a flag that was already set, inserting a
+>   row that was already there. The assertion passes on the setup, never reaching the behaviour.
+> - **Asserting something the type system or a `NOT NULL` already guarantees.** It cannot fail, so it
+>   measures nothing.
+> - **Asserting a relation that holds for a reason other than the one under test** — the
+>   `synced_at >= updated_at` case already written up in the backend entry, which passed with an
+>   insert-only trigger because the comparison was vacuous rather than because the trigger worked.
+>
+> The check that catches all three is the one used throughout this branch: **revert the fix and watch
+> the named test go red.** An assertion that stays green with the behaviour removed is not testing
+> that behaviour. It costs one command and it is the only thing that distinguishes a test from a
+> statement of belief.
+
+### Still open — and a security one
+
+**`git grep -nIE` skips binary files, and the secret scan uses it.** Found while fixing the binary
+`sync_tables.dart`: the `secrets` job in `flutter.yml` would not have seen a credential committed
+inside any blob git classifies as binary, on a public repository where a secret committed once is
+compromised even if removed. The `text-encoding` gate added here closes it **only for `lib/` and
+`test/`** — a binary file anywhere else in the tree is still invisible to the scan. The real fix is
+in the scan, not in the encoding gate. Carried to the next branch.
 
 ### Next
 
