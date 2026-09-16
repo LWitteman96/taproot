@@ -14,6 +14,7 @@ builds clean, inspects clean, and does the wrong thing at runtime.
 **Contents**
 
 - [The shape of the project](#the-shape-of-the-project)
+- [Getting it into the app](#getting-it-into-the-app) — the copy step, and the stacking contract
 - [The generator](#the-generator)
 - [RML capabilities](#rml-capabilities) — paths, bones, view models
 - [Traps: silent failures](#traps-silent-failures)
@@ -56,6 +57,42 @@ others are `rive fern --artboard=FernSeed` and so on.
 The view model exposes two numbers, both 0–1: **`vitality`** (droop, colour,
 sway amplitude) and **`roots`** (root growth, and the stability lean on the two
 tall stages).
+
+---
+
+## Getting it into the app
+
+The Flutter app ships `assets/rive/fern.riv`, a **committed copy** of the build
+output. It does not rebuild from this project, so regenerating here does not
+update the app:
+
+```bash
+python3 fern_generator.py      # rml from the generator
+rive . --once                  # riv from the rml
+cp build/fern.riv ../assets/rive/fern.riv
+```
+
+Skip the last step and the app keeps rendering the previous plant, with nothing
+reporting it. The asset is binary, so every refresh is a blob in the diff —
+regenerate deliberately rather than incidentally.
+
+### The stacking contract
+
+The roots are a separate artboard because a view-model bind inside a
+`NestedArtboard` is inert ([Traps](#traps-silent-failures)). The host therefore
+stacks `FernRoots` under a stage artboard — ground lines meet, since the stage
+canvases put theirs at y=900 and the roots artboard at y=0.
+
+**Both artboards must be bound to one shared `ViewModelInstance`**, not left to
+auto-bind. Verified from the Flutter runtime, both directions:
+
+- one instance handed to both controllers (`DataBind.byInstance`) — a single
+  write of `roots` is visible through both, and both advance against it;
+- two auto-binds — each gets its **own** instance and they do not share a value.
+
+The second is right for a lone plant and silently wrong for the stacked pair:
+the roots would grow while the plant above them leaned as though there were
+none. Nothing reports it, which is why the app-side tests pin both.
 
 ---
 
