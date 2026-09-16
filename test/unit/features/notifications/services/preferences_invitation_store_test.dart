@@ -45,6 +45,47 @@ void main() {
     expect(await PreferencesInvitationStore().hasBeenOffered(), isTrue);
   });
 
+  group('a write that fails', () {
+    test('still leaves the question put for the rest of the run', () async {
+      // The gate reads this store, so a store that forgets a failed write
+      // sends the user back to the invitation the instant they leave it — and
+      // again, and again, because the screen they just answered is the one
+      // thing the gate still thinks they have not seen.
+      final broken = PreferencesInvitationStore(
+        preferences: _UnwritablePreferences(),
+      );
+
+      await expectLater(broken.markOffered(), throwsStateError);
+
+      expect(await broken.hasBeenOffered(), isTrue);
+    });
+
+    test('and is asked again on the next launch', () async {
+      // The in-memory half deliberately does not outlive the process: nothing
+      // was written, so the honest answer on a relaunch is "not yet asked".
+      final preferences = _UnwritablePreferences();
+      final broken = PreferencesInvitationStore(preferences: preferences);
+      await expectLater(broken.markOffered(), throwsStateError);
+
+      expect(
+        await PreferencesInvitationStore(
+          preferences: preferences,
+        ).hasBeenOffered(),
+        isFalse,
+      );
+    });
+
+    test('rethrows rather than reporting success', () async {
+      // Swallowing here is how "asked once" becomes "asked every launch" with
+      // nothing in the logs to say why.
+      final broken = PreferencesInvitationStore(
+        preferences: _UnwritablePreferences(),
+      );
+
+      expect(broken.markOffered(), throwsStateError);
+    });
+  });
+
   test('an unreadable record reads as "not yet asked"', () async {
     // Of the two wrong answers this is the survivable one. Asking a second
     // time costs one screen; wrongly reporting "already asked" costs the user
@@ -63,6 +104,21 @@ class _BrokenPreferences implements SharedPreferencesAsync {
   @override
   Future<bool?> getBool(String key) async =>
       throw StateError('the preferences file is unreadable');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('${invocation.memberName} is not used here');
+}
+
+/// Preferences that can be read but not written — a full disk, or a platform
+/// channel that fails under the write.
+class _UnwritablePreferences implements SharedPreferencesAsync {
+  @override
+  Future<bool?> getBool(String key) async => null;
+
+  @override
+  Future<void> setBool(String key, bool value) async =>
+      throw StateError('the preferences file could not be written');
 
   @override
   dynamic noSuchMethod(Invocation invocation) =>

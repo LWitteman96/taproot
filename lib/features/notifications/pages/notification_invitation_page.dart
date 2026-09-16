@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:go_router/go_router.dart';
+import 'package:logging/logging.dart';
 
 import 'package:taproot/app/router/app_router.dart';
 import 'package:taproot/app/theme/app_dimensions.dart';
@@ -11,6 +12,7 @@ import 'package:taproot/core/models/habit.dart';
 import 'package:taproot/core/utils/local_dates.dart';
 import 'package:taproot/features/notifications/domain/evening_check_in.dart';
 import 'package:taproot/features/notifications/domain/expected_occasions.dart';
+import 'package:taproot/features/notifications/domain/notification_access.dart';
 import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
 
@@ -67,12 +69,21 @@ class NotificationInvitationPage extends ConsumerStatefulWidget {
 
 class _NotificationInvitationPageState
     extends ConsumerState<NotificationInvitationPage> {
+  static final Logger _log = Logger('NotificationInvitationPage');
+
   _InvitationStage _stage = _InvitationStage.offered;
 
   /// The question is only ever put once, so it is recorded as asked whichever
   /// way it is answered — and *before* the platform dialog resolves, so that
   /// dismissing the system prompt without answering does not bring the screen
   /// back on the next launch.
+  ///
+  /// **Neither await may escape.** `asking` disables both buttons, and this
+  /// page is a redirect destination: no `AppBar`, nothing pushed underneath to
+  /// pop back to. An exception thrown after the stage flips leaves two greyed
+  /// buttons and killing the app as the only way out. So both failures end
+  /// somewhere the user can leave from, and they end in *different* places,
+  /// because they are not the same failure.
   Future<void> _accept() async {
     // Taken before the first await: reaching for the context again on the far
     // side of one is the lint's whole point, and here it would be reaching for
@@ -80,9 +91,24 @@ class _NotificationInvitationPageState
     final container = ProviderScope.containerOf(context, listen: false);
 
     setState(() => _stage = _InvitationStage.asking);
-    await ref.read(notificationInvitationStoreProvider).markOffered();
+    await _markOffered();
 
-    final access = await requestNotificationAccess(container);
+    // A platform that cannot be asked is a platform that cannot post, so this
+    // failure lands on the designed screen for "no notifications" — the same
+    // place a refusal lands, and true for the same reason.
+    final NotificationAccess access;
+    try {
+      access = await requestNotificationAccess(container);
+    } catch (error, stackTrace) {
+      _log.warning(
+        'the platform could not be asked for notification access',
+        error,
+        stackTrace,
+      );
+      if (!mounted) return;
+      setState(() => _stage = _InvitationStage.withoutNotifications);
+      return;
+    }
     if (!mounted) return;
 
     if (access.canPost) {
@@ -94,9 +120,32 @@ class _NotificationInvitationPageState
 
   Future<void> _decline() async {
     setState(() => _stage = _InvitationStage.asking);
-    await ref.read(notificationInvitationStoreProvider).markOffered();
+    await _markOffered();
     if (!mounted) return;
     setState(() => _stage = _InvitationStage.withoutNotifications);
+  }
+
+  /// Records the question as put, and never throws.
+  ///
+  /// Deliberately *not* folded into the accept path's catch. A record that
+  /// failed to write is a bookkeeping loss — the user is asked once more on
+  /// the next launch, which [NotificationInvitationStore] already argues is
+  /// the cheaper of the two wrong answers. Treating it as "no notifications,
+  /// then" would be the screen contradicting the platform: it would say the
+  /// app will not nudge while the OS has just granted permission for exactly
+  /// that. So this failure is logged and the answer the user actually gave is
+  /// carried through.
+  Future<void> _markOffered() async {
+    try {
+      await ref.read(notificationInvitationStoreProvider).markOffered();
+    } catch (error, stackTrace) {
+      _log.warning(
+        'the invitation record could not be written; the question will be '
+        'put again on the next launch',
+        error,
+        stackTrace,
+      );
+    }
   }
 
   /// Hands the user back to the router.

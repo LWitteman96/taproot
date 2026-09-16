@@ -21,6 +21,10 @@ class FakeNotificationGateway implements NotificationGateway {
   /// notification mid-pass.
   bool failNextSchedule = false;
 
+  /// Set to have [requestAccess] throw — the plugin failing to initialise, or
+  /// the permission channel failing under it.
+  bool failRequestAccess = false;
+
   /// The answer the app was launched by, if any.
   NudgeResponse? launchedBy;
 
@@ -43,7 +47,12 @@ class FakeNotificationGateway implements NotificationGateway {
   Future<NotificationAccess> currentAccess() async => _access;
 
   @override
-  Future<NotificationAccess> requestAccess() async => _access;
+  Future<NotificationAccess> requestAccess() async {
+    if (failRequestAccess) {
+      throw StateError('the notifications plugin could not be initialised');
+    }
+    return _access;
+  }
 
   @override
   Future<void> schedule(ScheduledNudge nudge) async {

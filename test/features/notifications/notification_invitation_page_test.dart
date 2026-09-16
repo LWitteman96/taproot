@@ -119,6 +119,84 @@ void main() {
     expect(find.byIcon(Icons.warning), findsNothing);
   });
 
+  group('a failure on the way out is not a dead end', () {
+    // Both awaits in `_accept` can throw, and `asking` has already disabled
+    // both buttons by the time either can. The page is a redirect destination
+    // — no AppBar, nothing underneath to pop to — so an escaping exception
+    // leaves killing the app as the only way off the screen.
+
+    testWidgets(
+      'a platform that cannot be asked lands on the designed screen',
+      (tester) async {
+        gateway.grant(const NotificationAccess(mode: NotificationMode.granted));
+        gateway.failRequestAccess = true;
+        await pumpInvitation(tester);
+
+        await tap(tester, NotificationInvitationPage.acceptLabel);
+
+        expect(
+          find.text(NotificationInvitationPage.withoutNotificationsHeadline),
+          findsOneWidget,
+          reason: 'the request threw and the screen never left `asking`',
+        );
+
+        // And it is a screen you can leave from, which is the whole finding.
+        await tap(tester, NotificationInvitationPage.continueLabel);
+        expect(find.byType(GardenPage), findsOneWidget);
+      },
+    );
+
+    testWidgets('a record that will not write still asks the platform', (
+      tester,
+    ) async {
+      // `markOffered` is a bare `setBool`. Its failure is a bookkeeping loss —
+      // the question gets put once more on the next launch — and deliberately
+      // not the same failure as the platform refusing: saying "no
+      // notifications, then" here would contradict the permission the OS just
+      // granted.
+      gateway.grant(const NotificationAccess(mode: NotificationMode.granted));
+      invitations.failMarkOffered = true;
+      await pumpInvitation(tester);
+
+      await tap(tester, NotificationInvitationPage.acceptLabel);
+
+      expect(find.byType(GardenPage), findsOneWidget);
+    });
+
+    testWidgets('a record that will not write leaves declining answerable', (
+      tester,
+    ) async {
+      invitations.failMarkOffered = true;
+      await pumpInvitation(tester);
+
+      await tap(tester, NotificationInvitationPage.declineLabel);
+
+      expect(
+        find.text(NotificationInvitationPage.withoutNotificationsHeadline),
+        findsOneWidget,
+      );
+      await tap(tester, NotificationInvitationPage.continueLabel);
+      expect(find.byType(GardenPage), findsOneWidget);
+    });
+
+    testWidgets('both failing at once still ends somewhere with a way out', (
+      tester,
+    ) async {
+      invitations.failMarkOffered = true;
+      gateway.failRequestAccess = true;
+      await pumpInvitation(tester);
+
+      await tap(tester, NotificationInvitationPage.acceptLabel);
+
+      expect(
+        find.text(NotificationInvitationPage.withoutNotificationsHeadline),
+        findsOneWidget,
+      );
+      expect(find.textContaining('went wrong'), findsNothing);
+      expect(find.byIcon(Icons.error), findsNothing);
+    });
+  });
+
   group('the question is put once', () {
     testWidgets('accepting records it', (tester) async {
       gateway.grant(const NotificationAccess(mode: NotificationMode.granted));

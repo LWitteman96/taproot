@@ -339,8 +339,20 @@ class FakeNudgeService implements NudgeRepository {
 class FakeNotificationInvitationStore implements NotificationInvitationStore {
   FakeNotificationInvitationStore({this.offered = false});
 
+  /// What [hasBeenOffered] answers.
   bool offered;
+
+  /// Whether a write actually landed. Distinct from [offered], exactly as it
+  /// is in the real store: a failed write still leaves the question put for
+  /// the rest of the run, and only [persisted] survives a relaunch.
+  bool persisted = false;
+
   int markCalls = 0;
+
+  /// Set to have [markOffered] throw, as a full disk or a failed platform
+  /// channel does. The real store rethrows on this path, so the caller has to
+  /// catch it.
+  bool failMarkOffered = false;
 
   @override
   Future<bool> hasBeenOffered() async => offered;
@@ -349,6 +361,10 @@ class FakeNotificationInvitationStore implements NotificationInvitationStore {
   Future<void> markOffered() async {
     markCalls++;
     offered = true;
+    if (failMarkOffered) {
+      throw StateError('the invitation record could not be written');
+    }
+    persisted = true;
   }
 }
 
