@@ -21,6 +21,64 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-16 — A second species: plantgen, the oak, and oak.riv in the assets
+
+Branch: `feature/rive_animations`. Two sessions: one drew the oak and split the generator, this one
+built it with the rive CLI and shipped the asset. It answers the first of the two questions
+[status.md](status.md) has been carrying about the generator approach.
+
+### What landed
+
+- **`plantgen/`** — the generic half of `fern_generator.py`, lifted out whole: the geometry model,
+  the SVG writer, the RML emitter, and the sway / droop / lean / roots wiring. A plant is now a
+  `Species(...)` holding its own art and tables. **The fern's generated output was byte-identical
+  across the move**, every `.rml` and `.svg`, in both sway modes — which is the only reason the
+  refactor is trustworthy, and the check to re-run after any future change to `plantgen/`.
+- **`oak/`** — six oak stages plus `OakRoots`, a generator, a structural checker (`check_rml.py`),
+  and a built-file checker (`check_built.py`, written to be reused by the next plant).
+- **`assets/rive/oak.riv`**, 544 KB, registered in `pubspec.yaml` beside `fern.riv`, with
+  `test/features/garden/oak_asset_test.dart` pinning its names the way the fern's test does.
+
+### What it decided
+
+The art decisions are in [`oak/NOTES.md`](../oak/NOTES.md) and were reviewed as flat SVG before any
+of this: the crown is laid out *before* the limbs (leaves-on-sticks read as a bare tree with tufts),
+wood is drawn in two passes with front limbs split so no outline crosses the trunk, droop lives in
+the leaves rather than the wood (drooping limbs split the crown open — a tree breaking, not a tree
+thirsty), the lean goes **left** where the fern's goes right, and the taproot is the level-1 root.
+
+What this session decided is smaller and all about proof:
+
+- **Compare the build against the art it came from, not against an approved picture.** Headless
+  Chrome renders the generated `.svg`, `rive --screenshot` renders the `.riv`, and the two are
+  diffed at `--advance=0`. Zero strongly-differing pixels across six stages and four root levels.
+  The recipe is now in `fern/NOTES.md` for every plant after this one.
+- **Negative-control the checker.** Each of `check_built.py`'s four assertions was re-run against a
+  deliberately corrupted tree to confirm it fails. A checker that silently passes is the exact class
+  of bug this project keeps finding.
+
+### What it left open
+
+- **`OakMature` and `OakBloom` are over the render budget** — 0.34 and 0.36 ms against 0.30 ms, with
+  `advance` and memory comfortably inside. Shrinking the viewport does not help: the cost is path
+  count, not pixel count. Nothing was slimmed, because every lever changes art that was reviewed.
+  The levers are in `oak/NOTES.md` under "Weight". **This is a decision for Luuk.**
+- **The app does not draw oaks.** `plant_art.dart` hard-codes the fern, and generalising it to
+  per-species names was deliberately out of scope here.
+- The garden-design §10 step 7 art pass (outline widths × 2, root recolour) now applies to two
+  plants, so it is best done once in `plantgen/`.
+- The oak's motion tuning was judged on stills; the rosette droop scale, the limb scale and the
+  trunk's quarter-degree sway are unreviewed in motion.
+
+### Next
+
+**Per-species plant art in the app** — a species → (artboard prefix, state machine, view model) map
+in `plant_art.dart` in place of the fern special case, which also collapses the two asset tests into
+one. `OakRoots` is the same 1024×520 canvas with its ground line at y=0 as `FernRoots`, so
+`GardenLayout.rootsDepth` stays a global constant rather than becoming per-species.
+
+---
+
 ## 2026-09-16 — The garden home screen, and the fern standing in it
 
 Branch: `feature/rive_animations`. `docs/garden-design.md` arrived and now governs this screen; it

@@ -95,6 +95,9 @@ flutter:
     # build/fern.riv here. Committed because it is a build product of a
     # committed generator, and the CLI is not part of the Flutter toolchain.
     - assets/rive/fern.riv
+    # Built by the Rive CLI from oak/ — `cd oak && rive . --once`, then copy
+    # build/oak.riv here. Same arrangement as the fern above.
+    - assets/rive/oak.riv
 
   # Bundled, not fetched at runtime (garden-design §8). Both are SIL OFL;
   # the licences sit beside them in assets/fonts/.

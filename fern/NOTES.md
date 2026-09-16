@@ -29,7 +29,8 @@ builds clean, inspects clean, and does the wrong thing at runtime.
 ## The shape of the project
 
 ```
-fern_generator.py     the source of truth: geometry, SVG writer, RML emitter
+fern_generator.py     the source of truth for the fern: palette, parts, stages, tables
+../plantgen/          the shared half: geometry, SVG writer, RML emitter, wiring
 pngdiff.py            dependency-free PNG reader, for measuring render changes
 preview.sh            renders every stage at every vitality into build/preview/
 fern-data.rml         generated — the shared Fern view model
@@ -97,6 +98,12 @@ none. Nothing reports it, which is why the app-side tests pin both.
 ---
 
 ## The generator
+
+> Since the oak: the generic half of this generator — the geometry model, both
+> writers, the sway/droop/lean/roots wiring — lives in `../plantgen`, and
+> `fern_generator.py` hands the fern's art and tables to a `Species`. The fern's
+> output was byte-identical across the move. What follows still describes how
+> it works; `../oak/NOTES.md` has what the move added.
 
 The one rule: **`fern_generator.py` is the source of truth, and both outputs are
 readers over one geometry model.** Nothing is hand-transcribed between SVG and
@@ -356,6 +363,8 @@ runtime. Ordered by how easy they are to hit.
 | **`DataConverterRangeMapper.interpolationType` defaults to `linear`** | same attribute name as a keyframe's, opposite default (`hold`) | a converter eases by default once given an interpolator; a keyframe does not |
 | **Skinning: `indices` is 1-based** | a `0` slot is the identity transform — looks exactly like bones not working | `tendonIndex + 1` |
 | **Skinning: `values` must total 255** | the runtime divides by 255 and does not renormalize | split an even blend 128/127 |
+| **Two `--advance` steps around a `--pointer` are not one `--advance` of the sum** | the scene lands on a different animation time, so a pointer-driven capture compared against a plain capture at the "same" frame shows a difference that is entirely the measurement (found on the oak: a spurious ~15,000 px "residual droop" that was still there when the click changed nothing at all) | give both sides of the comparison the **same advance structure**, not the same total; a click that changes nothing is the control that proves it |
+| **`rive --screenshot` writes an opaque background; a headless-Chrome SVG screenshot writes a transparent one** | diffing the two makes ~99% of pixels differ and hides the real answer | composite both over the *same* colour before diffing — rive's is `#1D1D1D` |
 | **Skinning: `Tendon` matrix order** | `Mat2D(xx, xy, yx, yy, tx, ty)`; x-unit is `(xx, xy)` | swapping renders mirrored or collapsed, `problems` empty |
 
 Unit traps, which at least fail loudly once you look:
@@ -654,6 +663,31 @@ Then compare against the same capture with the interpolator dropped from the
 chain: smoothed, the fern is still fully drooped the instant after the click;
 unsmoothed, it is already upright. Remove the scaffold afterwards — it is a test
 fixture, not part of the scene.
+
+**Does the build draw the art?** The strongest appearance check available, and
+new on the oak. Both outputs already come from one geometry model, so render the
+generated `.svg` with headless Chrome, render the `.riv` with
+`rive --screenshot`, and diff. This compares the build against *the art the
+build came from*, which is a much stronger statement than comparing either
+against a reference image someone approved.
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless \
+    --screenshot=build/svgpng/stage.png --window-size=1024,1024 \
+    --default-background-color=00000000 --hide-scrollbars "file://$PWD/stage.svg"
+rive . --screenshot=build/rest/stage.png --artboard=OakMature \
+    --data=vitality=1 --data=roots=1 --advance=0
+```
+
+`--advance=0` is the point: at frame 0 every sway key is 0, so the artboard sits
+in exactly the rest pose the SVG describes. Composite both over the same
+background first (see the trap table). On the oak this gave 0.008%–0.687% of
+pixels differing at all and **zero** differing strongly, across six stages and
+four root levels — the residue is edge antialiasing, and it scales with edge
+count rather than with anything structural.
+
+Treat a *strongly*-differing pixel as the signal. Any at all means the emitter
+and the writer disagree about something, and the count will point at which part.
 
 **Measuring "less", not just "different".** Screenshot hashes answer *did it
 change*; they cannot answer *by how much*. A ~40-line pure-Python PNG reader

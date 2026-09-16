@@ -74,8 +74,12 @@ supabase/
   functions/  # Deno edge functions
 docs/         # The five specs
 scripts/      # coverage.sh, supabase-push.sh
+plantgen/     # The shared half of every plant generator: geometry, SVG writer,
+              # RML emitter, and the sway/droop/lean/roots wiring. No Dart.
 fern/         # Rive CLI project: generated plant art + animation. No Dart.
               # Its own AGENTS.md and NOTES.md govern it; see docs/status.md.
+oak/          # The second one, same shape. plantgen/ + its own art and tables.
+              # fern/NOTES.md is the shared trap list; oak/NOTES.md what it adds.
 ```
 
 Each feature under `lib/features/<name>/` contains `pages/`, `providers/` or `controllers/`,
