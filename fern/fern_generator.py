@@ -534,10 +534,50 @@ def sway_animation(nodes, ids, anim_id, depth=2):
     out.append(f'{ind}</LinearAnimation>')
     return out
 
+# ---------- the vitality droop ----------
+DROOP_MAX_DEGREES = 25   # what a fully upright frond gives up at vitality 0
+
+def droop_angle(fid):
+    """Rotation in radians at vitality 0, for one frond.
+
+    Derived from the art rather than hand-tuned per frond, so it carries to the
+    other stages: a frond gives up `DROOP_MAX_DEGREES` scaled by how upright it
+    already is, in the direction it already leans. A near-horizontal frond has
+    little height to lose and droops least; the near-vertical centre one falls
+    furthest. The sign is the side the tip is on, which turns the rotation into
+    "outward and down" rather than "toward the middle".
+    """
+    tip = FRONDS[fid][2]
+    dx, dy = tip[0] - BASE[0], tip[1] - BASE[1]
+    elevation = math.degrees(math.atan2(-dy, abs(dx)))          # 0 = flat, 90 = straight up
+    return math.copysign(math.radians(DROOP_MAX_DEGREES * elevation / 90), dx)
+
+def pose_animation(name, anim_id, angle_of, nodes, ids, depth=2):
+    """One end of the droop blend: a single rotation keyframe per frond.
+
+    Both poses key *every* frond. A property keyed in one pose and missing from
+    the other has nothing to mix toward, and blends by jumping.
+    """
+    ind = "    " * depth
+    out = [f'{ind}<LinearAnimation fps="60" duration="60" name="{name}" id="{anim_id}">']
+    for fid in MATURE_ORDER:
+        out.append(f'{ind}    <KeyedObject objectId="{nodes[fid]["droop"]}" id="{ids()}">')
+        out.append(f'{ind}        <KeyedProperty propertyKey="15" id="{ids()}">')
+        out.append(f'{ind}            <KeyFrameDouble frame="0" value="{angle_of(fid):.6f}" '
+                   f'interpolationType="linear" id="{ids()}"/>')
+        out.append(f'{ind}        </KeyedProperty>')
+        out.append(f'{ind}    </KeyedObject>')
+    out.append(f'{ind}</LinearAnimation>')
+    return out
+
 def mature_rml():
     ids = Ids()
     artboard_id, machine_id, layer_id, anim_id, state_id = ids(), ids(), ids(), ids(), ids()
     style_id = ids()
+    vitality_layer_id, blend_id, bindable_id = ids(), ids(), ids()
+    upright_id, drooped_id = ids(), ids()
+    converter_id, interpolator_id = ids(), ids()
+    viewmodel_id, vitality_id, instance_id = ids(), ids(), ids()
     nodes = {}
     body = []
     # reversed: base is painted last in SVG, so it is declared first here
@@ -547,7 +587,8 @@ def mature_rml():
 
     head = [
         '<Rive version="1" kind="fragment">',
-        f'    <Artboard defaultStateMachineId="{machine_id}" width="{W}" height="{W}" '
+        f'    <Artboard defaultStateMachineId="{machine_id}" viewModelId="{viewmodel_id}" '
+        f'viewModelInstanceId="{instance_id}" width="{W}" height="{W}" '
         f'styleId="{style_id}" name="FernMature" id="{artboard_id}">',
         f'        <LayoutComponentStyle name="Artboard Style" id="{style_id}"/>',
         '',
@@ -558,7 +599,13 @@ def mature_rml():
         '',
     ] + sway_animation(nodes, ids, anim_id) + [
         '',
+    ] + pose_animation("Upright", upright_id, lambda fid: 0.0, nodes, ids) + [
+        '',
+    ] + pose_animation("Drooped", drooped_id, droop_angle, nodes, ids) + [
+        '',
         f'        <StateMachine name="State Machine 1" id="{machine_id}">',
+        '',
+        '            <!-- the sway owns rotation on the inner *-sway nodes -->',
         f'            <StateMachineLayer name="Sway" id="{layer_id}">',
         '                <AnyState x="420" y="-120"/>',
         '                <ExitState x="620" y="-120"/>',
@@ -567,8 +614,41 @@ def mature_rml():
         '                </EntryState>',
         f'                <AnimationState x="160" y="0" animationId="{anim_id}" id="{state_id}"/>',
         '            </StateMachineLayer>',
+        '',
+        '            <!-- vitality owns rotation on the outer *-droop nodes -->',
+        f'            <StateMachineLayer name="Vitality" id="{vitality_layer_id}">',
+        '                <AnyState x="420" y="-120"/>',
+        '                <ExitState x="620" y="-120"/>',
+        '                <EntryState x="0" y="0">',
+        f'                    <StateTransition stateToId="{blend_id}"/>',
+        '                </EntryState>',
+        f'                <BlendState1DViewModel x="160" y="0" id="{blend_id}">',
+        f'                    <BindablePropertyNumber id="{bindable_id}">',
+        f'                        <DataBindContext sourcePathIds="{viewmodel_id}-{vitality_id}" '
+        f'propertyKey="636" converterId="{converter_id}"/>',
+        '                    </BindablePropertyNumber>',
+        '                    <!-- ascending value order: the runtime binary-searches these -->',
+        f'                    <BlendAnimation1D animationId="{drooped_id}" value="0"/>',
+        f'                    <BlendAnimation1D animationId="{upright_id}" value="100"/>',
+        '                </BlendState1DViewModel>',
+        '            </StateMachineLayer>',
         '        </StateMachine>',
         '    </Artboard>',
+        '',
+        '    <!-- vitality is 0-1; a blend axis is 0-100. the easing lives here, on the',
+        '         value feeding the blend, rather than on the two poses. -->',
+        '    <DataConverterRangeMapper minInput="0" maxInput="1" minOutput="0" maxOutput="100"',
+        '                              clampLower="true" clampUpper="true"',
+        f'                              interpolationType="cubic" name="VitalityToBlend" id="{converter_id}">',
+        f'        <CubicEaseInterpolator x1="0.42" y1="0" x2="0.58" y2="1" id="{interpolator_id}"/>',
+        '    </DataConverterRangeMapper>',
+        '',
+        f'    <ViewModel defaultInstanceId="{instance_id}" name="Fern" id="{viewmodel_id}">',
+        f'        <ViewModelPropertyNumber name="vitality" id="{vitality_id}"/>',
+        f'        <ViewModelInstance exports="true" name="Default" id="{instance_id}">',
+        f'            <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="{vitality_id}"/>',
+        '        </ViewModelInstance>',
+        '    </ViewModel>',
         '</Rive>',
         '',
     ]

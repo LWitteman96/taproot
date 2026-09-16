@@ -229,6 +229,7 @@ runtime. Ordered by how easy they are to hit.
 | **Artboard without `defaultStateMachineId`** | no bind ever pushes, no pointer input arrives; animations still play | always set it |
 | **Keyframe element not matching the property type** | the value is never written | `KeyFrameDouble` for `double`, `KeyFrameColor` for `Color`, `KeyFrameUint` for uint/enum, `KeyFrameId` for `Id` |
 | **`interpolationType="cubic"` with no `CubicEaseInterpolator` child** | eases nothing | give every cubic keyframe its curve |
+| **`interpolationType` is only tested for `hold` at runtime** | the *nested interpolator* decides the behaviour, so flipping the enum to `linear` does **not** disable an easing curve | to disable easing, remove the interpolator child; keep the enum consistent with the child anyway, since the editor reads it |
 | **`nameBased="true"` on a `DataBindContext`** | this toolchain cannot emit the manifest it indexes; the bind is inert | never author it; `problems` is meaningless in both directions here |
 | **`Feather` inside a `Fill`** | the paint vanishes entirely | feather strokes; for a soft fill use a `RadialGradient` with an alpha-`00` outer stop |
 | **`GradientStop` with no `position`** | all stops sit at 0, gradient renders flat | always set `position` |
@@ -257,6 +258,20 @@ rive . --screenshot --advance=1   # appearance, one frame after the machine star
 Then read the output for what was actually asked for. The type counts in
 `--summary` are the cheapest real check: they catch a whole category of
 "emitted nothing" bugs.
+
+For anything data-driven, the direct check is to **change the data and see the
+picture change**:
+
+```bash
+rive . --screenshot=a.png --data=vitality=1 --advance=1
+rive . --screenshot=b.png --data=vitality=0 --advance=1
+```
+
+Identical files mean nothing is bound, whatever `problems` says. The `--data`
+path is relative to **the view model instance bound to the artboard** — neither
+the view model's name nor the instance's name appears in it, so it is
+`--data=vitality=0`, not `--data=Fern/vitality=0`. A wrong path prints
+`no property at "..."` rather than failing silently.
 
 ---
 
@@ -382,3 +397,82 @@ frames where the turning points line up. Measured linear-interpolation error is
 Verified: 5 `KeyedObject` / 5 `KeyedProperty` / 125 `KeyFrameDouble`, every
 `objectId` resolving to a `*-sway` node rather than a droop one, every keyframe
 reading back as `linear`. Both of those would build clean if wrong.
+
+
+### Step 4 — the vitality droop
+
+A `vitality` number (0–1) on a `Fern` view model drives a
+`BlendState1DViewModel` between two poses, on a **second state machine layer**.
+
+```
+Sway layer      AnimationState → Sway            keys rotation on *-sway nodes
+Vitality layer  BlendState1DViewModel            keys rotation on *-droop nodes
+                  ├ BlendAnimation1D value=0   → Drooped
+                  └ BlendAnimation1D value=100 → Upright
+```
+
+The two layers write `rotation` on **different objects**, which is what makes
+two layers safe here. Had both targeted the same node the later layer would
+simply win — the reason for the nested droop/sway pair from step 2.
+
+**Droop angles are derived from the art, not hand-tuned**, so they carry to the
+other stages unchanged: a frond gives up `DROOP_MAX_DEGREES` (25°) scaled by how
+upright it already is, in the direction it already leans. A near-horizontal
+frond has little height to lose; the near-vertical centre one falls furthest.
+The sign is `sign(dx)` of the tip, which is what turns the rotation into
+"outward and down" rather than "toward the middle".
+
+| Frond | Droop at vitality 0 | Tip falls |
+|---|---|---|
+| `frond-back-left` | −20.6° | 253 px |
+| `frond-back-right` | +20.6° | 253 px |
+| `frond-left` | −11.8° | 115 px |
+| `frond-right` | +11.8° | 115 px |
+| `frond-center` | +24.2° | 314 px |
+
+The axis is remapped 0–1 → 0–100 by a `DataConverterRangeMapper`
+(`clampLower`/`clampUpper` set), carrying a `CubicEaseInterpolator` at the
+standard ease-in-out (0.42, 0, 0.58, 1). The easing lives on the value feeding
+the blend rather than on the poses, which makes both ends sticky: the fern holds
+upright through the top of the range and fully slumped through the bottom, with
+the visible change in the middle.
+
+Both poses key **all five** fronds — `Upright` at 0, `Drooped` at its angle — so
+nothing jumps for want of something to mix toward.
+
+Verified:
+
+- `problems: []`. 3 `LinearAnimation`, 2 `StateMachineLayer`, 1
+  `BlendState1DViewModel` with 2 `BlendAnimation1D` in ascending value order,
+  `DataConverterRangeMapper` + `CubicEaseInterpolator` and the `ViewModel` as
+  root elements.
+- `--data=vitality=` at 1.0 / 0.5 / 0.0 renders three distinct images, so the
+  bind genuinely drives the blend.
+- At vitality 1.0 the render is **byte-identical** to the step-3 capture at the
+  same frame, which is the check that the droop contributes exactly zero when
+  the plant is healthy.
+- Two frames at a fixed vitality of 0.2 differ, so the sway still runs
+  underneath the droop — the layers compose rather than one clobbering the
+  other.
+- Removing the `CubicEaseInterpolator` child changes the render, so the easing
+  is live. **Flipping `interpolationType` does not** — see the trap table; the
+  first attempt at this check was measuring nothing.
+
+#### Open calibration questions
+
+Deliberately left open rather than settled quietly:
+
+- **`DROOP_MAX_DEGREES = 25`** is a look, not a derived number. At vitality 0
+  the fern reads as collapsed-but-alive; a wilt that should look worse wants a
+  larger value.
+- **The ease curve.** Symmetric ease-in-out makes no claim about whether a user
+  should see early feedback from a small vitality dip. A curve weighted toward
+  the top of the range would show trouble sooner, which is a product question
+  about the growth engine's feedback loop, not a drawing one.
+- **The centre frond's lean.** It is near-vertical, so `sign(dx)` picks its side
+  on a 36 px offset — it leans right because the art happens to. That is
+  defensible for a wilting plant but it is arbitrary, and it is the one place
+  the droop looks asymmetric.
+- **Sway amplitude does not fall with vitality.** A wilted plant arguably moves
+  less. The amplitude is baked into the sway keyframes, so this would need
+  either a second blend axis or the sway scaled some other way.
