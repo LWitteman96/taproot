@@ -73,20 +73,38 @@ app from a nagging one.
 
 ## Status
 
-**Early. Infrastructure scaffold — the app itself isn't built yet.**
+**The loop is closed.** You can design a habit, water it, get asked about it in the evening, answer,
+and have all of it survive a reinstall. Everything in the build order is built except the last two
+entries.
 
-What exists today is a Flutter project skeleton, the dependency set, and an unusually complete set of
-design documents. The product and engine specs are finished and pressure-tested; the code is not.
+What runs today:
 
-Build order from here: growth engine (pure Dart, fully tested) → local SQLite store → completion tap
-→ Supabase sync → notification scheduling and the nudge ledger → reflection check-in → garden
-rendering → insight surfacing.
+- **Habit creation** — the cue → routine → reward flow, with *"I already do this, just track it"* as
+  a deliberate opt-out rather than an equal choice at the front door
+- **The completion tap** — press-and-hold to water, with an undo window and a non-gestural path
+- **The engine** — stage, vitality, roots and autonomy, derived from the ledgers on every read, never
+  stored
+- **The evening check-in** — scheduled on-device, with the nudge fading actually implemented: the
+  ledger records the occasions the app *chose to stay quiet on*, because those are autonomy's
+  denominator
+- **Reflection** — priority scoring, the five framings, and the authored chip library's surfacing rule
+- **Offline-first storage** — SQLite as the primary store, with Supabase sync (paged pull over an
+  overlap cursor, last-write-wins enforced by a trigger rather than by convention)
+
+What's left: **garden rendering** — plants currently render as words, since the art was blocked on an
+external illustrator; procedural generation is being explored on a branch — and **insight
+surfacing**. Also unbuilt: auth screens, a provisioned remote Supabase project, and Sentry
+initialisation.
+
+[`docs/status.md`](docs/status.md) is the current state, area by area.
+[`docs/progress-log.md`](docs/progress-log.md) is the append-only record of how it got here — what
+each stage decided, and what it left open.
 
 ---
 
 ## Documentation
 
-The thinking is the interesting part of this repo right now. All five documents live in [`docs/`](docs):
+The specs came first and still lead the code. All seven documents live in [`docs/`](docs):
 
 | Document | What it covers |
 |---|---|
@@ -95,6 +113,8 @@ The thinking is the interesting part of this repo right now. All five documents 
 | [reflection-logic.md](docs/reflection-logic.md) | When to prompt, what to ask, the cue and friction taxonomies, insight detection rules |
 | [starter-chip-library.md](docs/starter-chip-library.md) | 144 cue chips and 94 friction chips across 12 categories, plus the surfacing rule |
 | [infrastructure-guide.md](docs/infrastructure-guide.md) | Every stack decision, with rationale and the traps worth not repeating |
+| [status.md](docs/status.md) | Where every area stands right now — the mutable half of the record |
+| [progress-log.md](docs/progress-log.md) | Append-only, newest first: what each stage landed, decided, and left open |
 
 Each spec ends with its **open calibration questions** stated plainly rather than papered over. The
 numbers throughout are calibrated defaults meant to be tuned against real data — not laws.
@@ -121,19 +141,36 @@ Flutter + Supabase, chosen to match an existing production app so the proven pat
 
 ```bash
 flutter pub get
-flutter run
+flutter run --flavor dev
 ```
 
-`flutter analyze`, `dart format --set-exit-if-changed .`, and `flutter test` are the three gates and
-are currently green.
+Per-flavor entry points are wired up — `--flavor dev|stg|prod`, each with its own entry point, bundle
+id and `.env`. `.env.dev` points at a local Supabase stack; stg and prod are placeholders, since no
+hosted project is provisioned yet.
 
-Per-flavor entry points (`--flavor dev|stg|prod`) and the Supabase backend are scaffolded in the
-infrastructure guide but not yet wired up.
+`flutter analyze`, `dart format --set-exit-if-changed .` and `flutter test` are the three gates, and
+stay green in every commit — **923 tests** at the time of writing. The backend has gates of its own,
+run only when `supabase/` changes: `scripts/supabase-verify.sh` applies every migration from scratch,
+re-applies them to prove they are re-runnable, runs a **48-assertion pgTAP suite** over the schema and
+the RLS policies, and deletes an account end to end through the edge function.
+
+Two CI gates exist because a check that cannot fail is worse than no check: one asserts every source
+file is text (a NUL byte makes git treat a file as binary, so its contents appear in no diff), and
+the credential scan now plants a fake key inside a binary blob and fails the build if it *doesn't*
+find it.
 
 ---
 
 ## A note on scope
 
-This is a portfolio project, built in the open. The specs are more finished than the code on purpose —
-I wanted the hard product thinking settled, and the failure modes found, before writing the engine
-that depends on them.
+This is a portfolio project, built in the open. The specs went first on purpose — I wanted the hard
+product thinking settled, and the failure modes found, before writing the engine that depends on
+them. The code has caught up; the specs still lead it, and their open calibration questions are still
+open.
+
+Every stage was reviewed before it merged, and the reviews are in the progress log alongside the work.
+The one practice worth stealing came out of them: several tests were found that could not fail — one
+asserted a state the fixture already had, one asserted something the type system guaranteed, one
+asserted a relation that held for a reason other than the one under test, and one was a self-test
+*about* that very problem. So the standard here is not "does a test exist" but **"does a test exist
+that could fail"** — revert the fix, and watch the named test go red.
