@@ -11,7 +11,7 @@ import 'package:taproot/app/theme/themedata.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
 import 'package:taproot/features/garden/pages/garden_page.dart';
 import 'package:taproot/features/garden/providers/plant_art_providers.dart';
-import 'package:taproot/features/garden/widgets/plant_card.dart';
+import 'package:taproot/features/garden/widgets/plant_detail_card.dart';
 import 'package:taproot/features/garden/controllers/garden_controller.dart';
 import 'package:taproot/features/garden/widgets/watering_control.dart';
 import 'package:taproot/features/habits/domain/completion_repository.dart';
@@ -171,7 +171,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text(GardenPage.emptyHeadline), findsOneWidget);
-      expect(find.byType(PlantCard), findsNothing);
+      expect(find.byType(PlantDetailCard), findsNothing);
     });
 
     testWidgets('an empty garden offers the flow that fills it', (
@@ -195,11 +195,17 @@ void main() {
       await tester.pumpWidget(harness.app);
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Seed'), findsOneWidget);
+      // On the card, not the plant: the silhouette carries the same word, and
+      // the point here is that the card followed the engine.
+      Finder onCard(String word) => find.descendant(
+        of: find.byType(PlantDetailCard),
+        matching: find.textContaining(word),
+      );
+      expect(onCard('seed'), findsOneWidget);
 
       await holdToWater(tester);
 
-      expect(find.textContaining('Sprout'), findsOneWidget);
+      expect(onCard('sprout'), findsOneWidget);
       expect(await harness.completions.completionsFor('a'), hasLength(1));
     });
 
@@ -212,25 +218,22 @@ void main() {
       await tester.pumpAndSettle();
 
       await holdToWater(tester);
-      expect(find.text(GardenPage.wateredMessage), findsOneWidget);
 
-      await tester.tap(
-        find.descendant(
-          of: find.byType(SnackBar),
-          matching: find.text(PlantCard.undoLabel),
-        ),
-      );
+      // The undo sits on the detail card rather than in a snack bar. The card
+      // is the standing correction for the rest of the day the watering
+      // happened on, so it does not time out and it does not cover the garden.
+      await tester.tap(find.text(PlantDetailCard.undoLabel));
       await tester.pumpAndSettle();
 
       expect(await harness.completions.completionsFor('a'), isEmpty);
-      expect(find.textContaining('Seed'), findsOneWidget);
+      expect(find.textContaining('seed'), findsOneWidget);
     });
 
     testWidgets('the undo stays on the card after the offer has gone', (
       tester,
     ) async {
-      // The transient snack bar is the shortcut; the card carries the
-      // correction for the rest of the day the watering happened on.
+      // The card carries the correction for the rest of the day the watering
+      // happened on, and nothing about it expires with a snack bar.
       final harness = PageHarness();
       await harness.store.saveHabit(testHabit(id: 'a'));
       await tester.pumpWidget(harness.app);
@@ -240,9 +243,10 @@ void main() {
       await tester.pump(AppMotion.undoOfferDuration);
       await tester.pumpAndSettle();
 
+      // No snack bar to outlive: the correction was never transient.
       expect(find.byType(SnackBar), findsNothing);
 
-      await tester.tap(find.text(PlantCard.undoLabel));
+      await tester.tap(find.text(PlantDetailCard.undoLabel));
       await tester.pumpAndSettle();
 
       expect(await harness.completions.completionsFor('a'), isEmpty);
@@ -272,7 +276,7 @@ void main() {
       await tester.tap(find.text(GardenPage.retryLabel));
       await tester.pumpAndSettle();
 
-      expect(find.byType(PlantCard), findsOneWidget);
+      expect(find.byType(PlantDetailCard), findsOneWidget);
       expect(find.text('Morning walk'), findsOneWidget);
     });
 
@@ -291,7 +295,7 @@ void main() {
       await holdToWater(tester);
 
       expect(find.text(couldNotWaterMessage), findsOneWidget);
-      expect(find.textContaining('Seed'), findsOneWidget);
+      expect(find.textContaining('seed'), findsOneWidget);
       expect(await harness.completions.completionsFor('a'), isEmpty);
     });
 
@@ -326,14 +330,12 @@ void main() {
       await tester.pumpAndSettle();
 
       await holdToWater(tester);
-      // Let the transient offer go, so the only Undo left is the card's.
-      await tester.pump(AppMotion.undoOfferDuration);
       await tester.pumpAndSettle();
       // The garden was left open across midnight, so the card's standing offer
       // went stale.
       harness.clock.advance(const Duration(days: 1));
 
-      await tester.tap(find.text(PlantCard.undoLabel));
+      await tester.tap(find.text(PlantDetailCard.undoLabel));
       await tester.pumpAndSettle();
 
       expect(find.text(undoWindowClosedMessage), findsOneWidget);
@@ -395,7 +397,7 @@ void main() {
       await tester.pumpWidget(harness.app);
       await tester.pumpAndSettle();
 
-      expect(find.byType(PlantCard), findsOneWidget);
+      expect(find.byType(PlantDetailCard), findsOneWidget);
       expect(find.textContaining(GardenPage.checkInInvitation), findsNothing);
     });
 

@@ -96,6 +96,18 @@ flutter:
     # committed generator, and the CLI is not part of the Flutter toolchain.
     - assets/rive/fern.riv
 
+  # Bundled, not fetched at runtime (garden-design §8). Both are SIL OFL;
+  # the licences sit beside them in assets/fonts/.
+  fonts:
+    - family: Newsreader
+      fonts:
+        - asset: assets/fonts/Newsreader.ttf
+        - asset: assets/fonts/NewsreaderItalic.ttf
+          style: italic
+    - family: Karla
+      fonts:
+        - asset: assets/fonts/Karla.ttf
+
 # Native flavor configuration. Regenerate with:
 #   dart run flutter_flavorizr
 #

@@ -36,6 +36,7 @@ Before implementing anything, read the governing document.
 | Document | Governs |
 |---|---|
 | [docs/design-spec.md](docs/design-spec.md) | Concept, the garden metaphor, visual and UX direction |
+| [docs/garden-design.md](docs/garden-design.md) | The garden **home screen**: scene, layout, how the plant art sits in it, and the watering and reflection moments |
 | [docs/growth-engine.md](docs/growth-engine.md) | Stage / vitality / roots / autonomy — every formula |
 | [docs/reflection-logic.md](docs/reflection-logic.md) | Prompt scheduling, framings, cue and friction taxonomies, insight rules |
 | [docs/starter-chip-library.md](docs/starter-chip-library.md) | Chip content and the first-reflection surfacing rule |
