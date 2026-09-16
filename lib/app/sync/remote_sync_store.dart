@@ -35,28 +35,69 @@ const Duration syncOverlapWindow = Duration(seconds: 30);
 /// The SQLSTATE the server raises when a write has lost.
 ///
 /// `PT`-prefixed codes are how PostgREST is told which HTTP status to answer
-/// with, so this arrives as a 409 Conflict. Two triggers raise it, and they
-/// mean the same thing to a caller: `reject_stale_update` when an `updated_at`
-/// goes backwards, and `pin_soft_delete` when a push tries to clear a
-/// `deleted_at`. Both say *this row has moved on without you* — pull, do not
-/// retry.
+/// with — it reads the three digits after `PT` as the status — so every 409 the
+/// schema raises has to spell it exactly this way. Two triggers do, and the
+/// shared code is why they need [staleUpdateDetail] and
+/// [softDeletePinnedDetail] to tell them apart.
 const String staleWriteCode = 'PT409';
 
-/// A row the server refused because it has a newer version.
+/// `reject_stale_update`'s DETAIL: a newer write beat this one.
+///
+/// The winner is **ahead of the pull cursor** — that is what made this row a
+/// loser — so the recovery is to do nothing. The next pull brings it.
+const String staleUpdateDetail = 'sync_conflict=stale_update';
+
+/// `pin_soft_delete`'s DETAIL: the row is deleted upstream.
+///
+/// The winner is **behind the pull cursor**. The deletion was written before
+/// this drain's pull, was read by that pull, and lost the `updated_at`
+/// comparison on the way in — so waiting for the next pull waits forever, and
+/// treating this like a stale row is what resurrects a deleted habit for good.
+/// The recovery is to apply the deletion locally. See
+/// `TwoWaySyncDrain._pushOneByOne`.
+const String softDeletePinnedDetail = 'sync_conflict=soft_delete_pinned';
+
+/// A write the server refused.
 ///
 /// Typed rather than left as a `PostgrestException` because it is not an error
 /// in the sense the rest of the error handling means: nothing is broken, the
 /// write simply lost a race it was always going to lose. It is an expected
 /// state with a designed response, which is exactly the kind CLAUDE.md asks be
 /// kept out of the error budget.
-class StaleRowRejected implements Exception {
-  const StaleRowRejected(this.table, this.message);
+///
+/// **Sealed, because the two cases have opposite recoveries** and a caller that
+/// handles one has to say what it does about the other. They arrive as the same
+/// HTTP status and the same SQLSTATE; only the DETAIL separates them.
+sealed class SyncWriteRejected implements Exception {
+  const SyncWriteRejected(this.table, this.message);
 
   final String table;
   final String message;
+}
+
+/// A row the server refused because it has a newer version.
+///
+/// Nothing to do: the version that won is ahead of the cursor, so the next pull
+/// brings it and the local row is replaced then.
+final class StaleRowRejected extends SyncWriteRejected {
+  const StaleRowRejected(super.table, super.message);
 
   @override
   String toString() => 'StaleRowRejected($table: $message)';
+}
+
+/// A push the server refused because the row is soft-deleted upstream.
+///
+/// `deleted_at` is one-way, and a whole-row push carrying a null cannot lift a
+/// deletion. Unlike [StaleRowRejected] this **is not** self-correcting: the
+/// deletion that refused the write is older than the drain's own pull, so it is
+/// already behind the cursor and no future pull will offer it again. The caller
+/// has to apply the deletion locally or the row lives on this device forever.
+final class SoftDeletePinned extends SyncWriteRejected {
+  const SoftDeletePinned(super.table, super.message);
+
+  @override
+  String toString() => 'SoftDeletePinned($table: $message)';
 }
 
 /// The server, as sync sees it.
@@ -125,6 +166,14 @@ class SupabaseRemoteSyncStore implements RemoteSyncStore {
           );
     } on PostgrestException catch (error) {
       if (error.code == staleWriteCode) {
+        // `details` is Postgres's DETAIL field, passed through by PostgREST.
+        // An unrecognised one falls back to the stale reading, which is the
+        // conservative half: it retries nothing and waits for a pull, where
+        // guessing `SoftDeletePinned` would stamp a deletion nobody asked for.
+        final detail = error.details;
+        if (detail is String && detail.contains(softDeletePinnedDetail)) {
+          throw SoftDeletePinned(table.name, error.message);
+        }
         throw StaleRowRejected(table.name, error.message);
       }
       rethrow;
@@ -146,6 +195,12 @@ class SupabaseRemoteSyncStore implements RemoteSyncStore {
         .select()
         .gte('synced_at', since.toUtc().toIso8601String())
         .order('synced_at', ascending: true)
+        // A secondary key, so the walk is deterministic. Rows sharing a
+        // `synced_at` have no defined order without one, and PostgreSQL is free
+        // to return them differently on each request — which would let the
+        // caller's `fresh.isEmpty` escape hatch fire on a page that merely
+        // came back reshuffled. With this, a page is the same page every time.
+        .order('id', ascending: true)
         .limit(limit);
 
     return rows.cast<Map<String, Object?>>();

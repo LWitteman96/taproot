@@ -40,15 +40,30 @@ class LocalSyncStore {
 
   /// Rows waiting to be pushed, oldest first, at most [limit] of them.
   ///
+  /// "Oldest first" is a guarantee, so it is ordered rather than left to
+  /// SQLite. Without an `ORDER BY` the engine may return rows in any order and
+  /// in practice returns rowid order — insertion order, not edit order — so a
+  /// row edited today can precede one queued last week. Nothing depends on it
+  /// today, because [clearPending] and the re-query drain the backlog whatever
+  /// order it arrives in; it is ordered because the sentence above reads as a
+  /// promise a later reader could build on.
+  ///
+  /// The mutable tables order on `updated_at`, which is the age that means
+  /// something. The append-only ledgers have no such column — their rows never
+  /// change — so they order on their key, which is at least stable across
+  /// reads even though it is not chronological.
+  ///
   /// `pending_sync` is stripped: it is the device's queue flag and means
   /// nothing to the server, which would reject the column outright.
   Future<List<Map<String, Object?>>> pendingRows(
     SyncTable table, {
     int limit = 500,
   }) => guardStore(_log, 'pendingRows', () async {
+    final keyOrder = table.keyColumns.map((column) => '$column ASC').join(', ');
     final rows = await _database.query(
       table.name,
       where: 'pending_sync = 1',
+      orderBy: table.isMutable ? 'updated_at ASC, $keyOrder' : keyOrder,
       limit: limit,
     );
     return rows
@@ -154,11 +169,19 @@ class LocalSyncStore {
         }
 
         final local = existing.single;
-        if (!_incomingWins(row, local)) continue;
+
+        // The winner-takes-the-row question and the one-way questions are
+        // different questions, and asking only the first is what let a
+        // deletion be discarded. A losing row can still carry something the
+        // rules say cannot be reversed — see [_pinnedOntoLoser].
+        final merged = _incomingWins(row, local)
+            ? _reconciled(table, incoming: row, local: local)
+            : _pinnedOntoLoser(table, incoming: row, local: local);
+        if (merged == null) continue;
 
         await transaction.update(
           table.name,
-          toRow(_reconciled(table, incoming: row, local: local)),
+          toRow(merged),
           where: table.keyColumns.map((column) => '$column = ?').join(' AND '),
           whereArgs: table.keyColumns.map((column) => row[column]).toList(),
         );
@@ -194,8 +217,8 @@ class LocalSyncStore {
   /// The winning row, with the columns that do not simply take the winner's
   /// value put back.
   ///
-  /// Two of them, both on `habits`, and both cases where "the incoming row is
-  /// newer" is the wrong question:
+  /// Three of them, all cases where "the incoming row is newer" is the wrong
+  /// question:
   ///
   /// - **`category` is read leniently.** `readOpenEnum` turns a category this
   ///   build has not heard of into null, because the set widens with the chip
@@ -207,21 +230,128 @@ class LocalSyncStore {
   /// - **`deleted_at` is one-way**, the same rule the server pins with a
   ///   trigger. A row that arrives without the stamp cannot lift a deletion
   ///   this device already knows about, whatever its `updated_at` says.
+  /// - **The nudge ledger's flags are monotonic.** `sent`, `confirmed` and
+  ///   `declined` each record that something happened, and nothing that
+  ///   happened can un-happen, so a winning row may set one and may never
+  ///   clear one. `LocalNudgeService._outcomeColumns` refuses exactly this
+  ///   write on the local path — "rolling `sent` back to 0 after the
+  ///   notification fired would move an occasion that *was* nudged into
+  ///   autonomy's un-nudged denominator" — and without this the pull
+  ///   reintroduced it from the network. `merge_nudge_flags()` is the same rule
+  ///   on the server.
   Map<String, Object?> _reconciled(
     SyncTable table, {
     required Map<String, Object?> incoming,
     required Map<String, Object?> local,
-  }) {
-    if (table.name != AppSchema.habits) return incoming;
-
-    return <String, Object?>{
+  }) => switch (table.name) {
+    AppSchema.habits => <String, Object?>{
       ...incoming,
       if (incoming['category'] == null && local['category'] != null)
         'category': local['category'],
       if (incoming['deleted_at'] == null && local['deleted_at'] != null)
         'deleted_at': local['deleted_at'],
-    };
+    },
+    AppSchema.nudges => <String, Object?>{
+      ...incoming,
+      for (final flag in _monotonicNudgeFlags)
+        flag: _eitherIsSet(incoming[flag], local[flag]),
+    },
+    _ => incoming,
+  };
+
+  /// What a **losing** incoming row still gets to change.
+  ///
+  /// Null when it changes nothing, which is the usual answer and means "leave
+  /// the local row alone".
+  ///
+  /// The two rules above that are not about winning are applied here too, from
+  /// the other side. [_reconciled] was a winner-side fixup for rules that are
+  /// not about winners, and that asymmetry was a bug rather than a shortcut:
+  ///
+  /// - **A deletion is exactly the kind of row that loses.** Device B deletes a
+  ///   habit at t1; device A is offline and renames it at t2 > t1. A's pull
+  ///   reads the deletion, `_incomingWins` says no, and the deletion was
+  ///   discarded — leaving a habit alive on A that every other device and the
+  ///   server consider deleted, with the pull cursor already advanced past the
+  ///   only row that would have corrected it. It never self-heals, and A keeps
+  ///   planning occasions and recording completions against it.
+  /// - **A flag set on another device is still set**, whichever row is newer.
+  ///   Losing the comparison says this version of the row is older; it does not
+  ///   say the notification was never queued or the answer never given.
+  ///
+  /// The local row keeps everything else, `pending_sync` included: an edit
+  /// waiting to go up is still waiting, and stamping a deletion onto it does
+  /// not make it sent. The next push carries both, which the server accepts —
+  /// `pin_soft_delete` passes a `deleted_at` that is not distinct from the one
+  /// it holds.
+  Map<String, Object?>? _pinnedOntoLoser(
+    SyncTable table, {
+    required Map<String, Object?> incoming,
+    required Map<String, Object?> local,
+  }) {
+    if (table.name == AppSchema.habits) {
+      if (incoming['deleted_at'] == null || local['deleted_at'] != null) {
+        return null;
+      }
+      // The incoming stamp rather than one invented here: it is the server's,
+      // and it is the instant the deletion actually happened.
+      return <String, Object?>{...local, 'deleted_at': incoming['deleted_at']};
+    }
+
+    if (table.name == AppSchema.nudges) {
+      final gained = <String, Object?>{
+        for (final flag in _monotonicNudgeFlags)
+          if (_isSet(incoming[flag]) && !_isSet(local[flag]))
+            flag: _eitherIsSet(incoming[flag], local[flag]),
+      };
+      return gained.isEmpty ? null : <String, Object?>{...local, ...gained};
+    }
+
+    return null;
   }
+
+  /// Once true, never false — see [_reconciled].
+  static const List<String> _monotonicNudgeFlags = <String>[
+    'sent',
+    'confirmed',
+    'declined',
+  ];
+
+  /// SQLite has no boolean: these arrive as 0/1 from the device and can arrive
+  /// as a real `bool` from PostgREST, so both spellings are read.
+  static bool _isSet(Object? value) => value == 1 || value == true;
+
+  static int _eitherIsSet(Object? a, Object? b) =>
+      _isSet(a) || _isSet(b) ? 1 : 0;
+
+  /// Applies a deletion the server refused a push for.
+  ///
+  /// The recovery for [SoftDeletePinned], and the reason that conflict needed
+  /// telling apart from a stale one. The row is dead upstream; the deletion
+  /// that killed it is *behind* this device's pull cursor, so no future pull
+  /// will offer it and doing nothing leaves the habit alive here forever.
+  ///
+  /// [deletedAt] is the client's clock rather than the server's, which the
+  /// error does not carry. Only null-ness is ever compared — here, in
+  /// `pin_soft_delete`, and in the repository's live-habit filter — and the
+  /// server keeps its own stamp regardless, since `pin_soft_delete` pins
+  /// `old.deleted_at` through any later push. This is the narrow race left
+  /// after [_pinnedOntoLoser] handles the common case: a deletion written
+  /// *after* this drain's pull and before its push.
+  Future<void> pinDeleted(
+    SyncTable table,
+    Map<String, Object?> row,
+    DateTime deletedAt,
+  ) => guardStore(_log, 'pinDeleted', () async {
+    await _database.update(
+      table.name,
+      <String, Object?>{'deleted_at': encodeDateTime(deletedAt)},
+      where:
+          '${table.keyColumns.map((column) => '$column = ?').join(' AND ')} '
+          'AND deleted_at IS NULL',
+      whereArgs: table.keyColumns.map((column) => row[column]).toList(),
+    );
+  });
 
   /// How far the pull for [table] has got, or null if it has never run.
   Future<DateTime?> cursorFor(SyncTable table) =>

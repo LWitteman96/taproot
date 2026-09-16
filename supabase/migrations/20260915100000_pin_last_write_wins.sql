@@ -22,11 +22,15 @@
 --     `updated_at` is genuinely the reconciliation rule for these, and it is
 --     what `LocalSyncStore.applyPulled` implements on the device.
 --
---   * nudges — deliberately NOT. Its cross-device story is not last-write-wins:
---     two devices can hold rows for the same expected occasion, the flags are
---     OR'd (if either sent it, it was sent) and the duplicates are collapsed at
---     read time. A strict `updated_at` gate would reject a legitimate flag
---     write from whichever device did not create the row.
+--   * nudges — deliberately NOT, but see merge_nudge_flags() in
+--     20260916090000_merge_nudge_flags.sql, which is what makes the exemption
+--     safe rather than merely stated. Its cross-device story is not
+--     last-write-wins: two devices can hold rows for the same expected occasion
+--     and a strict `updated_at` gate would reject a legitimate flag write from
+--     whichever device did not create the row. The OR that justifies the
+--     exemption has to actually exist for same-id rows, and until that
+--     migration it did not — collapseDuplicateOccasions() merges *different*
+--     ids for one occasion, which is a different problem.
 --
 --   * completions, completion_retractions — nothing to apply. They are
 --     append-only event ledgers with no `updated_at` and no UPDATE grant: a
@@ -54,6 +58,12 @@ begin
       'stale write to %.%: updated_at % is older than the stored %',
       tg_table_schema, tg_table_name, new.updated_at, old.updated_at
       using errcode = 'PT409',
+            -- Machine-readable, because the caller's two recoveries are
+            -- different and PT409 cannot tell them apart on its own: PostgREST
+            -- reads the three digits after `PT` as the HTTP status, so every
+            -- 409 this schema raises must share the SQLSTATE. See
+            -- `staleUpdateDetail` in remote_sync_store.dart.
+            detail = 'sync_conflict=stale_update',
             hint = 'Pull before pushing. This row has been changed more '
                    'recently somewhere else, and that version wins.';
   end if;

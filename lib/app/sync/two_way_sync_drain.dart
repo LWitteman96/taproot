@@ -32,13 +32,20 @@ class TwoWaySyncDrain implements SyncDrain {
   TwoWaySyncDrain({
     required LocalSyncStore local,
     required RemoteSyncStore remote,
+    DateTime Function() clock = DateTime.now,
   }) : _local = local,
-       _remote = remote;
+       _remote = remote,
+       _clock = clock;
 
   static final Logger _log = Logger('TwoWaySyncDrain');
 
   final LocalSyncStore _local;
   final RemoteSyncStore _remote;
+
+  /// Only ever read to stamp a deletion the server refused a push for — see
+  /// [LocalSyncStore.pinDeleted]. Injectable so a test can assert on the value
+  /// rather than on "some time around now".
+  final DateTime Function() _clock;
 
   /// A bound on the pages one drain will walk per table.
   ///
@@ -50,13 +57,16 @@ class TwoWaySyncDrain implements SyncDrain {
   static const int _maximumPages = 20;
 
   @override
-  Future<void> drain() async {
+  Future<DrainOutcome> drain() async {
     final userId = _remote.currentUserId;
     if (userId == null) {
       // Signed out. Not a failure: the app runs on the local store, and there
       // is nowhere to sync to. The queue keeps until there is.
+      //
+      // Reported rather than returned silently, because the caller stamps
+      // "last backed up" on a clean return and this one backed nothing up.
       _log.info('nobody is signed in; nothing to drain');
-      return;
+      return DrainOutcome.signedOut;
     }
 
     for (final table in syncTables) {
@@ -65,6 +75,7 @@ class TwoWaySyncDrain implements SyncDrain {
     for (final table in syncTables) {
       await _push(table, userId);
     }
+    return DrainOutcome.drained;
   }
 
   /// Sends everything queued for one table.
@@ -82,11 +93,11 @@ class TwoWaySyncDrain implements SyncDrain {
 
       try {
         await _remote.push(table, stamped);
-      } on StaleRowRejected {
-        // One row in the batch has been overtaken, and an upsert is all-or-
-        // nothing, so the whole page failed for one loser. Retry them
-        // individually to find it rather than giving up on the rest — the
-        // others are perfectly good writes that happened to travel with it.
+      } on SyncWriteRejected {
+        // One row in the batch was refused, and an upsert is all-or-nothing, so
+        // the whole page failed for it. Retry them individually to find it
+        // rather than giving up on the rest — the others are perfectly good
+        // writes that happened to travel with it.
         await _pushOneByOne(table, stamped);
       }
 
@@ -95,6 +106,12 @@ class TwoWaySyncDrain implements SyncDrain {
       // drain forever. The winning version arrives on the next pull: the row
       // that beat it was written after this device last pulled — that is what
       // made it a loser — so its `synced_at` is ahead of the cursor.
+      //
+      // That argument holds for a [StaleRowRejected] and **only** for one. A
+      // [SoftDeletePinned] loser was beaten by a row that is behind the cursor,
+      // so no pull will bring it; [_pushOneByOne] applies that deletion locally
+      // before this runs, which is what stops the row coming off the queue
+      // still alive and never being reconciled again.
       await _local.clearPending(table, rows);
 
       if (rows.length < syncPageSize) return;
@@ -112,14 +129,27 @@ class TwoWaySyncDrain implements SyncDrain {
   /// rare: a row that had already lost would have been replaced by the pull and
   /// taken off the queue before the push ran. Getting here means the row was
   /// overtaken in the window between this drain's pull and its push.
+  ///
+  /// **The two refusals are handled differently, and that is the point of
+  /// telling them apart.** A stale row needs nothing done: the version that
+  /// beat it is ahead of the cursor and the next pull applies it. A row the
+  /// server refused because it is soft-deleted needs the deletion applied here
+  /// and now — the deletion that refused it is *behind* the cursor, already
+  /// read and rejected by this drain's own pull, so waiting for a pull waits
+  /// forever and the habit stays alive on this device with nothing left to
+  /// correct it.
   Future<void> _pushOneByOne(
     SyncTable table,
     List<Map<String, Object?>> rows,
   ) async {
     var lost = 0;
+    var deleted = 0;
     for (final row in rows) {
       try {
         await _remote.push(table, <Map<String, Object?>>[row]);
+      } on SoftDeletePinned {
+        await _local.pinDeleted(table, row, _clock().toUtc());
+        deleted++;
       } on StaleRowRejected {
         lost++;
       }
@@ -129,6 +159,12 @@ class TwoWaySyncDrain implements SyncDrain {
       _log.info(
         '$lost ${table.name} row(s) were overtaken and not sent; the pull '
         'brings the version that won',
+      );
+    }
+    if (deleted > 0) {
+      _log.info(
+        '$deleted ${table.name} row(s) are deleted upstream; the deletion has '
+        'been applied here rather than waiting for a pull that cannot bring it',
       );
     }
   }
@@ -185,6 +221,22 @@ class TwoWaySyncDrain implements SyncDrain {
         since = last.add(const Duration(microseconds: 1));
       } else {
         since = last;
+      }
+
+      if (page == _maximumPages - 1) {
+        // The same warning `_push` carries, for the same reason. Ending the
+        // loop here is safe — rows come back ascending on `synced_at`, so
+        // everything unpulled is ahead of `newest` and the next drain resumes
+        // from there — but a first install restoring a year of history across
+        // more than 10,000 rows would otherwise finish partially and say
+        // nothing, with the garden showing an incomplete history and no
+        // indication why. The trigger is a connectivity edge rather than a
+        // timer, so "the next drain" on a phone that stays on one network may
+        // be days away.
+        _log.warning(
+          'stopped pulling ${table.name} after $_maximumPages pages; the next '
+          'drain will continue from $newest',
+        );
       }
     }
 

@@ -22,11 +22,15 @@ class ControllableDrain implements SyncDrain {
   /// Thrown instead of draining.
   Object? failure;
 
+  /// What a completed drain reports. `signedOut` is the no-round-trip case.
+  DrainOutcome outcome = DrainOutcome.drained;
+
   @override
-  Future<void> drain() async {
+  Future<DrainOutcome> drain() async {
     runs++;
     if (gate != null) await gate!.future;
     if (failure case final thrown?) throw thrown;
+    return outcome;
   }
 }
 
@@ -340,6 +344,57 @@ void main() {
         await harness.settle();
 
         expect(harness.drain.runs, 2);
+      });
+    });
+
+    group('a drain that moved nothing', () {
+      test('does not claim the work is backed up', () async {
+        // Nobody is signed in. `drain()` returns early and without throwing —
+        // correctly, since signed out is a designed state rather than a
+        // failure — but nothing was pushed and nothing was pulled.
+        final harness = Harness();
+        harness.drain.outcome = DrainOutcome.signedOut;
+        harness.start();
+
+        await harness.goOnline();
+
+        expect(harness.drain.runs, 1);
+        expect(
+          harness.state.lastSucceededAt,
+          isNull,
+          reason:
+              '"synced 4 minutes ago" is the sentence this number is for, and '
+              'nothing signs a user in yet — so a dev build would bind the '
+              'first sync UI to a value that has never once been true',
+        );
+        expect(harness.state.status, SyncStatus.signedOut);
+        expect(
+          harness.state.isBackedUp,
+          isFalse,
+          reason:
+              'an app that says "all backed up" while backing nothing up '
+              'is lying, which is the argument SyncStatus already makes '
+              'about `unavailable`',
+        );
+      });
+
+      test('and leaves an earlier real success where it was', () async {
+        final harness = Harness();
+        harness.start();
+
+        await harness.goOnline();
+        final backedUpAt = harness.state.lastSucceededAt;
+        expect(backedUpAt, isNotNull);
+
+        // Signed out afterwards — the last true backup is still the last true
+        // backup, and saying so is more useful than saying nothing.
+        harness.drain.outcome = DrainOutcome.signedOut;
+        harness.clock.advance(const Duration(hours: 1));
+        await harness.goOffline();
+        await harness.goOnline();
+
+        expect(harness.state.lastSucceededAt, backedUpAt);
+        expect(harness.state.status, SyncStatus.signedOut);
       });
     });
   });

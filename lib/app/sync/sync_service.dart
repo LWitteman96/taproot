@@ -110,14 +110,32 @@ class SyncService extends Notifier<SyncState> {
           errorMessage: () => null,
         );
 
-        await _drain.drain();
+        final outcome = await _drain.drain();
         if (!ref.mounted) return;
 
-        state = state.copyWith(
-          status: SyncStatus.idle,
-          lastSucceededAt: _clock,
-          errorMessage: () => null,
-        );
+        // A clean return is not a round trip. `drain()` returns early without
+        // throwing when nobody is signed in — correctly, since signed out is a
+        // designed state rather than a failure — and stamping the clock for
+        // that would make `lastSucceededAt` mean "a drain was attempted"
+        // rather than "your work is safe somewhere else". `SyncStatus`'s own
+        // doc-comment makes the argument: an app that shows "all backed up"
+        // while backing nothing up is lying, and the difference is invisible
+        // from the status alone if the two share a value.
+        //
+        // Nothing signs a user in yet, so this is currently the *only* path a
+        // dev build takes — the first UI to render "synced 4 minutes ago"
+        // would otherwise be wired to a value that has never once been true.
+        state = switch (outcome) {
+          DrainOutcome.drained => state.copyWith(
+            status: SyncStatus.idle,
+            lastSucceededAt: _clock,
+            errorMessage: () => null,
+          ),
+          DrainOutcome.signedOut => state.copyWith(
+            status: SyncStatus.signedOut,
+            errorMessage: () => null,
+          ),
+        };
       } while (_drainAgain);
     } catch (error, stackTrace) {
       _log.warning('the drain could not finish', error, stackTrace);

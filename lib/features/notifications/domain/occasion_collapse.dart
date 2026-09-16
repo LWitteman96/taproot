@@ -36,7 +36,19 @@ import 'package:taproot/core/utils/local_dates.dart';
 ///   answer — it may have been written by a background isolate from the shade,
 ///   which is the normal path.
 /// - **`scheduledFor` is the earliest of them**, because that is the one that
-///   would have fired first.
+///   would have fired first. It is a record of what was planned, not an
+///   instruction: `NudgeScheduler` recomputes `nudgeDeliveryTime(occasion)`
+///   from the occasion itself, and that recomputation is authoritative. This
+///   column exists so a later diagnostic can see what the devices intended.
+/// - **The absorbed ids are carried**, on [NudgeRecord.mergedIds]. The merged
+///   record is synthetic — its `id` comes from one row and its `sent` may come
+///   from another — so anything treating the id as an *addressable identity*
+///   rather than as a label needs the rest of them. The scheduler does: it asks
+///   the OS whether `notificationIdFor(id)` is still pending, and without the
+///   absorbed ids a `sent` OR'd in from the other row looks like a notification
+///   the OS lost, so it queues a second one for an evening that already has
+///   one. Two nudges, one occasion, and nothing to cancel the first with
+///   because that id is never looked up again.
 List<NudgeRecord> collapseDuplicateOccasions(Iterable<NudgeRecord> nudges) {
   final byOccasion = <String, List<NudgeRecord>>{};
   for (final nudge in nudges) {
@@ -79,5 +91,9 @@ NudgeRecord _merge(List<NudgeRecord> group) {
     confirmed: confirmed,
     declined: declined,
     scheduledFor: () => earliestScheduled,
+    mergedIds: <String>[
+      for (final nudge in group)
+        if (nudge.id != canonical.id) nudge.id,
+    ]..sort(),
   );
 }

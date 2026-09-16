@@ -296,5 +296,8 @@ class CountingDrain implements SyncDrain {
   int runs = 0;
 
   @override
-  Future<void> drain() async => runs++;
+  Future<DrainOutcome> drain() async {
+    runs++;
+    return DrainOutcome.drained;
+  }
 }

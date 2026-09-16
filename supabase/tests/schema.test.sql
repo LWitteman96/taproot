@@ -11,7 +11,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select plan(34);
+select plan(37);
 
 -- ── RLS is on, everywhere, with nothing reachable by anon ───────────────────
 
@@ -392,15 +392,61 @@ select lives_ok(
   'and a newer one is what the rule exists to let through'
 );
 
--- nudges is deliberately exempt: its cross-device story is OR''d flags with a
--- read-time collapse of duplicate occasions, not whole-row last-write-wins, so
--- a strict gate would reject a legitimate flag write from the device that did
--- not create the row.
+-- ── The nudge ledger: exempt from the gate, but not ungoverned ─────────────
+--
+-- `nudges` is deliberately exempt from reject_stale_update, because a flag
+-- write from the device that did *not* create the row is legitimate and a
+-- strict `updated_at` gate would reject it. The exemption is only safe while
+-- merge_nudge_flags() supplies the rule it was justified by — OR'd monotonic
+-- flags — so these four assertions pin the exemption and the rule together.
+--
+-- The first one on its own used to be the whole test, and it was vacuous: it
+-- set `confirmed = true` on a row where `confirmed` was already true. It
+-- asserted that the exemption exists, which nothing threatened, and said
+-- nothing about the merge, which did not exist.
+
+update public.nudges
+   set sent = true, confirmed = true
+ where id = 'eeeeeeee-0000-0000-0000-000000000001';
+
 select lives_ok(
   $$update public.nudges
-       set confirmed = true, updated_at = '1999-01-01T00:00:00Z'
+       set declined = true, updated_at = '1999-01-01T00:00:00Z'
      where id = 'eeeeeeee-0000-0000-0000-000000000001'$$,
-  'the nudge ledger is exempt, because its merge rule is not last-write-wins'
+  'the nudge ledger is exempt from the stale gate, because a flag write from '
+  'the device that did not create the row is legitimate and its merge rule is '
+  'not whole-row last-write-wins'
+);
+
+-- The write above carried the column defaults for sent and confirmed — false —
+-- which is exactly the shape of the failure: a device that has not heard about
+-- an answer pushes its whole row, and an unconditional ON CONFLICT DO UPDATE
+-- takes the cleared flag. Every device then pulls it back, and the device that
+-- holds the truth is no longer pending, so it never re-pushes it.
+select is(
+  (select confirmed from public.nudges
+     where id = 'eeeeeeee-0000-0000-0000-000000000001'),
+  true,
+  'and a stale write cannot clear an answer the user has already given — '
+  'without the merge the server stays wrong forever and a reinstall pulls the '
+  'answer as never given'
+);
+
+select is(
+  (select sent from public.nudges
+     where id = 'eeeeeeee-0000-0000-0000-000000000001'),
+  true,
+  'nor roll `sent` back, which is the worse half: an occasion that WAS nudged '
+  'moving into autonomy''s un-nudged denominator depresses the graduation gate'
+);
+
+select ok(
+  (select updated_at from public.nudges
+     where id = 'eeeeeeee-0000-0000-0000-000000000001')
+    > '2020-01-01T00:00:00Z',
+  'and updated_at is clamped forward rather than wound back — the stale writer '
+  'keeps its flag contribution without moving the timestamp every other device '
+  'compares against and pages on'
 );
 
 -- ── Deleting the auth user is the whole deletion ────────────────────────────

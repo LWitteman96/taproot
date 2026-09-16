@@ -294,6 +294,16 @@ class FakeNudgeService implements NudgeRepository {
     }
   }
 
+  /// Puts a row in the ledger the way a **sync pull** does: by key, without
+  /// the one-row-per-occasion guard.
+  ///
+  /// That guard belongs to the local write path, and `saveNudge` is right to
+  /// enforce it. Sync does not go through it — `LocalSyncStore.applyPulled`
+  /// writes rows by key — which is exactly how two devices that each planned
+  /// the same evening end up with two rows for one occasion, and therefore the
+  /// only way to stage the case `collapseDuplicateOccasions` exists for.
+  void injectPulled(NudgeRecord nudge) => _nudges[nudge.id] = nudge;
+
   @override
   Future<List<NudgeRecord>> nudgesFor(String habitId) async =>
       // Collapsed like the SQLite service: a fake that is more forgiving than

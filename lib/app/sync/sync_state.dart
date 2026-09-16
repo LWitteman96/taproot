@@ -13,6 +13,15 @@ enum SyncStatus {
   /// backoff loop, because the trigger is an event rather than a poll.
   failed,
 
+  /// There is a backend, but nobody is signed in.
+  ///
+  /// Distinct from [idle] for the same reason [unavailable] is: a drain that
+  /// returned early because there was nowhere to send anything did not back
+  /// anything up, and [SyncState.lastSucceededAt] must not move for it. Distinct
+  /// from [unavailable] because this one is fixed by signing in, and the UI
+  /// has something to offer the user about it.
+  signedOut,
+
   /// This build has no backend to sync with.
   ///
   /// A designed state, not an error: only the dev flavor has credentials until
@@ -49,6 +58,13 @@ class SyncState {
 
   /// Whether this build can sync at all.
   bool get isAvailable => status != SyncStatus.unavailable;
+
+  /// Whether the last drain actually moved data.
+  ///
+  /// The question [lastSucceededAt] is only meaningful for. Read it before
+  /// rendering "all backed up": [SyncStatus.idle] is the only status that
+  /// earns that sentence.
+  bool get isBackedUp => status == SyncStatus.idle && lastSucceededAt != null;
 
   SyncState copyWith({
     SyncStatus? status,

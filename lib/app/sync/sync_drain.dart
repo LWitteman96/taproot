@@ -1,10 +1,26 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:taproot/app/database/database_provider.dart';
+import 'package:taproot/app/runtime/runtime_providers.dart';
 import 'package:taproot/app/supabase/supabase_config.dart';
 import 'package:taproot/app/sync/local_sync_store.dart';
 import 'package:taproot/app/sync/remote_sync_store.dart';
 import 'package:taproot/app/sync/two_way_sync_drain.dart';
+
+/// What a drain did, beyond finishing without throwing.
+///
+/// A clean return is not the same as a round trip. [SyncService] stamps "last
+/// backed up" on success, and a drain that returned early because nobody is
+/// signed in backed nothing up — so it has to be able to say so, or the app
+/// shows "synced just now" off a value that has never once been true.
+enum DrainOutcome {
+  /// A real round trip: pulled what was new, pushed what was pending.
+  drained,
+
+  /// Nobody is signed in, so there was nowhere to sync to. A designed state,
+  /// not a failure — the app runs on the local store and the queue keeps.
+  signedOut,
+}
 
 /// One round of synchronisation: push everything pending, pull everything new.
 ///
@@ -25,9 +41,10 @@ import 'package:taproot/app/sync/two_way_sync_drain.dart';
 /// - **Failure is throwing, not returning.** A drain that could not finish must
 ///   throw so the state says so; swallowing an error here produces the exact
 ///   thing this feature exists to prevent, an app reporting that work is backed
-///   up when it is not.
+///   up when it is not. [DrainOutcome] is not a softer way to report failure —
+///   it distinguishes two kinds of *success*, one of which moved no data.
 abstract class SyncDrain {
-  Future<void> drain();
+  Future<DrainOutcome> drain();
 }
 
 /// The drain for a build with no backend.
@@ -39,7 +56,7 @@ class UnconfiguredSyncDrain implements SyncDrain {
   const UnconfiguredSyncDrain();
 
   @override
-  Future<void> drain() async {}
+  Future<DrainOutcome> drain() async => DrainOutcome.signedOut;
 }
 
 /// The drain in use.
@@ -57,5 +74,6 @@ final syncDrainProvider = Provider<SyncDrain>((ref) {
   return TwoWaySyncDrain(
     local: LocalSyncStore(database: ref.watch(appDatabaseProvider)),
     remote: ref.watch(remoteSyncStoreProvider),
+    clock: ref.watch(clockProvider),
   );
 });

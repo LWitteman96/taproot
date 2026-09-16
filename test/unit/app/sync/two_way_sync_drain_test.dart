@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:taproot/app/database/app_database.dart';
 import 'package:taproot/app/sync/local_sync_store.dart';
 import 'package:taproot/app/sync/remote_sync_store.dart';
+import 'package:taproot/app/sync/sync_drain.dart';
 import 'package:taproot/app/sync/sync_tables.dart';
 import 'package:taproot/app/sync/two_way_sync_drain.dart';
 import 'package:taproot/core/utils/json_codec.dart';
@@ -46,11 +47,12 @@ class FakeRemoteSyncStore implements RemoteSyncStore {
     };
   }
 
-  /// Enforces the same last-write-wins rule the `reject_stale_update` trigger
-  /// does, so a test exercises what the server actually answers rather than a
-  /// fake that is more forgiving than production.
+  /// Enforces the same three rules the server's triggers do, so a test
+  /// exercises what the server actually answers rather than a fake that is more
+  /// forgiving than production: `reject_stale_update`, `pin_soft_delete` and
+  /// `merge_nudge_flags`.
   ///
-  /// All-or-nothing, like the real upsert: one stale row fails the batch.
+  /// All-or-nothing, like the real upsert: one refused row fails the batch.
   @override
   Future<void> push(SyncTable table, List<Map<String, Object?>> rows) async {
     if (pushFailure case final failure?) throw failure;
@@ -61,21 +63,52 @@ class FakeRemoteSyncStore implements RemoteSyncStore {
       for (final row in rows) {
         final existing = _tableOf(table)[table.keyOf(row)];
         if (existing == null) continue;
-        final incomingAt = requireDateTime(row, 'updated_at');
-        // Strictly older only — an equal replay is what sync does all day.
-        if (incomingAt.isBefore(requireDateTime(existing, 'updated_at'))) {
-          throw StaleRowRejected(table.name, 'stale write to ${table.name}');
+
+        // pin_soft_delete, and it is checked first because the real trigger
+        // fires on habits regardless of what the timestamps say.
+        if (table.name == AppSchema.habits &&
+            existing['deleted_at'] != null &&
+            row['deleted_at'] == null) {
+          throw SoftDeletePinned(table.name, '${row['id']} is deleted');
+        }
+
+        // reject_stale_update, which `nudges` is exempt from.
+        if (table.name != AppSchema.nudges) {
+          final incomingAt = requireDateTime(row, 'updated_at');
+          // Strictly older only — an equal replay is what sync does all day.
+          if (incomingAt.isBefore(requireDateTime(existing, 'updated_at'))) {
+            throw StaleRowRejected(table.name, 'stale write to ${table.name}');
+          }
         }
       }
     }
 
     for (final row in rows) {
-      _tableOf(table)[table.keyOf(row)] = <String, Object?>{
+      final existing = _tableOf(table)[table.keyOf(row)];
+      final stored = <String, Object?>{
         ...row,
         'synced_at': encodeDateTime(clock.now),
       };
+
+      // merge_nudge_flags: the monotonic flags are OR'd and updated_at is
+      // clamped forward rather than the write being rejected.
+      if (existing != null && table.name == AppSchema.nudges) {
+        for (final flag in <String>['sent', 'confirmed', 'declined']) {
+          final either = _isSet(row[flag]) || _isSet(existing[flag]);
+          stored[flag] = either ? 1 : 0;
+        }
+        final incomingAt = requireDateTime(row, 'updated_at');
+        final storedAt = requireDateTime(existing, 'updated_at');
+        stored['updated_at'] = encodeDateTime(
+          incomingAt.isAfter(storedAt) ? incomingAt : storedAt,
+        );
+      }
+
+      _tableOf(table)[table.keyOf(row)] = stored;
     }
   }
+
+  static bool _isSet(Object? value) => value == 1 || value == true;
 
   @override
   Future<List<Map<String, Object?>>> pullPage(
@@ -135,6 +168,9 @@ void main() {
   final SyncTable completions = syncTables.firstWhere(
     (table) => table.name == AppSchema.completions,
   );
+  final SyncTable nudges = syncTables.firstWhere(
+    (table) => table.name == AppSchema.nudges,
+  );
 
   setUp(() async {
     clock = TestClock(DateTime.utc(2026, 3, 4, 9));
@@ -166,7 +202,7 @@ void main() {
       remote.currentUserId = null;
       await insertLocalHabit(id: 'habit-1', updatedAt: clock.now);
 
-      await drain.drain();
+      final outcome = await drain.drain();
 
       expect(remote.tables, isEmpty);
       expect(
@@ -174,6 +210,19 @@ void main() {
         hasLength(1),
         reason: 'the queue keeps until there is somewhere to send it',
       );
+      expect(
+        outcome,
+        DrainOutcome.signedOut,
+        reason:
+            'a clean return is not a round trip, and the caller stamps '
+            '"last backed up" on a clean return',
+      );
+    });
+
+    test('a real drain says so', () async {
+      await insertLocalHabit(id: 'habit-1', updatedAt: clock.now);
+
+      expect(await drain.drain(), DrainOutcome.drained);
     });
   });
 
@@ -523,6 +572,238 @@ void main() {
 
       expect(remote.tables[AppSchema.completions], hasLength(1));
       expect(await local.pendingRows(completions), isEmpty);
+    });
+  });
+
+  /// The one-way `deleted_at` rule, from the side it was missing on.
+  ///
+  /// `_reconciled` applied it only where the incoming row *won* the
+  /// `updated_at` comparison — and a deletion is exactly the kind of row that
+  /// loses, because the device that deleted it stops editing it and the other
+  /// device carries on.
+  group('a deletion is one-way whichever row is newer', () {
+    /// B deleted the habit at t1. A was offline and renamed it at t2 > t1.
+    Future<void> stageTheResurrection() async {
+      await insertLocalHabit(
+        id: 'habit-1',
+        name: 'renamed while offline',
+        updatedAt: DateTime.utc(2026, 3, 4, 12),
+      );
+      remote.seed(
+        habits,
+        habitRow(id: 'habit-1', updatedAt: DateTime.utc(2026, 3, 4, 10))
+          ..['deleted_at'] = encodeDateTime(DateTime.utc(2026, 3, 4, 10)),
+        syncedAt: DateTime.utc(2026, 3, 4, 10, 0, 1),
+      );
+    }
+
+    Future<Map<String, Object?>> storedHabit() async => (await database.query(
+      AppSchema.habits,
+      where: 'id = ?',
+      whereArgs: <Object?>['habit-1'],
+    )).single;
+
+    test('the pull applies it even though the incoming row lost', () async {
+      await stageTheResurrection();
+
+      await drain.drain();
+
+      expect(
+        (await storedHabit())['deleted_at'],
+        isNotNull,
+        reason:
+            'discarding the losing row whole left a habit alive on this '
+            'device that every other device considers deleted — and with the '
+            'cursor advanced past it, nothing would ever correct it',
+      );
+    });
+
+    test('the local edit is not silently dropped to apply it', () async {
+      await stageTheResurrection();
+
+      await drain.drain();
+
+      expect(
+        (await storedHabit())['name'],
+        'renamed while offline',
+        reason: 'the deletion is pinned onto the local row, not instead of it',
+      );
+    });
+
+    test('the deletion survives a re-pull of the same page', () async {
+      await stageTheResurrection();
+
+      await drain.drain();
+      clock.advance(const Duration(minutes: 1));
+      await drain.drain();
+
+      expect((await storedHabit())['deleted_at'], isNotNull);
+    });
+  });
+
+  /// The narrow race the pull cannot catch: the deletion is written *after*
+  /// this drain's pull and before its push, so the push is what discovers it.
+  group('a push refused because the row is deleted upstream', () {
+    setUp(() async {
+      await insertLocalHabit(
+        id: 'habit-1',
+        name: 'renamed while offline',
+        updatedAt: DateTime.utc(2026, 3, 4, 12),
+      );
+      // Seeded with a `synced_at` behind the cursor the drain will end on, so
+      // the pull genuinely cannot bring it back on a later cycle either.
+      remote.seed(
+        habits,
+        habitRow(id: 'habit-1', updatedAt: DateTime.utc(2026, 3, 4, 12))
+          ..['deleted_at'] = encodeDateTime(DateTime.utc(2026, 3, 4, 11)),
+      );
+      // The local row has not seen it: the cursor is already past this page.
+      await local.setCursor(habits, DateTime.utc(2026, 3, 5));
+    });
+
+    Future<Map<String, Object?>> storedHabit() async => (await database.query(
+      AppSchema.habits,
+      where: 'id = ?',
+      whereArgs: <Object?>['habit-1'],
+    )).single;
+
+    test(
+      'applies the deletion locally rather than waiting for a pull',
+      () async {
+        await drain.drain();
+
+        expect(
+          (await storedHabit())['deleted_at'],
+          isNotNull,
+          reason:
+              'treating this like a stale row waits for a winner that is behind '
+              'the cursor, which never arrives',
+        );
+      },
+    );
+
+    test('and takes the row off the queue', () async {
+      await drain.drain();
+
+      expect(await local.pendingRows(habits), isEmpty);
+    });
+  });
+
+  /// `sent`, `confirmed` and `declined` each record that something happened,
+  /// and nothing that happened can un-happen.
+  group('the nudge ledger\'s flags are monotonic', () {
+    Map<String, Object?> nudgeRow({
+      required DateTime updatedAt,
+      bool sent = false,
+      bool confirmed = false,
+    }) => <String, Object?>{
+      'id': 'nudge-1',
+      'user_id': 'user-1',
+      'habit_id': 'habit-1',
+      'expected_occasion_at': encodeDateTime(DateTime.utc(2026, 3, 4)),
+      'scheduled_for': null,
+      'sent': sent ? 1 : 0,
+      'confirmed': confirmed ? 1 : 0,
+      'declined': 0,
+      'updated_at': encodeDateTime(updatedAt),
+    };
+
+    Future<Map<String, Object?>> storedNudge() async => (await database.query(
+      AppSchema.nudges,
+      where: 'id = ?',
+      whereArgs: <Object?>['nudge-1'],
+    )).single;
+
+    setUp(() async {
+      await insertLocalHabit(
+        id: 'habit-1',
+        updatedAt: clock.now,
+        pendingSync: 0,
+      );
+    });
+
+    test('a winning pull cannot roll one back', () async {
+      // The device knows the notification was queued. The server's copy is
+      // newer — another device wrote the user's answer — but predates the
+      // `sent` this device set.
+      await database.insert(
+        AppSchema.nudges,
+        toRow(nudgeRow(updatedAt: DateTime.utc(2026, 3, 4, 9), sent: true))
+          ..remove('user_id')
+          ..['pending_sync'] = 0,
+      );
+      remote.seed(
+        nudges,
+        nudgeRow(updatedAt: DateTime.utc(2026, 3, 4, 10), confirmed: true),
+      );
+
+      await drain.drain();
+
+      final stored = await storedNudge();
+      expect(
+        stored['sent'],
+        1,
+        reason:
+            'rolling `sent` back moves an occasion that WAS nudged into '
+            "autonomy's un-nudged denominator and depresses the graduation "
+            'gate — which is the write `_outcomeColumns` refuses locally',
+      );
+      expect(stored['confirmed'], 1, reason: 'and the answer still lands');
+    });
+
+    test('a losing pull still contributes the flag it carries', () async {
+      await database.insert(
+        AppSchema.nudges,
+        toRow(nudgeRow(updatedAt: DateTime.utc(2026, 3, 4, 11), sent: true))
+          ..remove('user_id')
+          ..['pending_sync'] = 0,
+      );
+      remote.seed(
+        nudges,
+        nudgeRow(updatedAt: DateTime.utc(2026, 3, 4, 10), confirmed: true),
+      );
+
+      await drain.drain();
+
+      final stored = await storedNudge();
+      expect(
+        stored['confirmed'],
+        1,
+        reason:
+            'losing the comparison says this version of the row is older, not '
+            'that the answer was never given',
+      );
+      expect(stored['sent'], 1);
+    });
+
+    test('and a stale push cannot clear one on the server', () async {
+      remote.seed(
+        nudges,
+        nudgeRow(updatedAt: DateTime.utc(2026, 3, 4, 12), confirmed: true),
+        syncedAt: DateTime.utc(2026, 3, 4, 12),
+      );
+      // This device never heard about the answer and is pending for its own
+      // reason. Its cursor is past the server's row, so the pull brings
+      // nothing.
+      await local.setCursor(nudges, DateTime.utc(2026, 3, 5));
+      await database.insert(
+        AppSchema.nudges,
+        toRow(nudgeRow(updatedAt: DateTime.utc(2026, 3, 4, 9), sent: true))
+          ..remove('user_id')
+          ..['pending_sync'] = 1,
+      );
+
+      await drain.drain();
+
+      expect(
+        remote.tables[AppSchema.nudges]!['nudge-1']!['confirmed'],
+        1,
+        reason:
+            'an unconditional ON CONFLICT DO UPDATE let a stale confirmed = 0 '
+            'win permanently: every device pulls it back, and the device that '
+            'holds the truth is no longer pending so it never re-pushes',
+      );
+      expect(remote.tables[AppSchema.nudges]!['nudge-1']!['sent'], 1);
     });
   });
 }

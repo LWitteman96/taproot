@@ -80,6 +80,39 @@ void main() {
       expect(pending.single['id'], 'habit-1');
     });
 
+    test('offers them oldest first, as it says it does', () async {
+      // Inserted newest-first, so rowid order — which is what SQLite returns
+      // without an ORDER BY — is the opposite of the documented one.
+      for (final (index, updatedAt) in <DateTime>[
+        DateTime.utc(2026, 3, 9),
+        DateTime.utc(2026, 3, 4),
+        DateTime.utc(2026, 3, 7),
+      ].indexed) {
+        await database.insert(
+          AppSchema.habits,
+          toRow(remoteHabit(id: 'habit-$index', updatedAt: updatedAt))
+            ..remove('user_id')
+            ..remove('synced_at')
+            ..['pending_sync'] = 1,
+        );
+      }
+
+      final pending = await store.pendingRows(habits);
+
+      expect(
+        pending.map((row) => row['updated_at']).toList(),
+        <String?>[
+          encodeDateTime(DateTime.utc(2026, 3, 4)),
+          encodeDateTime(DateTime.utc(2026, 3, 7)),
+          encodeDateTime(DateTime.utc(2026, 3, 9)),
+        ],
+        reason:
+            'the doc comment calls this oldest first, and a later reader '
+            'batching by age or reasoning about what a truncated push got '
+            'through would be building on a guarantee nothing kept',
+      );
+    });
+
     test('ignores rows that are already up', () async {
       await database.insert(
         AppSchema.habits,
