@@ -72,6 +72,8 @@ supabase/
   functions/  # Deno edge functions
 docs/         # The five specs
 scripts/      # coverage.sh, supabase-push.sh
+fern/         # Rive CLI project: generated plant art + animation. No Dart.
+              # Its own AGENTS.md and NOTES.md govern it; see docs/status.md.
 ```
 
 Each feature under `lib/features/<name>/` contains `pages/`, `providers/` or `controllers/`,

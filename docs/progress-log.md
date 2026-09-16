@@ -21,6 +21,94 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-16 — The fern: procedural plant art, animated in Rive
+
+Branch: `feature/rive_animations`. **No Dart changed.** This is a new top-level directory, `fern/`,
+holding a Rive CLI project and the Python that generates it. The three gates are untouched because
+nothing it contains is Dart.
+
+The garden has been "blocked on an external illustrator" since the design spec sent plant art out to
+a paid designer (§4) and `plant_choices.dart` was written as a deliberate placeholder. This branch
+tests a different answer for one of the six plants: **generate the art.**
+
+### What landed
+
+`fern/` builds one 109 KB `.riv` holding five artboards — `FernSprout`, `FernSeedling`, `FernYoung`,
+`FernMature`, `FernBloom` — the five growth stages the engine already computes. Each carries:
+
+- a **looping sway**, five seconds, every frond rotating a couple of degrees about the plant's base;
+- a **vitality droop**, bound to a `vitality` number (0–1) on a shared `Fern` view model: at 1 the
+  fronds stand upright in full colour, and as it falls they rotate outward and down while the
+  leaflet fills desaturate toward grey-green;
+- **sway amplitude that scales with vitality**, with a floor — a wilted plant moves less, never
+  freezes.
+
+Nothing is wired into the app. No `.riv` is in `pubspec.yaml`, no widget renders one, and nothing
+sets `vitality`. The garden still renders its plants as words.
+
+### The method, which is the point
+
+The fern is a first subject; the method is meant to carry to the other five plants, and to whatever
+else needs animating. `fern/NOTES.md` is the full write-up. In short:
+
+**One generator, two outputs, no hand-transcription.** `fern_generator.py` holds a small geometry
+model, and the SVG writer and the RML emitter are two readers over it. Neither format is the source
+of truth. This matters more than it sounds: Rive stores bezier handles as **polar offsets from the
+vertex**, where SVG writes absolute control points, so a hand conversion is both tedious and certain
+to drift. Where a format needed something the other lacked — SVG's elliptical arc caps — the
+*geometry* changed so both writers see the same points, rather than the emitter learning a special
+case.
+
+**Parameters derived from the art, not tuned per instance.** A frond's droop is
+`DROOP_MAX_DEGREES` scaled by how upright it already is, in the direction it already leans. That one
+rule produced all five stages without a table of hand-picked angles, including a stage-2 frond and
+three fiddleheads that exist in no layout table.
+
+**Declared, not inferred, where inference is fragile.** Above 80° from horizontal, which way a part
+leans is an accident of the art — the centre frond leans right by 36 px out of 743. So near-vertical
+parts must be declared in `DROOP_DIRECTION`, and the generator **raises** rather than falling back to
+a guess that would silently flip on a trivial edit.
+
+**One owner per animated property.** Each part is wrapped in two nested transform nodes, an outer one
+for the droop and an inner one for the sway. Two state machine layers then animate the same logical
+thing without either clobbering the other — had both keyed one node, the later layer would simply
+have won.
+
+**Verification by measurement, because clean builds prove almost nothing.** Demonstrated on this
+branch: `rive --verify` reports *0 errors, 0 warnings* on a data bind pointing at a view model that
+does not exist. `rive inspect` catches it. Neither catches a bind that resolves and drives nothing —
+for that you change the data and diff the render. So the branch carries `pngdiff.py`, a
+dependency-free PNG reader, and checks things like "the sway floor actually does something" by
+rebuilding with it at zero and confirming the plant freezes completely.
+
+The general shape: **assert on the built file, not the markup.** Every emitted vertex was
+reconstructed from the RML and compared against the model (max error 0.005 px); the loop seam was
+checked for exact equality rather than eyeballed; and when the mature stage was refactored to
+generalise across stages, the proof was that it rendered **byte-identical** to before.
+
+### What it leaves open
+
+- **Five of six plants.** Oak, lotus, sunflower, lavender and pine have no art. Whether the
+  generator approach suits a tree as well as a fern is untested — fronds are repetitive in a way
+  branches are not.
+- **The roots.** `docs/growth-engine.md` has root depth as a first-class derived value, and the
+  generator already emits root SVGs grouped one-per-primary for rigging, but no root artboard exists.
+- **Growth transitions.** Five separate artboards cannot animate *between* stages. If a plant should
+  be seen growing when it advances, that is a different structure and worth deciding before anything
+  depends on the current one.
+- **Whether procedural art is good enough.** This is the real open question and it is not a
+  technical one. The fern reads well in stills and motion, but six coherent species that look like
+  one garden is a different bar from one plant that looks right on its own.
+
+### Next
+
+Wiring one stage into the garden screen end to end — asset, widget, and the vitality the engine
+already computes — would answer more than another four plants would. It is also the first point at
+which `DataConverterInterpolator` earns its place: the chains already smooth a changed vitality over
+0.6s, so a completion tap should ease the fern upright rather than snapping it.
+
+---
+
 ## 2026-09-16 — Sync review fixes
 
 Branch: `feature/supabase-sync`. Cross-review of PR #8 by another session; this entry records what

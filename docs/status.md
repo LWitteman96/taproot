@@ -26,7 +26,7 @@ Update this file in the same commit as the work it describes.
 | **Supabase sync** (`lib/app/sync/`) | **Built — connectivity trigger, paged pull with an overlap cursor, push, last-write-wins** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
 | **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule** |
-| Garden rendering | Not started (blocked on external illustrator) |
+| Garden rendering | **Plant art + animation built for one of six plants** (`fern/`, a Rive project — five stages, vitality-driven); nothing wired into Flutter |
 | Insight surfacing | Not started |
 
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
@@ -34,15 +34,23 @@ tap → Supabase sync → notifications and the nudge ledger → reflection chec
 The first four are done, and four stages have landed on top of them: habit creation — a prerequisite
 the build order does not name, since every stage after it needs habits a user actually made — plus
 notifications, the reflection check-in and Supabase sync. That completes the build order up to its
-last two entries, so what remains is **garden rendering**, which is blocked on the external
-illustrator, and **insight surfacing**, which now has reflection data to surface. Two follow-ups sit
-alongside them: the notification-permission invitation and the check-in composer seam below.
+last two entries, so what remains is **garden rendering**, now half-unblocked — see below — and
+**insight surfacing**, which now has reflection data to surface. Two follow-ups sit alongside them:
+the notification-permission invitation and the check-in composer seam below.
 
 What is deliberately *not* built yet: Sentry is still uninitialised, no remote Supabase project is
 provisioned — `.env.dev` points at the local stack and stg and prod are placeholders, so those two
 flavors start without a backend and say so as `SyncStatus.unavailable` — nothing signs a user in, so
-sync has nobody to sync for, and the garden renders its plants as words rather than art, which is
-waiting on the external illustrator.
+sync has nobody to sync for, and the garden still renders its plants as words rather than art.
+
+**The plant art is no longer entirely blocked on the external illustrator.** `fern/` is a Rive CLI
+project that *generates* a fern from Python — five stage artboards, a looping sway, and a droop and
+colour fade bound to a `vitality` number the engine already computes. It is one of the six plants in
+`plant_choices.dart`, and **none of it is wired into the app**: no `.riv` in `pubspec.yaml`, no
+widget, nothing setting `vitality`. The roots have no artboard, and five species have no art. Two
+questions are open and neither is technical — whether the same approach suits a tree as well as a
+fern, and whether six procedurally generated species can look like one garden. The method and its
+findings are in `fern/NOTES.md`; the decisions are in the progress log.
 
 The router's gate is no longer stubbed — it reads the habit count, so a user with nothing planted is
 sent to plant something and only then gets a garden. The debug-only dev-flavor seed button that used
