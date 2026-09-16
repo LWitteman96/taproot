@@ -26,7 +26,7 @@ Update this file in the same commit as the work it describes.
 | **Supabase sync** (`lib/app/sync/`) | **Built — connectivity trigger, paged pull with an overlap cursor, push, last-write-wins** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
 | **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule** |
-| Garden rendering | **Plant art + animation built for one of six plants** (`fern/`, a Rive project — five stages, vitality-driven); nothing wired into Flutter |
+| **Garden home screen** (`lib/features/garden/`) | **Built — one garden scene: sky, ground, scrolling plants, selection, detail card, and the fern art in its slots. Roots, the watering choreography and time-of-day are not wired yet** |
 | Insight surfacing | Not started |
 
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
@@ -34,7 +34,7 @@ tap → Supabase sync → notifications and the nudge ledger → reflection chec
 The first four are done, and four stages have landed on top of them: habit creation — a prerequisite
 the build order does not name, since every stage after it needs habits a user actually made — plus
 notifications, the reflection check-in and Supabase sync. That completes the build order up to its
-last two entries, so what remains is **garden rendering**, now half-unblocked — see below — and
+last two entries, so what remains is **garden rendering**, now largely built — see below — and
 **insight surfacing**, which now has reflection data to surface. Two follow-ups sit alongside them:
 the notification-permission invitation and the check-in composer seam below.
 
@@ -43,14 +43,26 @@ provisioned — `.env.dev` points at the local stack and stg and prod are placeh
 flavors start without a backend and say so as `SyncStatus.unavailable` — nothing signs a user in, so
 sync has nobody to sync for, and the garden still renders its plants as words rather than art.
 
-**The plant art is no longer entirely blocked on the external illustrator.** `fern/` is a Rive CLI
-project that *generates* a fern from Python — five stage artboards, a looping sway, and a droop and
-colour fade bound to a `vitality` number the engine already computes. It is one of the six plants in
-`plant_choices.dart`, and **none of it is wired into the app**: no `.riv` in `pubspec.yaml`, no
-widget, nothing setting `vitality`. The roots have no artboard, and five species have no art. Two
-questions are open and neither is technical — whether the same approach suits a tree as well as a
-fern, and whether six procedurally generated species can look like one garden. The method and its
-findings are in `fern/NOTES.md`; the decisions are in the progress log.
+**The garden is drawn.** The home screen is no longer a list of cards: it is one vertical
+cross-section — sky, a ground line, soil — with every habit standing on the same ground at one world
+scale, a floating detail card, and a horizontal scroll. `docs/garden-design.md` governs it, and
+build steps 1–3 of its §10 have landed.
+
+**The plant art is no longer blocked on the external illustrator, for one plant.** `fern/` is a Rive
+CLI project that *generates* a fern from Python — six stage artboards plus `FernRoots`, a looping
+sway, and a droop, colour fade and root-depth lean bound to the `vitality` and `roots` numbers the
+engine already computes. `assets/rive/fern.riv` ships with the app and the stage art is live in the
+garden, driven by vitality.
+
+What is **not** wired yet, from garden-design §10: **roots** (step 4 — `FernRoots` and the shared
+`ViewModelInstance` the stacking needs), **the watering choreography** (step 5 — the drop, the
+damp patch, the ripple, the landing-time vitality write), **time of day** (step 6 — the modes
+cross-fade but nothing re-checks the hour, and there is no plant-light filter), and the **art pass**
+in `fern/` (step 7 — outline widths and root recolour for the 0.15 scale).
+
+Five of six species still have no art and render as placeholder silhouettes. Two questions are open
+and neither is technical — whether the generator approach suits a tree as well as a fern, and
+whether six generated species can look like one garden. The method is in `fern/NOTES.md`.
 
 The router's gate is no longer stubbed — it reads the habit count, so a user with nothing planted is
 sent to plant something and only then gets a garden. The debug-only dev-flavor seed button that used

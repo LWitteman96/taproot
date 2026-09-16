@@ -21,6 +21,88 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-16 — The garden home screen, and the fern standing in it
+
+Branch: `feature/rive_animations`. `docs/garden-design.md` arrived and now governs this screen; it
+is in the spec table. Build steps 1–3 of its §10 landed, plus the Rive runtime underneath them.
+
+### What the home screen is now
+
+A list of cards became **one garden**: a vertical cross-section with sky above a ground line and
+soil below, every habit standing on the same ground at one world scale, a floating detail card for
+the selected plant, and a horizontal scroll. The greeting replaced the "Taproot" title, the empty
+plot replaced the floating action button, and the undo moved out of a snack bar onto the card.
+
+`PlantCard` is gone. Its semantic label — the whole plant in one sentence — moved onto the plant
+itself, which is where it belonged: the picture is now the thing a screen reader cannot see.
+
+### Rive, and the two things that had never been tested
+
+Nothing had ever loaded a CLI-built `.riv` into the Flutter runtime, and the file uses view-model
+data binding, which is the newest part of the format. It works. Two things only running it revealed:
+
+- **`rive_native` needs a platform library `pub get` does not fetch.** Without
+  `dart run rive_native:setup` every Rive test dies on a `dlopen` failure. That is a new CI step.
+- **`Factory.rive` aborts the process under `flutter test`** — it wants a graphics context, and the
+  failure is a `SIGABRT` rather than an exception. `Factory.flutter` works headless.
+
+`assets/rive/fern.riv` is committed rather than built in CI, because a build step would need the
+Rive CLI and its auth inside the pipeline. That means a copy step after every generator change,
+which is now written down in `fern/NOTES.md` rather than living in commit messages.
+
+### What the build decided
+
+**Scene colours are generated from the handoff's `tokens.json`,** not typed. Forty-six colours is
+too many to hand-copy without drift; oklch stays in the doc comments as the canonical source.
+
+**The ground line is a function of the viewport, not the reference frame,** and on a short screen it
+moves *up* rather than letting the detail card cover a plant's roots.
+
+**The hit target is the 128pt column, not the plant.** A seed is 11pt wide. The column already
+reserves the depth the roots will occupy, so the target will not move when they arrive.
+
+**Selection is a glow on the ground, not a ring on the plant.** The art deliberately overflows its
+slot, so there is no box to ring — and the ground is where every plant agrees on a position.
+
+**The art is anchored on canvas y = 900, not on the canvas bottom.** The plant stands there, so the
+artboard's top goes 135pt above the ground line and the remaining 18.6pt hangs below it under the
+soil. Anchoring on the bottom floats every plant off the ground.
+
+**Where the prototype and the art disagreed, garden-design §9 decided, and this followed it**: the
+plant's droop, lean and sway are all in the Rive file, and Flutter never rotates, scales or tints a
+plant to express state. It places plants and writes numbers.
+
+### What the device caught that the tests could not
+
+Worth recording because it is the argument for the screenshot step:
+
+- the ground has to be at least as wide as the viewport, or the world runs out of floor;
+- `Alignment` distributes *slack* around a child rather than placing its centre, so the sun landed
+  well short of its fraction and collided with the greeting;
+- a caption under a placeholder lifts the plant off the ground line, so the caption became a
+  separate widget the slot places below the grass.
+
+### What it leaves open
+
+The rest of garden-design §10: **roots** (step 4), the **watering choreography** (step 5), **time of
+day** (step 6) and the **art pass** for the 0.15 scale (step 7). `roots` is verified end to end —
+including that one `ViewModelInstance` shared by the plant and its roots is what the composition
+needs, since a bind inside a `NestedArtboard` silently resolves to nothing — but nothing writes it
+yet, so it reads 0 in the app.
+
+Two calibration questions are implemented at their defaults and named rather than settled: the
+world scale of 0.15 and the 128pt pitch come from a 402pt mock-up and are unchecked on the smallest
+phone or a tablet; and `AppMotion.stageAdvanceDuration` is 700ms because a dissolve between two
+silhouettes reads as a glitch at 240ms, but the specs do not say what an earned stage advance should
+feel like.
+
+### Next
+
+Step 4: `FernRoots` under each fern slot on one shared `ViewModelInstance`, and `roots` written from
+the engine.
+
+---
+
 ## 2026-09-16 — The fern: procedural plant art, animated in Rive
 
 Branch: `feature/rive_animations`. **No Dart changed.** This is a new top-level directory, `fern/`,
