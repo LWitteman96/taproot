@@ -68,12 +68,36 @@ jobs:
       #
       # `.gitattributes` fixes how such a file *displays*; only this stops one
       # being committed.
+      # Same argument as the secret scan's self-test: show the check can fail
+      # before trusting it when it passes. A gate that has never been seen to
+      # catch anything is a statement of belief.
+      - name: Check the text gate can detect a binary file
+        run: |
+          scratch="$(mktemp -d)"
+          printf 'a\000b' > "$scratch/planted.dart"
+          printf 'plain text\n' > "$scratch/clean.dart"
+          if LC_ALL=C tr -d '\000' < "$scratch/planted.dart" | cmp -s - "$scratch/planted.dart"; then
+            echo "::error::The text gate does not detect a NUL byte. It would pass every file regardless."
+            exit 1
+          fi
+          if ! LC_ALL=C tr -d '\000' < "$scratch/clean.dart" | cmp -s - "$scratch/clean.dart"; then
+            echo "::error::The text gate flags a plain text file. It would fail every build."
+            exit 1
+          fi
+          rm -rf "$scratch"
+          echo "The text gate detects a NUL byte and leaves text alone."
+
+      # `LC_ALL=C` so `tr` treats bytes as bytes. Without it, BSD `tr` aborts
+      # with "Illegal byte sequence" on content that is not valid UTF-8 — which
+      # is most binary files, and is what the pre-commit hook meets on macOS.
+      # The check still reached the right answer through the error, by accident
+      # rather than by design.
       - name: Fail if a source file is not text
         run: |
           offenders=""
           for f in $(git ls-files -- lib test); do
             [ -f "$f" ] || continue
-            if ! tr -d '\000' < "$f" | cmp -s - "$f"; then
+            if ! LC_ALL=C tr -d '\000' < "$f" | cmp -s - "$f"; then
               offenders="$offenders $f"
             fi
           done
@@ -87,6 +111,12 @@ jobs:
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest
+
+    # Defined once, at job level, so the self-test below and the scan itself
+    # cannot drift apart. A self-test with its own copy of the pattern proves
+    # only that the copy works.
+    env:
+      CREDENTIAL_PATTERN: 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|sk-[A-Za-z0-9]{32,}'
 
     steps:
       - name: Checkout code
@@ -109,10 +139,67 @@ jobs:
           fi
           echo "No credential files tracked."
 
+      # Proves the scan can do the thing it exists to do, before trusting it to
+      # say the repository is clean.
+      #
+      # This is not ceremony. Until this commit the scan below carried `-I`,
+      # which skips binary files, so a credential committed inside any blob git
+      # classifies as binary was invisible to it — on a public repository, where
+      # a secret committed once is compromised even after it is removed. It had
+      # been that way since the job was written and nothing could have told us,
+      # because a scan that finds nothing looks identical whether it is clean or
+      # blind.
+      #
+      # The locale line is the other half, and it is the half that reasoning
+      # alone does not reach. Dropping `-I` is not enough: under a UTF-8 locale
+      # the regex engine gives up on content containing invalid UTF-8 — a PNG
+      # header is 0x89 'PNG', which is not valid UTF-8 — so the pattern never
+      # matches however the binary flags are set. Measured, on the real pattern:
+      #
+      #     git grep -nIE  → missed        LC_ALL=C           → found
+      #     git grep -nE   → missed        LC_ALL=C.UTF-8     → missed
+      #     git grep -naE  → missed        LC_ALL=en_US.UTF-8 → missed
+      #
+      # A fixed-string search found it every time, which is what made the regex
+      # the suspect. `LC_ALL=C` makes the engine compare bytes as bytes; the
+      # patterns are all ASCII, so nothing is lost by it.
+      - name: Check the scan can see inside a binary file
+        run: |
+          scratch="$(mktemp -d)"
+          git init -q "$scratch"
+          # A PNG header with a fake AWS key id planted after a NUL.
+          #
+          # The 0xFF 0xFE **on the same line as the credential** is load-bearing
+          # and was missing from the first version of this step. git grep splits
+          # on newlines first, and the PNG's own CRLF pushes the credential onto
+          # a later line — so a plant whose bytes are all valid UTF-8 from that
+          # newline onward matches under every locale, and the step would go
+          # green with LC_ALL=C removed. An invalid byte anywhere on the line
+          # breaks matching for the whole line, which is what this has to
+          # reproduce. Verified: this plant is found by the invocation below,
+          # and missed both with `-I` restored and under LC_ALL=C.UTF-8.
+          printf '\211PNG\015\012\032\012\000\000\000\015IHDR\377\376\000AKIAABCDEFGHIJKLMNOP\000\000' \
+            > "$scratch/planted.png"
+          git -C "$scratch" add -A
+          git -C "$scratch" -c user.email=ci@example.invalid -c user.name=ci \
+            commit -qm planted
+          if LC_ALL=C git -C "$scratch" grep -nE "$CREDENTIAL_PATTERN" -- . >/dev/null; then
+            echo "The scan sees credentials inside binary files."
+          else
+            echo "::error::The secret scan cannot see inside binary files. It would report this repository clean without having looked at every blob. Check the -I flag and LC_ALL on the step below."
+            exit 1
+          fi
+          rm -rf "$scratch"
+
+      # No `-I`, so binary blobs are searched too, and `LC_ALL=C` so the regex
+      # actually matches inside them. Verified in both directions: the step
+      # above proves it catches a planted credential, and this one is known to
+      # produce no false positives across this repository's ~70 tracked binaries
+      # (the app-icon PNGs). One scan rather than a separate binary sweep —
+      # fewer moving parts to keep correct.
       - name: Fail if a credential-shaped string is committed
         run: |
-          if git grep -nIE \
-              'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|sk-[A-Za-z0-9]{32,}' \
+          if LC_ALL=C git grep -nE "$CREDENTIAL_PATTERN" \
               -- . ':(exclude)pubspec.lock' ':(exclude).github/workflows/*'; then
             echo "::error::A credential-shaped string is committed. Rotate it, then remove it."
             exit 1
