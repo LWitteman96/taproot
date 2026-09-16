@@ -98,7 +98,9 @@ void main() {
       final harness = _Harness();
       final habit = testHabit(id: 'a', name: 'Morning run');
       await harness.store.saveHabit(habit);
-      await tester.pumpWidget(harness.app(checkIn: harness.offerFor(habit)));
+      await tester.pumpWidget(
+        harness.app(showCheckIn: true, checkIn: harness.offerFor(habit)),
+      );
       await tester.pumpAndSettle();
 
       expect(find.byType(CheckInSheet), findsOneWidget);
@@ -113,7 +115,9 @@ void main() {
       final harness = _Harness();
       final habit = testHabit(id: 'a', name: 'Morning run');
       await harness.store.saveHabit(habit);
-      await tester.pumpWidget(harness.app(checkIn: harness.offerFor(habit)));
+      await tester.pumpWidget(
+        harness.app(showCheckIn: true, checkIn: harness.offerFor(habit)),
+      );
       await tester.pumpAndSettle();
 
       expect(find.text(CheckInSheet.title), findsOneWidget);
@@ -163,7 +167,10 @@ class _Harness {
     isFirstReflection: true,
   );
 
-  Widget app({CheckInOffer? checkIn}) => ProviderScope(
+  Widget app({
+    bool showCheckIn = false,
+    CheckInOffer? checkIn,
+  }) => ProviderScope(
     overrides: [
       habitServiceProvider.overrideWithValue(store),
       completionServiceProvider.overrideWithValue(completions),
@@ -177,7 +184,9 @@ class _Harness {
       riveFernFileProvider.overrideWith((ref) async => null),
       gardenTickerProvider.overrideWith(_StillTicker.new),
     ],
-    child: MaterialApp(home: GardenPage(checkIn: checkIn)),
+    child: MaterialApp(
+      home: GardenPage(showCheckIn: showCheckIn, checkIn: checkIn),
+    ),
   );
 }
 

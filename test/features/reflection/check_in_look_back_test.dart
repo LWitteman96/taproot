@@ -9,12 +9,15 @@ import 'package:taproot/core/models/habit_category.dart';
 import 'package:taproot/core/models/nudge.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
-import 'package:taproot/features/reflection/pages/check_in_page.dart';
+import 'package:taproot/features/garden/domain/garden_ticker.dart';
+import 'package:taproot/features/garden/pages/garden_page.dart';
+import 'package:taproot/features/garden/providers/plant_art_providers.dart';
 import 'package:taproot/core/models/reflection.dart';
 import 'package:taproot/features/reflection/domain/reflection_repository.dart';
 import 'package:taproot/features/reflection/providers/reflection_providers.dart';
-import 'package:taproot/features/reflection/widgets/cue_answers.dart';
-import 'package:taproot/features/reflection/widgets/friction_answers.dart';
+import 'package:taproot/features/reflection/widgets/check_in_chip.dart';
+import 'package:taproot/features/reflection/widgets/check_in_look_back.dart';
+import 'package:taproot/features/reflection/widgets/check_in_sheet_host.dart';
 
 import '../../utils/fake_repositories.dart';
 import '../../utils/store_contract.dart';
@@ -48,8 +51,14 @@ void main() {
           nudgeServiceProvider.overrideWithValue(store.nudges),
           clockProvider.overrideWithValue(() => clock.now),
           newIdProvider.overrideWithValue(newId ?? () => 'reflection-1'),
+          // The check-in is a sheet on the garden now, so these pump the
+          // garden. No plant art: the sheet is what is under test, and
+          // loading the native library would make every one of these depend on
+          // a setup step outside `flutter pub get`.
+          riveFernFileProvider.overrideWith((ref) async => null),
+          gardenTickerProvider.overrideWith(_StillTicker.new),
         ],
-        child: const MaterialApp(home: CheckInPage()),
+        child: const MaterialApp(home: GardenPage(showCheckIn: true)),
       ),
     );
     await tester.pumpAndSettle();
@@ -77,46 +86,73 @@ void main() {
     );
   }
 
+  /// The chip carrying [label], whatever state it is in.
+  Finder chip(String label) => find.widgetWithText(CheckInChip, label);
+  Finder link(String label) => find.widgetWithText(CheckInFooterLink, label);
+
   testWidgets('says so calmly when there is nothing to ask', (tester) async {
     // Most days there is no check-in, and that is the design rather than a
     // failure to find one.
     await pumpCheckIn(tester);
 
-    expect(find.text(CheckInPage.nothingHeadline), findsOneWidget);
-    expect(find.byType(CueAnswers), findsNothing);
+    expect(find.text(CheckInSheetHost.nothingHeadline), findsOneWidget);
+    expect(find.byType(CheckInChip), findsNothing);
   });
 
-  testWidgets('asks about the cue, with the designed one pinned first', (
+  testWidgets('validation asks yes or no before it asks anything else', (
+    tester,
+  ) async {
+    // reflection-logic §3 wants the designed cue *tested*, which is a yes/no
+    // question. Showing the full chip list immediately — which is what the
+    // page used to do — makes a Validation indistinguishable from a Discovery.
+    await plantAndWater();
+    await pumpCheckIn(tester);
+
+    expect(find.text('Did after breakfast kick it off?'), findsOneWidget);
+    expect(chip(CheckInLookBack.yesLabel), findsOneWidget);
+    expect(chip(CheckInLookBack.validationNoLabel), findsOneWidget);
+    // Not yet: `Something else` and `Can't remember` answer an open question,
+    // and there is not one on screen.
+    expect(link(CheckInLookBack.somethingElseLabel), findsNothing);
+    expect(link(CheckInLookBack.cantRememberLabel), findsNothing);
+    // The way out is always available.
+    expect(link(CheckInLookBack.skipLabel), findsOneWidget);
+  });
+
+  testWidgets('yes answers with the designed cue, and counts as a match', (
     tester,
   ) async {
     await plantAndWater();
     await pumpCheckIn(tester);
 
-    expect(find.text('Did after breakfast kick it off?'), findsOneWidget);
-    expect(find.byType(CueAnswers), findsOneWidget);
-    expect(find.widgetWithText(ActionChip, 'after breakfast'), findsOneWidget);
-    expect(
-      find.widgetWithText(ActionChip, CueAnswers.cantRememberLabel),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('a tapped chip is written down and acknowledged', (tester) async {
-    await plantAndWater();
-    await pumpCheckIn(tester);
-
-    await tester.tap(find.widgetWithText(ActionChip, 'after breakfast'));
+    await tester.tap(chip(CheckInLookBack.yesLabel));
     await tester.pumpAndSettle();
 
     final saved = (await store.reflections.reflectionsFor('habit-1')).single;
-    expect(saved.inputMode, InputMode.chip);
     expect(saved.cueReported, 'after breakfast');
-    expect(saved.cueType, CueType.event);
     expect(saved.framing, Framing.validation);
-    // The designed cue was the answer, which is what cue reliability counts.
+    // Which is what cue reliability counts.
     expect(saved.matchedDesignedCue, isTrue);
+  });
 
-    expect(find.text(CheckInPage.doneHeadline), findsOneWidget);
+  testWidgets('no opens the list, without the cue that was just ruled out', (
+    tester,
+  ) async {
+    await plantAndWater();
+    await pumpCheckIn(tester);
+
+    await tester.tap(chip(CheckInLookBack.validationNoLabel));
+    await tester.pumpAndSettle();
+
+    expect(find.text('What got you going, then?'), findsOneWidget);
+    // The user has just said it was not that, so offering it back would be
+    // the app not listening.
+    expect(chip('after breakfast'), findsNothing);
+    // And "No, something else" was not itself an answer.
+    expect(await store.reflections.reflectionsFor('habit-1'), isEmpty);
+    // The open question brings its footer with it.
+    expect(link(CheckInLookBack.somethingElseLabel), findsOneWidget);
+    expect(link(CheckInLookBack.cantRememberLabel), findsOneWidget);
   });
 
   testWidgets("can't remember is recorded, not discarded", (tester) async {
@@ -124,10 +160,10 @@ void main() {
     // on autopilot without awareness.
     await plantAndWater();
     await pumpCheckIn(tester);
+    await tester.tap(chip(CheckInLookBack.validationNoLabel));
+    await tester.pumpAndSettle();
 
-    await tester.tap(
-      find.widgetWithText(ActionChip, CueAnswers.cantRememberLabel),
-    );
+    await tester.tap(link(CheckInLookBack.cantRememberLabel));
     await tester.pumpAndSettle();
 
     final saved = (await store.reflections.reflectionsFor('habit-1')).single;
@@ -138,22 +174,22 @@ void main() {
   testWidgets('typing is available, but it is not the default', (tester) async {
     await plantAndWater();
     await pumpCheckIn(tester);
+    await tester.tap(chip(CheckInLookBack.validationNoLabel));
+    await tester.pumpAndSettle();
 
     // No field until it is asked for.
     expect(find.byType(TextField), findsNothing);
 
-    await tester.tap(
-      find.widgetWithText(ActionChip, CueAnswers.somethingElseLabel),
-    );
+    await tester.tap(link(CheckInLookBack.somethingElseLabel));
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), 'the dog woke me');
     await tester.pumpAndSettle();
 
-    final submit = find.widgetWithText(FilledButton, CueAnswers.submitLabel);
-    await tester.ensureVisible(submit);
+    final save = find.widgetWithText(FilledButton, CheckInLookBack.saveLabel);
+    await tester.ensureVisible(save);
     await tester.pumpAndSettle();
-    await tester.tap(submit);
+    await tester.tap(save);
     await tester.pumpAndSettle();
 
     final saved = (await store.reflections.reflectionsFor('habit-1')).single;
@@ -184,12 +220,15 @@ void main() {
     );
     await pumpCheckIn(tester);
 
-    expect(find.byType(FrictionAnswers), findsOneWidget);
-    expect(find.byType(CueAnswers), findsNothing);
     expect(find.textContaining('What got in the way?'), findsOneWidget);
+    // States the absence, never the person.
     expect(find.textContaining('missed'), findsNothing);
+    expect(find.textContaining('No morning run'), findsOneWidget);
+    // Diagnosis never offers `Can't remember`: "I don't know why I didn't" is
+    // not evidence of autopilot, it is just a shrug.
+    expect(link(CheckInLookBack.cantRememberLabel), findsNothing);
 
-    await tester.tap(find.widgetWithText(ActionChip, 'just forgot'));
+    await tester.tap(chip('just forgot'));
     await tester.pumpAndSettle();
 
     final saved = (await store.reflections.reflectionsFor('habit-1')).single;
@@ -203,7 +242,7 @@ void main() {
     await plantAndWater();
     await pumpCheckIn(tester);
 
-    await tester.tap(find.widgetWithText(TextButton, CheckInPage.skipLabel));
+    await tester.tap(link(CheckInLookBack.skipLabel));
     await tester.pumpAndSettle();
 
     final saved = (await store.reflections.reflectionsFor('habit-1')).single;
@@ -228,18 +267,16 @@ void main() {
       newId: () => 'reflection-${++ids}',
     );
 
-    await tester.tap(find.widgetWithText(ActionChip, 'after breakfast'));
+    await tester.tap(chip(CheckInLookBack.yesLabel));
     await tester.pumpAndSettle();
 
     // The first attempt wrote the row and then threw on the way out, so the
-    // screen is back on the question with the chips live again.
-    expect(find.text(CheckInPage.doneHeadline), findsNothing);
-    expect(find.byType(CueAnswers), findsOneWidget);
+    // sheet is back on the question with the chips live again.
+    expect(chip(CheckInLookBack.yesLabel), findsOneWidget);
 
-    await tester.tap(find.widgetWithText(ActionChip, 'after breakfast'));
+    await tester.tap(chip(CheckInLookBack.yesLabel));
     await tester.pumpAndSettle();
 
-    expect(find.text(CheckInPage.doneHeadline), findsOneWidget);
     final saved = await store.reflections.reflectionsFor('habit-1');
     expect(saved, hasLength(1));
     expect(ids, 1, reason: 'the id is minted once per offer, not per attempt');
@@ -272,4 +309,9 @@ class _FlakyReflections implements ReflectionRepository {
   @override
   Future<List<Reflection>> recentReflections(String habitId, {int limit = 8}) =>
       _inner.recentReflections(habitId, limit: limit);
+}
+
+class _StillTicker extends GardenTickerController {
+  @override
+  GardenTicker build() => GardenTicker.still;
 }

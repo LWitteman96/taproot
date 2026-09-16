@@ -22,6 +22,7 @@ import 'package:taproot/features/garden/widgets/plant_art_view.dart';
 import 'package:taproot/features/garden/widgets/plant_detail_card.dart';
 import 'package:taproot/features/garden/widgets/plant_silhouette.dart';
 import 'package:taproot/features/habits/domain/plant_choices.dart';
+import 'package:taproot/features/reflection/controllers/check_in_controller.dart';
 import 'package:taproot/features/reflection/providers/reflection_providers.dart';
 import 'package:taproot/features/reflection/services/check_in_assembler.dart';
 import 'package:taproot/features/reflection/widgets/check_in_sheet.dart';
@@ -37,14 +38,18 @@ import 'package:taproot/features/reflection/widgets/check_in_sheet_host.dart';
 /// *"here's what you still owe."* Hence a greeting rather than a title, a
 /// status line rather than a count, and no red anywhere.
 class GardenPage extends ConsumerWidget {
-  const GardenPage({this.checkIn, super.key});
+  const GardenPage({this.showCheckIn = false, this.checkIn, super.key});
 
-  /// The offer to open the check-in sheet with, when the screen was reached
-  /// through `/check-in` or the garden's own Reflect button.
+  /// Whether the check-in sheet is up.
   ///
   /// The sheet lives on this screen rather than on its own, because the roots
   /// growing behind it *is* the payoff (check-in-design §1). A route that
   /// replaced the garden would have nothing to grow.
+  final bool showCheckIn;
+
+  /// The offer the garden already assembled, when there is one. A deep link
+  /// arrives without it and the sheet assembles from scratch, which is why
+  /// this is separate from [showCheckIn] rather than doubling as it.
   final CheckInOffer? checkIn;
 
   static const String emptyHeadline = 'Nothing planted yet';
@@ -90,8 +95,17 @@ class GardenPage extends ConsumerWidget {
     final selectedId = ref.watch(selectedHabitIdProvider);
 
     // Opening the sheet selects the reflected plant, and closing leaves it
-    // selected (check-in-design §8).
-    final reflectingId = checkIn?.habit.id;
+    // selected (check-in-design §8). The offer the controller settled on wins
+    // over the one handed in: a deep link arrives without one, and a
+    // re-verification can land on a different habit than the garden guessed.
+    final reflectingId = !showCheckIn
+        ? null
+        : (ref.watch(
+                    checkInControllerProvider.select((state) => state.offer),
+                  ) ??
+                  checkIn)
+              ?.habit
+              .id;
     final reflectingIndex = reflectingId == null
         ? -1
         : habitIds.indexOf(reflectingId);
@@ -137,7 +151,7 @@ class GardenPage extends ConsumerWidget {
               // worse. It is also absent behind the sheet, which is not a
               // moment for starting something new.
               showPlot:
-                  checkIn == null &&
+                  !showCheckIn &&
                   (state == _GardenViewState.planted ||
                       state == _GardenViewState.empty),
             ),
@@ -146,8 +160,7 @@ class GardenPage extends ConsumerWidget {
             header: SafeArea(
               bottom: false,
               child: GardenHeader(
-                checkInChip:
-                    checkIn == null && state == _GardenViewState.planted
+                checkInChip: !showCheckIn && state == _GardenViewState.planted
                     ? const _CheckInInvitation()
                     : null,
               ),
@@ -156,7 +169,7 @@ class GardenPage extends ConsumerWidget {
               // No card while loading: the scene with nothing on it is the
               // loading state, and a card outline with no content in it reads
               // as a plant that failed rather than as one that has not arrived.
-              _ when checkIn != null => null,
+              _ when showCheckIn => null,
               _GardenViewState.loading => null,
               _GardenViewState.unreadable => const _UnreadableGarden(),
               _GardenViewState.empty => const _EmptyGarden(),
@@ -165,9 +178,9 @@ class GardenPage extends ConsumerWidget {
                     ? null
                     : _SelectedPlantCard(habitId: selectedId, ticker: ticker),
             },
-            sheet: checkIn == null
+            sheet: !showCheckIn
                 ? null
-                : CheckInSheetHost(offered: checkIn!, ticker: ticker),
+                : CheckInSheetHost(offered: checkIn, ticker: ticker),
           ),
         ),
       ),

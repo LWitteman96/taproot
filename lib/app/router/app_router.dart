@@ -129,8 +129,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         // growing behind the sheet are the payoff (check-in-design §1), so a
         // route that replaced the garden would have nothing to grow. The deep
         // link keeps working; what it opens changed.
-        builder: (context, state) =>
-            GardenPage(checkIn: state.extra as CheckInOffer?),
+        builder: (context, state) => GardenPage(
+          showCheckIn: true,
+          checkIn: state.extra as CheckInOffer?,
+        ),
       ),
     ],
   );

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
 import 'package:taproot/features/reflection/controllers/check_in_controller.dart';
 import 'package:taproot/features/reflection/services/check_in_assembler.dart';
+import 'package:taproot/features/reflection/widgets/check_in_look_back.dart';
 import 'package:taproot/features/reflection/widgets/check_in_sheet.dart';
 
 /// The check-in sheet, and the state that decides what is inside it.
@@ -19,10 +20,14 @@ class CheckInSheetHost extends ConsumerStatefulWidget {
     super.key,
   });
 
-  /// The offer the garden already assembled. It is re-verified rather than
-  /// trusted — a notification answer can land in between — but re-verifying one
-  /// habit is a fraction of electing a winner among all of them again.
-  final CheckInOffer offered;
+  /// The offer the garden already assembled, when there is one. It is
+  /// re-verified rather than trusted — a notification answer can land in
+  /// between — but re-verifying one habit is a fraction of electing a winner
+  /// among all of them again.
+  ///
+  /// Null on a deep link or a cold start on `/check-in`, and then the whole
+  /// assembly runs.
+  final CheckInOffer? offered;
 
   final GardenTicker ticker;
 
@@ -48,7 +53,12 @@ class CheckInSheetHost extends ConsumerStatefulWidget {
   ConsumerState<CheckInSheetHost> createState() => _CheckInSheetHostState();
 }
 
+/// Which part of the check-in is on screen.
+enum _SheetStep { lookBack, commit, done }
+
 class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
+  _SheetStep _step = _SheetStep.lookBack;
+
   @override
   void initState() {
     super.initState();
@@ -64,6 +74,11 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
   }
 
   void _close() {
+    // `maybeOf`, because the sheet is a widget and not a route: it is built
+    // inside the garden, and a test — or a future caller — can mount it
+    // without a router above it. Closing is then simply not a thing it can do.
+    final router = GoRouter.maybeOf(context);
+    if (router == null) return;
     if (context.canPop()) {
       context.pop();
     } else {
@@ -79,12 +94,10 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
     // garden handed over until then — so the sheet never flashes empty.
     final offer = state.offer ?? widget.offered;
 
+    // Status first, offer second. "Nothing to ask" and "failed" have no offer
+    // by definition, and reading the offer first put a spinner on both of them
+    // that could never resolve.
     final child = switch (state.status) {
-      // No loading state on the happy path: the garden already assembled this
-      // offer, so there is something to ask before the re-verification returns.
-      CheckInStatus.looking ||
-      CheckInStatus.asking ||
-      CheckInStatus.answered => _Placeholder(offer: offer),
       CheckInStatus.nothingToAsk => CheckInMessage(
         headline: CheckInSheetHost.nothingHeadline,
         body: CheckInSheetHost.nothingBody,
@@ -99,23 +112,37 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
             .read(checkInControllerProvider.notifier)
             .load(offered: widget.offered),
       ),
+      // Only reachable on a deep link, before the assembly returns: with an
+      // offer in hand there is something to ask straight away.
+      CheckInStatus.looking when offer == null => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      CheckInStatus.looking ||
+      CheckInStatus.asking ||
+      CheckInStatus.answered => switch (_step) {
+        _SheetStep.lookBack => CheckInLookBack(
+          offer: offer!,
+          ticker: widget.ticker,
+          onAnswered: () => setState(() => _step = _SheetStep.commit),
+          // Closing *is* the acknowledgement for a skip: there is no step 2
+          // and no done state to show (check-in-design §4.4).
+          onSkipped: _close,
+        ),
+        // Build steps 4 and 5.
+        _SheetStep.commit || _SheetStep.done => const SizedBox(height: 120),
+      },
     };
 
     return CheckInSheet(
-      habitName: offer.habit.name,
-      step: '1 of 2',
+      habitName: offer?.habit.name ?? '',
+      step: switch (_step) {
+        _SheetStep.lookBack => '1 of 2',
+        _SheetStep.commit => '2 of 2',
+        _SheetStep.done => 'done',
+      },
       ticker: widget.ticker,
       child: child,
     );
   }
-}
-
-/// Step 1's content lands here in build step 3.
-class _Placeholder extends StatelessWidget {
-  const _Placeholder({required this.offer});
-
-  final CheckInOffer offer;
-
-  @override
-  Widget build(BuildContext context) => const SizedBox(height: 120);
 }
