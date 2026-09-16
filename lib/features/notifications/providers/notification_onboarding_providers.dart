@@ -37,11 +37,17 @@ final newestHabitProvider = FutureProvider<Habit?>((ref) async {
 /// keep describing a state that stopped being true while it was backgrounded,
 /// and the app would go on believing it was nudging.
 ///
-/// **Somebody has to watch this provider.** Riverpod 3 pauses a provider whose
-/// listeners are all paused — and one nobody listens to is in that set — so a
-/// lifecycle listener parked in a provider nothing watches is a listener that
-/// never fires. `TaprootApp` watches it for the life of the app, which is the
-/// only scope that makes sense for "notice when the user comes back".
+/// **Somebody has to hold this provider.** The listener is registered in the
+/// body below, so a provider nothing ever touches is a listener that does not
+/// exist — and nothing looks wrong, because an app that never notices a
+/// revocation and an app where nothing was revoked read the same.
+/// `TaprootApp` watches it for the life of the app, which is the only scope
+/// that makes sense for "notice when the user comes back".
+///
+/// The guard on that is a widget test that pumps `TaprootApp` and drives a
+/// resume through it, not a unit test with a hand-made container: the thing
+/// that can break is the wiring, and a container that subscribes by hand
+/// supplies the very thing whose absence is the bug.
 final notificationAccessRefreshProvider = Provider<void>((ref) {
   final log = Logger('notificationAccessRefresh');
 

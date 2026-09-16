@@ -128,11 +128,22 @@ void main() {
     expect(after.map((row) => row.id), before.map((row) => row.id));
   });
 
-  test('nobody listening means nobody notices', () async {
-    // Riverpod 3 pauses a provider whose listeners are all paused, and one
-    // nobody listens to is in that set — so this is not a hypothetical. It is
-    // why `TaprootApp` watches the provider rather than reading it once, and
-    // this test fails if that watch is ever dropped for a read.
+  test('a provider nothing touches is a listener that does not exist', () async {
+    // **What this proves and what it does not.** It builds a container that
+    // never mentions `notificationAccessRefreshProvider`, so the provider is
+    // never built and its `AppLifecycleListener` is never registered: a resume
+    // goes unnoticed. That is the failure mode, demonstrated — and it is the
+    // reason something in the app has to hold the provider.
+    //
+    // It says nothing about whether anything *does*. This container is not the
+    // app's, and the line that matters is in `main.dart`; the guard on that is
+    // `test/features/notifications/access_refresh_on_resume_test.dart`, which
+    // pumps `TaprootApp` and fails when the line is gone. An earlier version
+    // of this comment claimed that trading the app's `ref.watch` for a
+    // `ref.read` would fail this test. It does not — and neither does the
+    // widget test, because the provider is not auto-dispose and one read keeps
+    // it alive exactly as well. What breaks is dropping the line, not
+    // softening it.
     final container = containerWith();
     gateway.grant(const NotificationAccess(mode: NotificationMode.granted));
     await container.read(notificationAccessProvider.future);
