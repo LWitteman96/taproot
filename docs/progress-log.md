@@ -21,6 +21,87 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-16 — The evening check-in, as a sheet over the garden
+
+Branch: `feature/rive_animations`. `docs/check-in-design.md` arrived and now governs the check-in's
+presentation; it is in the spec table. All six build steps of its §10 landed, on top of
+garden-design steps 1–4.
+
+### What changed
+
+The check-in stopped being a full-screen page and became a **bottom sheet over the live garden**.
+The reason is the payoff: reflection is the only thing that deepens roots, so the user should watch
+the roots of the habit they just reflected on grow. A page cannot show that.
+
+`/check-in` still exists — the notification deep link keeps working — but it now builds the garden
+with the sheet up rather than a screen of its own.
+
+What did **not** change, deliberately: priority scoring, framing selection, chip surfacing, the
+`Reflection` record, and local-first writes. This was presentation.
+
+### The decisions worth keeping
+
+**Validation and Confirmation ask yes or no first.** reflection-logic §3 asks for that specifically,
+and the built page showed the full chip list immediately — which made a Validation
+indistinguishable from a Discovery and never actually tested the designed cue. "No, something else"
+is not an answer by itself: it records nothing and opens the list, and the list comes back *without*
+the cue just ruled out.
+
+**The reflection is written on answer, not on done**, so swiping the sheet away after answering
+keeps the answer.
+
+**The roots are pinned until done.** Because the write happens on answer, the engine's root depth
+moves immediately; left alone the roots would grow while the user was still mid-question and the
+done state would have nothing to show. The sheet pins the pre-answer depth on open and releases it
+at done, which is what starts Rive's 1.2s ease.
+
+**The garden is refreshed before the pin is released.** The reflection went through the check-in
+controller, so the garden's engine state still predated it — releasing without recomputing grew the
+roots to exactly where they already were. A test caught this: the depth came back 0.0 after a real
+answer.
+
+**Words only on done.** No credit values, no reflection count, in any state. Credit is an internal
+weighting, and "+½ credit · 3.50 reflections" turns a moment of being understood into a scoreboard.
+
+**One voice.** Every sentence is a pure function shared with `composeEveningCheckIn()`. §5 says "if
+they differ, change both together"; making both compose from one place turns that from a promise
+into a property, and a test asserts it.
+
+**A corrected Confirmation earns a full credit** (engine version 2 → 3). The trigger is
+`matchedDesignedCue == false`, not "anything but true" — the field is nullable and null means
+*unrecorded*, so paying the higher credit for null would silently re-price history and break
+reflection-logic's rule that a user coasting on one-tap confirmations deepens roots slowly. That
+rule had a test, which is how the first attempt was caught.
+
+### What the tests and the render harness caught
+
+- The "nothing to ask" and "failed" states read the offer before the status, so both showed a
+  spinner that could never resolve.
+- The sheet reached for `GoRouter` directly, which throws under any test that mounts it without a
+  router.
+- `dispose()` read the provider container from an already-deactivated element.
+- The footer — `Something else`, `Can't remember`, `Skip` — overflowed a 402pt screen by 113px,
+  losing the way out entirely. No widget test had caught it because none laid the sheet out at
+  phone width.
+
+That last one came from `check_in_shots_test`, which renders each framing's step 1 and both done
+states to `.tmp/shots/`. It exists because the five framings are chosen from a habit's history, so
+reaching them on a device means seeding five histories — and this machine's Xcode has no
+SimulatorKit, so there is no tap automation either.
+
+### What it leaves open
+
+Recorded in `docs/status.md` as later features: the **day picker** (`Different day` records
+`declined` and nothing else), **insight surfacing** (one insight fires — the autonomy milestone —
+because §0.4 forbids an insight without an action), and the **action editors** those insights would
+need.
+
+Four calibration questions are implemented at their defaults and named: the camera's 2.2× and 38%
+ground line, `Can't remember` on reflection #1 (behind a flag, default shown), the 420ms
+auto-advance, and the 25%/10% scrim, which is calibrated against dusk only.
+
+---
+
 ## 2026-09-16 — A second species: plantgen, the oak, and oak.riv in the assets
 
 Branch: `feature/rive_animations`. Two sessions: one drew the oak and split the generator, this one

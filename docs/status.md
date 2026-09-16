@@ -25,7 +25,7 @@ Update this file in the same commit as the work it describes.
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | **Supabase sync** (`lib/app/sync/`) | **Built — connectivity trigger, paged pull with an overlap cursor, push, last-write-wins** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
-| **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule** |
+| **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule, and the evening check-in as a sheet over the garden with the roots payoff** |
 | **Garden home screen** (`lib/features/garden/`) | **Built — one garden scene: sky, ground, scrolling plants, selection, detail card, and the fern art in its slots. Roots, the watering choreography and time-of-day are not wired yet** |
 | Insight surfacing | Not started |
 
@@ -78,6 +78,27 @@ Neither has been addressed, because every way to slim it changes art that has be
 The second question — **whether six generated species can look like one garden** — stays open, and
 four species still have no art and render as placeholder silhouettes. The method is in
 `fern/NOTES.md`, what the oak adds is in `oak/NOTES.md`.
+
+**The evening check-in is a sheet over the garden.** `docs/check-in-design.md` governs it, and all six
+build steps of its §10 have landed: the copy functions the notification shares, the sheet and its
+camera move, the look-back step, the commit step, the done state with the roots payoff, and the
+engine's `confirmationChangedCueCredit`. Priority scoring, framing selection and chip surfacing are
+unchanged — this was presentation, not policy.
+
+**Later features, named rather than half-built:**
+
+- **The day picker.** `Different day` records `declined` and nothing else. The prototype opens a
+  `Which day?` picker over the next four scheduled days; it needs a one-off reschedule of the next
+  occasion in `lib/features/notifications/` and a ledger field for the chosen day
+  (check-in-design §4.3). Whether `declined` alone feels like being heard is an open question — if
+  not, this moves up.
+- **Insight surfacing.** Exactly one insight fires today: the autonomy milestone, on a habit's first
+  un-nudged completion. Cue lock-in, cue unreliability, conditional failure, friction concentration,
+  the awareness gap and nudge dependence are all specified in reflection-logic §6 and none are
+  built, because §0.4 forbids an insight without an action and the actions do not exist.
+- **The action editors.** Cue, slot, routine and reward editors are the actions those insights would
+  offer. None are designed. check-in-design §7.3 records the friction-route copy and button labels
+  the prototype supplies, so the wording is ready when the editors are.
 
 The router's gate is no longer stubbed — it reads the habit count, so a user with nothing planted is
 sent to plant something and only then gets a garden. The debug-only dev-flavor seed button that used
