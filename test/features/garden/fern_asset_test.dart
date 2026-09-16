@@ -30,7 +30,7 @@ const String fernAsset = 'assets/rive/fern.riv';
 /// completion. It sways; it does not droop. Do not extend these tests with
 /// "writing vitality changes the render" without exempting it.
 ///
-/// Not every artboard is a stage: `fern/` also has `FernRoots`, which draws
+/// Not every artboard is a stage: `fern/` also has [rootsArtboard], which draws
 /// below the ground line and is composed separately.
 const Map<String, String> stageArtboards = {
   'seed': 'FernSeed',
@@ -40,6 +40,13 @@ const Map<String, String> stageArtboards = {
   'mature': 'FernMature',
   'bloom': 'FernBloom',
 };
+
+/// The root system. Not a stage — 1024x520 with its ground line at the top
+/// edge, so it stacks directly under a stage artboard with the lines meeting.
+const String rootsArtboard = 'FernRoots';
+
+/// The two numbers the garden writes. Both 0-1, both the engine's own ranges.
+const List<String> fernNumbers = ['vitality', 'roots'];
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -59,28 +66,102 @@ void main() {
     file = loaded!;
   });
 
-  for (final entry in stageArtboards.entries) {
-    test('${entry.value} exposes the state machine and vitality', () {
+  for (final name in [...stageArtboards.values, rootsArtboard]) {
+    test('$name exposes the state machine and both numbers', () {
       final controller = RiveWidgetController(
         file,
-        artboardSelector: ArtboardNamed(entry.value),
+        artboardSelector: ArtboardNamed(name),
         stateMachineSelector: const StateMachineNamed('Fern'),
       );
       addTearDown(controller.dispose);
+      final instance = controller.dataBind(DataBind.auto());
 
-      final vitality = controller.dataBind(DataBind.auto()).number('vitality');
-      expect(
-        vitality,
-        isNotNull,
-        reason: '${entry.value} has no `vitality` number on its view model',
-      );
+      for (final property in fernNumbers) {
+        final number = instance.number(property);
+        expect(
+          number,
+          isNotNull,
+          reason: '\$name has no `\$property` number on its view model',
+        );
 
-      // Writable, and reads back — a bind that resolved but drives nothing
-      // would still pass this, which is why fern/ verifies the rendering side.
-      vitality!.value = 0.25;
-      expect(vitality.value, closeTo(0.25, 1e-9));
+        // Writable, and reads back — a bind that resolved but drives nothing
+        // would still pass this, which is why fern/ verifies the rendering
+        // side. `roots` in particular drives the root system on one artboard
+        // and a lean on another, and neither is visible from here.
+        number!.value = 0.25;
+        expect(number.value, closeTo(0.25, 1e-9));
+      }
     });
   }
+
+  test('one view model instance drives a stage and its roots together', () {
+    // The composition the garden needs: `FernRoots` stacked under a stage
+    // artboard, both reading the same `roots`. It has to be one *instance* —
+    // `roots` drives the root system on one artboard and a lean on the other,
+    // so two instances would let the plant lean one way while the roots it is
+    // leaning about say something else.
+    //
+    // Nesting the roots artboard inside the plant is the obvious alternative
+    // and does not work: a bind inside a NestedArtboard resolves to nothing,
+    // silently, with a clean verify. Hence stacking two artboards in Flutter.
+    final viewModel = file.defaultArtboardViewModel(
+      file.artboard('FernMature')!,
+    );
+    final shared = viewModel!.createDefaultInstance();
+    expect(shared, isNotNull);
+
+    final plant = RiveWidgetController(
+      file,
+      artboardSelector: const ArtboardNamed('FernMature'),
+      stateMachineSelector: const StateMachineNamed('Fern'),
+    );
+    final roots = RiveWidgetController(
+      file,
+      artboardSelector: const ArtboardNamed(rootsArtboard),
+      stateMachineSelector: const StateMachineNamed('Fern'),
+    );
+    addTearDown(plant.dispose);
+    addTearDown(roots.dispose);
+
+    final boundToPlant = plant.dataBind(DataBind.byInstance(shared!));
+    final boundToRoots = roots.dataBind(DataBind.byInstance(shared));
+
+    // One write, seen by both. This is the whole assertion.
+    shared.number('roots')!.value = 0.5;
+    expect(boundToPlant.number('roots')!.value, closeTo(0.5, 1e-9));
+    expect(boundToRoots.number('roots')!.value, closeTo(0.5, 1e-9));
+
+    // And both artboards accept being advanced against it. `fern/` eases this
+    // value over 1.2s, so the poses are reached by elapsed time rather than by
+    // the write — advancing is what makes it arrive.
+    expect(plant.stateMachine.advanceAndApply(1.5), isA<bool>());
+    expect(roots.stateMachine.advanceAndApply(1.5), isA<bool>());
+  });
+
+  test('two auto-binds do not share a value', () {
+    // The failure mode the test above exists to prevent, pinned so it is
+    // obvious why `DataBind.auto()` is wrong for the stacked pair. Auto-binding
+    // is right for a lone plant and wrong the moment roots are under it.
+    final plant = RiveWidgetController(
+      file,
+      artboardSelector: const ArtboardNamed('FernMature'),
+      stateMachineSelector: const StateMachineNamed('Fern'),
+    );
+    final roots = RiveWidgetController(
+      file,
+      artboardSelector: const ArtboardNamed(rootsArtboard),
+      stateMachineSelector: const StateMachineNamed('Fern'),
+    );
+    addTearDown(plant.dispose);
+    addTearDown(roots.dispose);
+
+    plant.dataBind(DataBind.auto()).number('roots')!.value = 0.75;
+    expect(
+      roots.dataBind(DataBind.auto()).number('roots')!.value,
+      isNot(closeTo(0.75, 1e-9)),
+      reason: 'auto-bound instances are meant to be independent',
+    );
+  });
 
   test('an unknown artboard throws rather than falling back', () {
     // The Rive CLI silently renders the default artboard for an unknown name.
