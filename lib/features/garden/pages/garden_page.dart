@@ -8,6 +8,7 @@ import 'package:taproot/app/theme/garden_colors.dart';
 import 'package:taproot/app/theme/garden_layout.dart';
 import 'package:taproot/core/utils/flavor.dart';
 import 'package:taproot/features/garden/controllers/garden_controller.dart';
+import 'package:taproot/features/garden/domain/garden_camera.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
 import 'package:taproot/features/garden/domain/plant_art.dart';
 import 'package:taproot/features/garden/domain/plant_descriptions.dart';
@@ -22,6 +23,9 @@ import 'package:taproot/features/garden/widgets/plant_detail_card.dart';
 import 'package:taproot/features/garden/widgets/plant_silhouette.dart';
 import 'package:taproot/features/habits/domain/plant_choices.dart';
 import 'package:taproot/features/reflection/providers/reflection_providers.dart';
+import 'package:taproot/features/reflection/services/check_in_assembler.dart';
+import 'package:taproot/features/reflection/widgets/check_in_sheet.dart';
+import 'package:taproot/features/reflection/widgets/check_in_sheet_host.dart';
 
 /// The home screen: one garden, not a list of cards.
 ///
@@ -33,7 +37,15 @@ import 'package:taproot/features/reflection/providers/reflection_providers.dart'
 /// *"here's what you still owe."* Hence a greeting rather than a title, a
 /// status line rather than a count, and no red anywhere.
 class GardenPage extends ConsumerWidget {
-  const GardenPage({super.key});
+  const GardenPage({this.checkIn, super.key});
+
+  /// The offer to open the check-in sheet with, when the screen was reached
+  /// through `/check-in` or the garden's own Reflect button.
+  ///
+  /// The sheet lives on this screen rather than on its own, because the roots
+  /// growing behind it *is* the payoff (check-in-design §1). A route that
+  /// replaced the garden would have nothing to grow.
+  final CheckInOffer? checkIn;
 
   static const String emptyHeadline = 'Nothing planted yet';
   static const String emptyBody =
@@ -77,6 +89,16 @@ class GardenPage extends ConsumerWidget {
     final ticker = gardenTickerOf(context, ref);
     final selectedId = ref.watch(selectedHabitIdProvider);
 
+    // Opening the sheet selects the reflected plant, and closing leaves it
+    // selected (check-in-design §8).
+    final reflectingId = checkIn?.habit.id;
+    final reflectingIndex = reflectingId == null
+        ? -1
+        : habitIds.indexOf(reflectingId);
+    final camera = reflectingIndex < 0
+        ? GardenCamera.home
+        : GardenCamera.onPlant(reflectingIndex);
+
     // A garden that could not be read is not an empty garden, and saying
     // "nothing planted yet" to someone whose store failed is the app telling
     // them their work is gone. A failed *refresh* with plants already on screen
@@ -95,45 +117,100 @@ class GardenPage extends ConsumerWidget {
       data: Theme.of(context).copyWith(brightness: Brightness.dark),
       child: Scaffold(
         backgroundColor: GardenColors.bgApp,
-        body: GardenScene(
-          mode: mode,
-          ground: (context, groundLine, viewport) => _Ground(
-            groundLine: groundLine,
-            viewport: viewport,
-            habitIds: state == _GardenViewState.planted ? habitIds : const [],
-            ticker: ticker,
-            // The plot is the empty garden's whole content, and it follows the
-            // plants once there are any. It is absent while loading and when
-            // the store could not be read: offering to plant something on top
-            // of a garden that may already exist invites making it worse.
-            showPlot:
-                state == _GardenViewState.planted ||
-                state == _GardenViewState.empty,
-          ),
-          header: SafeArea(
-            bottom: false,
-            child: GardenHeader(
-              checkInChip: state == _GardenViewState.planted
-                  ? const _CheckInInvitation()
-                  : null,
+        body: _CameraMove(
+          target: camera,
+          ticker: ticker,
+          builder: (context, live, progress) => GardenScene(
+            mode: mode,
+            groundLineFraction: live.groundLineFraction,
+            scrimOpacity: CheckInSheetHost.scrimAsking * progress,
+            ground: (context, groundLine, viewport) => _Ground(
+              groundLine: groundLine,
+              viewport: viewport,
+              habitIds: state == _GardenViewState.planted ? habitIds : const [],
+              ticker: ticker,
+              camera: live,
+              // The plot is the empty garden's whole content, and it follows
+              // the plants once there are any. It is absent while loading and
+              // when the store could not be read: offering to plant something
+              // on top of a garden that may already exist invites making it
+              // worse. It is also absent behind the sheet, which is not a
+              // moment for starting something new.
+              showPlot:
+                  checkIn == null &&
+                  (state == _GardenViewState.planted ||
+                      state == _GardenViewState.empty),
             ),
+            // The header stays put behind the sheet rather than being hidden:
+            // the greeting is the garden, and the sheet is over the garden.
+            header: SafeArea(
+              bottom: false,
+              child: GardenHeader(
+                checkInChip:
+                    checkIn == null && state == _GardenViewState.planted
+                    ? const _CheckInInvitation()
+                    : null,
+              ),
+            ),
+            detailCard: switch (state) {
+              // No card while loading: the scene with nothing on it is the
+              // loading state, and a card outline with no content in it reads
+              // as a plant that failed rather than as one that has not arrived.
+              _ when checkIn != null => null,
+              _GardenViewState.loading => null,
+              _GardenViewState.unreadable => const _UnreadableGarden(),
+              _GardenViewState.empty => const _EmptyGarden(),
+              _GardenViewState.planted =>
+                selectedId == null
+                    ? null
+                    : _SelectedPlantCard(habitId: selectedId, ticker: ticker),
+            },
+            sheet: checkIn == null
+                ? null
+                : CheckInSheetHost(offered: checkIn!, ticker: ticker),
           ),
-          detailCard: switch (state) {
-            // No card while loading: the scene with nothing on it is the
-            // loading state, and a card outline with no content in it reads as
-            // a plant that failed rather than as one that has not arrived.
-            _GardenViewState.loading => null,
-            _GardenViewState.unreadable => const _UnreadableGarden(),
-            _GardenViewState.empty => const _EmptyGarden(),
-            _GardenViewState.planted =>
-              selectedId == null
-                  ? null
-                  : _SelectedPlantCard(habitId: selectedId, ticker: ticker),
-          },
         ),
       ),
     );
   }
+}
+
+/// Runs the camera between two positions.
+///
+/// The move belongs to the sheet's entry — 520ms on the same curve — so the two
+/// read as one movement rather than as two things happening at once
+/// (check-in-design §3). [progress] is 0 at home and 1 on the plant, which is
+/// also what the scrim fades on.
+class _CameraMove extends StatelessWidget {
+  const _CameraMove({
+    required this.target,
+    required this.ticker,
+    required this.builder,
+  });
+
+  final GardenCamera target;
+  final GardenTicker ticker;
+  final Widget Function(
+    BuildContext context,
+    GardenCamera live,
+    double progress,
+  )
+  builder;
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+    tween: Tween<double>(
+      begin: target.isHome ? 0 : 1,
+      end: target.isHome ? 0 : 1,
+    ),
+    duration: ticker.durationFor(CheckInSheet.entryDuration),
+    curve: CheckInSheet.entryCurve,
+    builder: (context, progress, _) => builder(
+      context,
+      GardenCamera.lerp(GardenCamera.home, target, progress),
+      progress,
+    ),
+  );
 }
 
 enum _GardenViewState { loading, unreadable, empty, planted }
@@ -149,6 +226,7 @@ class _Ground extends ConsumerStatefulWidget {
     required this.viewport,
     required this.habitIds,
     required this.ticker,
+    required this.camera,
     required this.showPlot,
   });
 
@@ -156,6 +234,11 @@ class _Ground extends ConsumerStatefulWidget {
   final Size viewport;
   final List<String> habitIds;
   final GardenTicker ticker;
+
+  /// Where the camera is. At home the row scrolls; on a plant it does not —
+  /// the sheet is about one habit, and letting the garden slide under it would
+  /// invite losing the plant the question is about.
+  final GardenCamera camera;
 
   /// False while loading and when the store could not be read: an offer to
   /// plant something, over a garden that may or may not already have plants in
@@ -226,48 +309,67 @@ class _GroundState extends ConsumerState<_Ground> {
       viewportWidth: widget.viewport.width,
     );
 
+    final ground = GardenGroundLayer(
+      groundLine: widget.groundLine,
+      viewport: widget.viewport,
+      sceneWidth: sceneWidth,
+      plants: [
+        if (selectedIndex >= 0)
+          SelectionGlow(
+            centreX: GardenLayout.slotCentre(selectedIndex),
+            groundLine: widget.groundLine,
+            ticker: widget.ticker,
+          ),
+        for (final (index, habitId) in widget.habitIds.indexed)
+          Positioned(
+            left: GardenLayout.slotCentre(index) - GardenLayout.slotPitch / 2,
+            top: 0,
+            bottom: 0,
+            width: GardenLayout.slotPitch,
+            child: _Plant(
+              habitId: habitId,
+              groundLine: widget.groundLine,
+              onTap: () => _select(index, habitId),
+            ),
+          ),
+        if (widget.showPlot)
+          Positioned(
+            left:
+                GardenLayout.slotCentre(widget.habitIds.length) -
+                GardenLayout.slotPitch / 2,
+            top: 0,
+            bottom: 0,
+            width: GardenLayout.slotPitch,
+            child: EmptyPlot(
+              groundLine: widget.groundLine,
+              onTap: () => context.push(AppRoutes.habitCreation),
+            ),
+          ),
+      ],
+    );
+
+    if (!widget.camera.isHome) {
+      // Scaled about the focused plant rather than scrolled to it. A transform
+      // moves the scene as one, so every plant is still drawn at world scale —
+      // the camera is closer, the world has not changed size.
+      return Transform(
+        transform: widget.camera.transformFor(
+          viewport: widget.viewport,
+          groundLine: widget.groundLine,
+        ),
+        child: OverflowBox(
+          alignment: Alignment.topLeft,
+          maxWidth: sceneWidth,
+          child: ground,
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       controller: _scroll,
       scrollDirection: Axis.horizontal,
       physics: const BouncingScrollPhysics(),
-      child: GardenGroundLayer(
-        groundLine: widget.groundLine,
-        viewport: widget.viewport,
-        sceneWidth: sceneWidth,
-        plants: [
-          if (selectedIndex >= 0)
-            SelectionGlow(
-              centreX: GardenLayout.slotCentre(selectedIndex),
-              groundLine: widget.groundLine,
-              ticker: widget.ticker,
-            ),
-          for (final (index, habitId) in widget.habitIds.indexed)
-            Positioned(
-              left: GardenLayout.slotCentre(index) - GardenLayout.slotPitch / 2,
-              top: 0,
-              bottom: 0,
-              width: GardenLayout.slotPitch,
-              child: _Plant(
-                habitId: habitId,
-                groundLine: widget.groundLine,
-                onTap: () => _select(index, habitId),
-              ),
-            ),
-          if (widget.showPlot)
-            Positioned(
-              left:
-                  GardenLayout.slotCentre(widget.habitIds.length) -
-                  GardenLayout.slotPitch / 2,
-              top: 0,
-              bottom: 0,
-              width: GardenLayout.slotPitch,
-              child: EmptyPlot(
-                groundLine: widget.groundLine,
-                onTap: () => context.push(AppRoutes.habitCreation),
-              ),
-            ),
-        ],
-      ),
+      child: ground,
     );
   }
 }

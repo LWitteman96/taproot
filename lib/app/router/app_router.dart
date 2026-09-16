@@ -9,7 +9,6 @@ import 'package:taproot/features/garden/pages/garden_page.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/pages/habit_creation_page.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
-import 'package:taproot/features/reflection/pages/check_in_page.dart';
 import 'package:taproot/features/reflection/services/check_in_assembler.dart';
 
 /// Every path in the app, in one place.
@@ -126,8 +125,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         // screen re-verifies one habit instead of re-electing a winner among
         // all of them. Absent — a deep link, a cold start on this path — the
         // screen assembles from scratch.
+        // The garden *with the sheet up*, not a screen of its own. The roots
+        // growing behind the sheet are the payoff (check-in-design §1), so a
+        // route that replaced the garden would have nothing to grow. The deep
+        // link keeps working; what it opens changed.
         builder: (context, state) =>
-            CheckInPage(offered: state.extra as CheckInOffer?),
+            GardenPage(checkIn: state.extra as CheckInOffer?),
       ),
     ],
   );

@@ -18,6 +18,9 @@ class GardenScene extends StatelessWidget {
     required this.ground,
     this.header,
     this.detailCard,
+    this.sheet,
+    this.scrimOpacity = 0,
+    this.groundLineFraction = GardenLayout.groundLineFraction,
     super.key,
   });
 
@@ -31,9 +34,24 @@ class GardenScene extends StatelessWidget {
   final Widget? header;
   final Widget? detailCard;
 
+  /// The check-in, over everything. When it is up the detail card is not.
+  final Widget? sheet;
+
+  /// One uniform layer over the scene while the sheet is open. 25% while
+  /// asking, 10% on done — the prototype's 35→55% gradient dims the roots too
+  /// much for the payoff to read (check-in-design §3).
+  final double scrimOpacity;
+
+  /// Animated by the caller: the camera raises the ground line to make room for
+  /// roots while the sheet is up.
+  final double groundLineFraction;
+
   /// The card's inset and how far it floats off the bottom, from the handoff.
   static const double cardInset = 16;
   static const double cardBottom = 50;
+
+  /// The scrim's colour, from check-in-design §3: `oklch(0.10 0.02 50)`.
+  static const Color scrimColour = Color(0xFF130C08);
 
   /// Used only to keep the ground line high enough that the card cannot cover a
   /// plant's roots. A real measurement would need a layout pass and would move
@@ -48,6 +66,7 @@ class GardenScene extends StatelessWidget {
       final groundLine = GardenLayout.groundLine(
         viewport,
         cardTop: viewport.height - cardBottom - estimatedCardHeight,
+        fraction: groundLineFraction,
       );
 
       return ColoredBox(
@@ -62,6 +81,13 @@ class GardenScene extends StatelessWidget {
             ground(context, groundLine, viewport),
             if (header case final header?)
               Align(alignment: Alignment.topLeft, child: header),
+            if (scrimOpacity > 0)
+              IgnorePointer(
+                ignoring: sheet == null,
+                child: ColoredBox(
+                  color: scrimColour.withValues(alpha: scrimOpacity),
+                ),
+              ),
             if (detailCard case final card?)
               Positioned(
                 left: cardInset,
@@ -69,6 +95,8 @@ class GardenScene extends StatelessWidget {
                 bottom: cardBottom,
                 child: card,
               ),
+            if (sheet case final sheet?)
+              Positioned(left: 0, right: 0, bottom: 0, child: sheet),
           ],
         ),
       );

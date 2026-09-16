@@ -82,8 +82,12 @@ abstract final class GardenLayout {
   ///
   /// Clamped so the card never eats the roots: on a screen too short to give
   /// [minimumSoilBelowGround] below the fraction, the ground line moves up.
-  static double groundLine(Size viewport, {required double cardTop}) {
-    final preferred = viewport.height * groundLineFraction;
+  static double groundLine(
+    Size viewport, {
+    required double cardTop,
+    double fraction = groundLineFraction,
+  }) {
+    final preferred = viewport.height * fraction;
     final latest = cardTop - minimumSoilBelowGround;
     return math.min(preferred, math.max(0, latest));
   }
