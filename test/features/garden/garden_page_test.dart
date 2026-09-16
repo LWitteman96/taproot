@@ -11,6 +11,8 @@ import 'package:taproot/app/theme/themedata.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
 import 'package:taproot/features/garden/pages/garden_page.dart';
 import 'package:taproot/features/garden/providers/plant_art_providers.dart';
+import 'package:taproot/app/theme/garden_layout.dart';
+import 'package:taproot/features/garden/widgets/empty_plot.dart';
 import 'package:taproot/features/garden/widgets/plant_detail_card.dart';
 import 'package:taproot/features/garden/controllers/garden_controller.dart';
 import 'package:taproot/features/garden/widgets/watering_control.dart';
@@ -384,6 +386,107 @@ void main() {
 
       expect(await harness.completions.completionsFor('a'), isEmpty);
       handle.dispose();
+    });
+  });
+
+  group('the garden row', () {
+    testWidgets('tapping a plant selects it and the card follows', (
+      tester,
+    ) async {
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      await harness.store.saveHabit(testHabit(id: 'b', name: 'Evening read'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      // The first plant is selected by default: there is always a selected
+      // habit, because an empty card would be a worse state than a stale one.
+      expect(
+        find.descendant(
+          of: find.byType(PlantDetailCard),
+          matching: find.text('Morning walk'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.bySemanticsLabel(RegExp('^Evening read,')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byType(PlantDetailCard),
+          matching: find.text('Evening read'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('the whole column is the target, not the plant', (
+      tester,
+    ) async {
+      // A seed is 11pt wide. garden-design §4.3 makes the 128pt column the
+      // target so selecting one is not a precision exercise.
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      await harness.store.saveHabit(testHabit(id: 'b', name: 'Evening read'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      final column = find.byWidgetPredicate(
+        (widget) => widget is PlantHitColumn,
+      );
+      expect(column, findsNWidgets(2));
+      // Tall enough to cover the plant and the roots that will hang below it.
+      final size = tester.getSize(column.at(1));
+      expect(size.width, GardenLayout.slotPitch);
+      expect(size.height, greaterThan(GardenLayout.rootsDepth));
+    });
+
+    testWidgets('the empty plot offers the flow that fills the garden', (
+      tester,
+    ) async {
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      // It follows the plants rather than floating over them: a new habit
+      // appears where the offer was.
+      expect(find.byType(EmptyPlot), findsOneWidget);
+      expect(find.byType(FloatingActionButton), findsNothing);
+    });
+
+    testWidgets('a garden that could not be read offers no plot', (
+      tester,
+    ) async {
+      // An invitation to plant something, over a garden that may already have
+      // plants in it we simply could not read, is an invitation to duplicate
+      // them.
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a'));
+      harness.habits.readFailure = StateError('the disk is unreadable');
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(EmptyPlot), findsNothing);
+      expect(find.text(GardenPage.unreadableHeadline), findsOneWidget);
+    });
+
+    testWidgets('the garden scrolls once there are more plants than fit', (
+      tester,
+    ) async {
+      final harness = PageHarness();
+      for (var i = 0; i < 6; i++) {
+        await harness.store.saveHabit(testHabit(id: '$i', name: 'Habit $i'));
+      }
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      final scrollable = find.byType(Scrollable);
+      expect(scrollable, findsOneWidget);
+      final position = tester.state<ScrollableState>(scrollable).position;
+      expect(position.axisDirection, AxisDirection.right);
+      expect(position.maxScrollExtent, greaterThan(0));
     });
   });
 

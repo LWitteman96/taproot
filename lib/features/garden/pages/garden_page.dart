@@ -13,7 +13,9 @@ import 'package:taproot/features/garden/domain/plant_descriptions.dart';
 import 'package:taproot/features/garden/providers/garden_scene_providers.dart';
 import 'package:taproot/features/garden/providers/garden_selectors.dart';
 import 'package:taproot/features/garden/widgets/garden_header.dart';
+import 'package:taproot/features/garden/widgets/empty_plot.dart';
 import 'package:taproot/features/garden/widgets/garden_scene.dart';
+import 'package:taproot/features/garden/widgets/selection_glow.dart';
 import 'package:taproot/features/garden/widgets/plant_detail_card.dart';
 import 'package:taproot/features/garden/widgets/plant_silhouette.dart';
 import 'package:taproot/features/habits/domain/plant_choices.dart';
@@ -97,6 +99,14 @@ class GardenPage extends ConsumerWidget {
             groundLine: groundLine,
             viewport: viewport,
             habitIds: state == _GardenViewState.planted ? habitIds : const [],
+            ticker: ticker,
+            // The plot is the empty garden's whole content, and it follows the
+            // plants once there are any. It is absent while loading and when
+            // the store could not be read: offering to plant something on top
+            // of a garden that may already exist invites making it worse.
+            showPlot:
+                state == _GardenViewState.planted ||
+                state == _GardenViewState.empty,
           ),
           header: SafeArea(
             bottom: false,
@@ -126,37 +136,138 @@ class GardenPage extends ConsumerWidget {
 
 enum _GardenViewState { loading, unreadable, empty, planted }
 
-/// The ground and the plants standing on it.
-class _Ground extends ConsumerWidget {
+/// The ground, the plants on it and the empty plot at the end — the layers that
+/// scroll.
+///
+/// Stateful because it owns the scroll position: selecting a plant has to be
+/// able to bring it into view, which needs a controller that outlives a build.
+class _Ground extends ConsumerStatefulWidget {
   const _Ground({
     required this.groundLine,
     required this.viewport,
     required this.habitIds,
+    required this.ticker,
+    required this.showPlot,
   });
 
   final double groundLine;
   final Size viewport;
   final List<String> habitIds;
+  final GardenTicker ticker;
+
+  /// False while loading and when the store could not be read: an offer to
+  /// plant something, over a garden that may or may not already have plants in
+  /// it, is an invitation to make the problem worse.
+  final bool showPlot;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) => GardenGroundLayer(
-    groundLine: groundLine,
-    viewport: viewport,
-    sceneWidth: GardenLayout.sceneWidth(
-      habitIds.length,
-      viewportWidth: viewport.width,
-    ),
-    plants: [
-      for (final (index, habitId) in habitIds.indexed)
-        Positioned(
-          left: GardenLayout.slotCentre(index) - GardenLayout.slotPitch / 2,
-          top: 0,
-          bottom: 0,
-          width: GardenLayout.slotPitch,
-          child: _Plant(habitId: habitId, groundLine: groundLine),
-        ),
-    ],
-  );
+  ConsumerState<_Ground> createState() => _GroundState();
+}
+
+class _GroundState extends ConsumerState<_Ground> {
+  final ScrollController _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// Bring a slot fully into view if it is not already.
+  ///
+  /// Deliberately does nothing when the plant is already visible: scrolling on
+  /// every selection would move the garden under a user who tapped exactly what
+  /// they meant to tap.
+  void _revealSlot(int index) {
+    if (!_scroll.hasClients) return;
+    final centre = GardenLayout.slotCentre(index);
+    final half = GardenLayout.slotPitch / 2;
+    final offset = _scroll.offset;
+    final width = _scroll.position.viewportDimension;
+
+    final double? target;
+    if (centre - half < offset) {
+      target = centre - half;
+    } else if (centre + half > offset + width) {
+      target = centre + half - width;
+    } else {
+      target = null;
+    }
+    if (target == null) return;
+
+    final clamped = target.clamp(0.0, _scroll.position.maxScrollExtent);
+    if (widget.ticker.isStill) {
+      _scroll.jumpTo(clamped);
+    } else {
+      _scroll.animateTo(
+        clamped,
+        duration: widget.ticker.durationFor(SelectionGlow.slideDuration),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  void _select(int index, String habitId) {
+    ref.read(selectedHabitIdProvider.notifier).select(habitId);
+    // After the frame, so the scroll view has laid out the slot being revealed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _revealSlot(index);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedId = ref.watch(selectedHabitIdProvider);
+    final selectedIndex = widget.habitIds.indexOf(selectedId ?? '');
+    final sceneWidth = GardenLayout.sceneWidth(
+      widget.habitIds.length,
+      viewportWidth: widget.viewport.width,
+    );
+
+    return SingleChildScrollView(
+      controller: _scroll,
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: GardenGroundLayer(
+        groundLine: widget.groundLine,
+        viewport: widget.viewport,
+        sceneWidth: sceneWidth,
+        plants: [
+          if (selectedIndex >= 0)
+            SelectionGlow(
+              centreX: GardenLayout.slotCentre(selectedIndex),
+              groundLine: widget.groundLine,
+              ticker: widget.ticker,
+            ),
+          for (final (index, habitId) in widget.habitIds.indexed)
+            Positioned(
+              left: GardenLayout.slotCentre(index) - GardenLayout.slotPitch / 2,
+              top: 0,
+              bottom: 0,
+              width: GardenLayout.slotPitch,
+              child: _Plant(
+                habitId: habitId,
+                groundLine: widget.groundLine,
+                onTap: () => _select(index, habitId),
+              ),
+            ),
+          if (widget.showPlot)
+            Positioned(
+              left:
+                  GardenLayout.slotCentre(widget.habitIds.length) -
+                  GardenLayout.slotPitch / 2,
+              top: 0,
+              bottom: 0,
+              width: GardenLayout.slotPitch,
+              child: EmptyPlot(
+                groundLine: widget.groundLine,
+                onTap: () => context.push(AppRoutes.habitCreation),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 /// One plant, standing on the ground line.
@@ -165,10 +276,15 @@ class _Ground extends ConsumerWidget {
 /// on the ground line whatever its stage — size differences are growth, never
 /// layout (garden-design §2).
 class _Plant extends ConsumerWidget {
-  const _Plant({required this.habitId, required this.groundLine});
+  const _Plant({
+    required this.habitId,
+    required this.groundLine,
+    required this.onTap,
+  });
 
   final String habitId;
   final double groundLine;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -179,6 +295,7 @@ class _Plant extends ConsumerWidget {
     final species = plantChoiceById(plant.habit.plantType)?.label ?? 'Plant';
 
     return Semantics(
+      button: true,
       label: plantSemanticLabel(
         habitName: plant.habit.name,
         stage: growth.stage,
@@ -187,37 +304,43 @@ class _Plant extends ConsumerWidget {
         isShallowRooted: growth.isShallowRooted,
         isPaused: plant.habit.isPaused,
       ),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          // The plant's base sits *on* the line, not above a caption that sits
-          // on it. Size differences between plants are growth, never layout
-          // (garden-design §2), and that only holds if they share a floor.
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: null,
-            top: groundLine - PlantSilhouette.sizeFor(growth.stage).height,
-            child: Center(
-              child: PlantSilhouette(
-                species: species,
-                stage: growth.stage,
-                vitality: growth.vitality,
+      onTap: onTap,
+      child: PlantHitColumn(
+        groundLine: groundLine,
+        plantHeight: PlantSilhouette.sizeFor(growth.stage).height,
+        onTap: onTap,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            // The plant's base sits *on* the line, not above a caption that sits
+            // on it. Size differences between plants are growth, never layout
+            // (garden-design §2), and that only holds if they share a floor.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: null,
+              top: groundLine - PlantSilhouette.sizeFor(growth.stage).height,
+              child: Center(
+                child: PlantSilhouette(
+                  species: species,
+                  stage: growth.stage,
+                  vitality: growth.vitality,
+                ),
               ),
             ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            top: groundLine + GardenLayout.grassBandHeight + 4,
-            child: Center(
-              child: PlantSilhouetteLabel(
-                species: species,
-                stage: growth.stage,
+            Positioned(
+              left: 0,
+              right: 0,
+              top: groundLine + GardenLayout.grassBandHeight + 4,
+              child: Center(
+                child: PlantSilhouetteLabel(
+                  species: species,
+                  stage: growth.stage,
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -313,17 +436,18 @@ class _EmptyGarden extends StatelessWidget {
   const _EmptyGarden();
 
   @override
-  Widget build(BuildContext context) => Builder(
-    builder: (context) => _SceneMessage(
-      headline: GardenPage.emptyHeadline,
-      body: GardenPage.emptyBody,
-      actionLabel: GardenPage.plantLabel,
-      onAction: () => context.push(AppRoutes.habitCreation),
-      // Carried over from the card list rather than dropped with it. It is the
-      // only place in the app that says which flavor is running, and the empty
-      // garden is where a fresh install lands.
-      footnote: 'flavor: ${getFlavor().name}',
-    ),
+  Widget build(BuildContext context) => _SceneMessage(
+    headline: GardenPage.emptyHeadline,
+    body: GardenPage.emptyBody,
+    // No button. The empty plot standing in slot 0 *is* the offer
+    // (garden-design §4.5), and §4.6 asks this card for the headline and body
+    // only — two identical invitations on one screen would make the user
+    // choose between them for no reason.
+    //
+    // Carried over from the card list rather than dropped with it: this is the
+    // only place in the app that says which flavor is running, and the empty
+    // garden is where a fresh install lands.
+    footnote: 'flavor: ${getFlavor().name}',
   );
 }
 
@@ -332,15 +456,15 @@ class _SceneMessage extends StatelessWidget {
   const _SceneMessage({
     required this.headline,
     required this.body,
-    required this.actionLabel,
-    required this.onAction,
+    this.actionLabel,
+    this.onAction,
     this.footnote,
   });
 
   final String headline;
   final String body;
-  final String actionLabel;
-  final VoidCallback onAction;
+  final String? actionLabel;
+  final VoidCallback? onAction;
   final String? footnote;
 
   @override
@@ -373,8 +497,10 @@ class _SceneMessage extends StatelessWidget {
               color: GardenColors.ink.withValues(alpha: 0.8),
             ),
           ),
-          const SizedBox(height: AppSpacing.medium),
-          FilledButton(onPressed: onAction, child: Text(actionLabel)),
+          if (actionLabel case final label?) ...[
+            const SizedBox(height: AppSpacing.medium),
+            FilledButton(onPressed: onAction, child: Text(label)),
+          ],
           if (footnote case final footnote?) ...[
             const SizedBox(height: AppSpacing.small),
             Text(

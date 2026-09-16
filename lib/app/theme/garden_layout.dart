@@ -54,6 +54,15 @@ abstract final class GardenLayout {
   static const double stageGroundOffset =
       (stageCanvasSize - stageCanvasGroundY) * worldScale;
 
+  /// `FernRoots` is 1024 x 520 with its ground line at its **top** edge, so at
+  /// world scale full roots reach this far below the ground line.
+  ///
+  /// Used already, before the roots are drawn (build step 4): the hit column
+  /// runs from the top of a plant to the bottom of its roots, and sizing that
+  /// correctly now means the target does not move when the art arrives.
+  static const double rootsCanvasHeight = 520;
+  static const double rootsDepth = rootsCanvasHeight * worldScale;
+
   /// The grass band. Its **top** edge is the ground line.
   static const double grassBandHeight = 7;
 
