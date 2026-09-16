@@ -6,6 +6,9 @@ import 'package:taproot/app/database/database_provider.dart';
 import 'package:taproot/features/garden/pages/garden_page.dart';
 import 'package:taproot/core/models/habit_journey.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
+import 'package:taproot/core/models/habit.dart';
+import 'package:taproot/features/notifications/domain/evening_check_in.dart';
+import 'package:taproot/features/notifications/domain/expected_occasions.dart';
 import 'package:taproot/features/notifications/domain/notification_access.dart';
 import 'package:taproot/features/notifications/pages/notification_invitation_page.dart';
 import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
@@ -25,12 +28,14 @@ void main() {
   late FakeHabitService habits;
   late FakeNotificationInvitationStore invitations;
   late FakeNotificationGateway gateway;
+  late ReflectionPromptComposer composer;
 
   setUp(() async {
     habits = FakeHabitService();
     await habits.saveHabit(testHabit());
     invitations = FakeNotificationInvitationStore();
     gateway = FakeNotificationGateway(access: NotificationAccess.denied);
+    composer = const NoReflectionPrompt();
   });
 
   Future<void> pumpInvitation(WidgetTester tester) async {
@@ -46,6 +51,7 @@ void main() {
           ),
           notificationGatewayProvider.overrideWithValue(gateway),
           notificationInvitationStoreProvider.overrideWithValue(invitations),
+          reflectionPromptComposerProvider.overrideWithValue(composer),
         ],
         child: const TaprootApp(),
       ),
@@ -53,24 +59,96 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// The notification the *scheduler* would compose for this habit, built from
+  /// the running app's own providers.
+  ///
+  /// The point of going through the container rather than rebuilding the
+  /// arguments here is that a second hand-assembled copy is a second thing to
+  /// keep in step — which is the defect this whole group is about.
+  Future<EveningCheckIn> composedFor(WidgetTester tester) async {
+    final container = ProviderScope.containerOf(
+      tester.element(find.byType(TaprootApp)),
+    );
+    final composed = await container.read(notificationPreviewProvider.future);
+    return composed!;
+  }
+
   Future<void> tap(WidgetTester tester, String label) async {
     await tester.tap(find.text(label));
     await tester.pumpAndSettle();
   }
 
-  testWidgets('offers the real notification, not a description of one', (
-    tester,
-  ) async {
-    // The preview is composed by the same function that composes the
-    // notification, so the screen cannot promise something the app does not
-    // send. `testHabit` designs "after breakfast".
-    await pumpInvitation(tester);
+  group('the preview is the notification, not a description of one', () {
+    testWidgets('it is what composeEveningCheckIn returns', (tester) async {
+      // Asserted against the composer's own output rather than against copied
+      // literals. Literals duplicate the copy instead of binding to it: they
+      // keep passing when the composer's wording changes, and — the failure
+      // that actually happened — when the preview and the scheduler stop
+      // calling it the same way.
+      await pumpInvitation(tester);
 
-    expect(find.text(NotificationInvitationPage.question), findsOneWidget);
-    expect(find.text('Morning run'), findsOneWidget);
-    expect(find.textContaining('after breakfast'), findsOneWidget);
-    expect(find.text('Yes'), findsOneWidget);
-    expect(find.text('Different day'), findsOneWidget);
+      final expected = await composedFor(tester);
+
+      expect(find.text(expected.title), findsOneWidget);
+      expect(find.text(expected.body), findsOneWidget);
+      expect(find.text(expected.confirmLabel), findsOneWidget);
+      expect(find.text(expected.declineLabel), findsOneWidget);
+    });
+
+    testWidgets('a reflection question shows up in it when one is composed', (
+      tester,
+    ) async {
+      // **The seam, driven with a non-default value.** While the stand-in
+      // composer is installed the prompt is always null, and null is
+      // indistinguishable from an omitted argument at every observation point
+      // — so every assertion built on the default passes whether or not the
+      // preview passes `reflectionPrompt` at all. Overriding the provider is
+      // what gives the assertion power, and it is the state #11 puts the app
+      // in.
+      composer = const _AlwaysAsks('How did today go?');
+      await pumpInvitation(tester);
+
+      expect(
+        find.textContaining('How did today go?'),
+        findsOneWidget,
+        reason: 'the preview dropped the reflection prompt the scheduler sends',
+      );
+      expect(find.text((await composedFor(tester)).body), findsOneWidget);
+    });
+
+    testWidgets('it uses the habit\'s real next occasion', (tester) async {
+      // Not `ExpectedOccasion(index: 0, …)`. `composeEveningCheckIn` ignores
+      // the index today, which is exactly why a fabricated one survives —
+      // until something reads it. The composer is handed the occasion and the
+      // delivery instant, so both have to be the real ones.
+      final recorder = _RecordsWhatItWasAsked();
+      composer = recorder;
+      await pumpInvitation(tester);
+
+      final expected = nextNudgeableOccasion(
+        habit: (await habits.allHabits()).last,
+        now: DateTime.now(),
+      );
+      expect(recorder.occasion, expected);
+      expect(recorder.deliverAt, nudgeDeliveryTime(expected!));
+    });
+
+    testWidgets('the copy does not promise the question every evening', (
+      tester,
+    ) async {
+      // The one line on this screen that is written rather than composed, and
+      // so the one that can over-promise. The reflection question is scored
+      // per occasion against a budget and a cooldown; most evenings nothing
+      // clears it.
+      await pumpInvitation(tester);
+
+      expect(find.textContaining('now and then'), findsOneWidget);
+      expect(find.text(NotificationInvitationPage.note), findsOneWidget);
+      expect(
+        NotificationInvitationPage.note,
+        isNot(contains('One message in the evening: how today went')),
+      );
+    });
   });
 
   testWidgets('accepting asks the platform and lands in the garden', (
@@ -258,4 +336,35 @@ void main() {
     expect(find.text(NotificationInvitationPage.question), findsOneWidget);
     expect(find.textContaining('Morning run'), findsWidgets);
   });
+}
+
+/// A composer that always has something to ask — the state #11 puts the app in.
+class _AlwaysAsks implements ReflectionPromptComposer {
+  const _AlwaysAsks(this.question);
+
+  final String question;
+
+  @override
+  Future<String?> promptFor({
+    required Habit habit,
+    required ExpectedOccasion occasion,
+    required DateTime deliverAt,
+  }) async => question;
+}
+
+/// Records what the preview handed the composer.
+class _RecordsWhatItWasAsked implements ReflectionPromptComposer {
+  ExpectedOccasion? occasion;
+  DateTime? deliverAt;
+
+  @override
+  Future<String?> promptFor({
+    required Habit habit,
+    required ExpectedOccasion occasion,
+    required DateTime deliverAt,
+  }) async {
+    this.occasion = occasion;
+    this.deliverAt = deliverAt;
+    return null;
+  }
 }

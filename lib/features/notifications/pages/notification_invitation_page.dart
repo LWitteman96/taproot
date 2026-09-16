@@ -8,10 +8,7 @@ import 'package:taproot/app/router/app_router.dart';
 import 'package:taproot/app/theme/app_dimensions.dart';
 import 'package:taproot/app/theme/app_radius.dart';
 import 'package:taproot/app/theme/app_spacing.dart';
-import 'package:taproot/core/models/habit.dart';
-import 'package:taproot/core/utils/local_dates.dart';
 import 'package:taproot/features/notifications/domain/evening_check_in.dart';
-import 'package:taproot/features/notifications/domain/expected_occasions.dart';
 import 'package:taproot/features/notifications/domain/notification_access.dart';
 import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
@@ -45,9 +42,20 @@ class NotificationInvitationPage extends ConsumerStatefulWidget {
   const NotificationInvitationPage({super.key});
 
   static const String question = 'Want a nudge the evening before?';
+
+  /// What the notification actually is, in the app's own words.
+  ///
+  /// **The cue for tomorrow is every evening; the look back is not.** The
+  /// reflection question is scored per occasion against a budget and a cooldown
+  /// (reflection spec §2), and most evenings nothing clears the threshold — so
+  /// "how today went" as a flat promise was the one line on this screen that
+  /// over-promised, on the screen whose whole point is that it cannot. The
+  /// preview below is composed rather than written, which is what keeps the
+  /// rest of it honest; this sentence has to be kept honest by hand.
   static const String note =
-      'One message in the evening: how today went, and the cue for tomorrow. '
-      'Nothing else, and never more than one a day.';
+      'One message in the evening: the cue for tomorrow, and now and then a '
+      'question about how the day went. Nothing else, and never more than one '
+      'a day.';
   static const String acceptLabel = 'Yes, remind me';
   static const String declineLabel = 'Not now';
   static const String continueLabel = 'To the garden';
@@ -161,7 +169,7 @@ class _NotificationInvitationPageState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final habit = ref.watch(newestHabitProvider).value;
+    final preview = ref.watch(notificationPreviewProvider).value;
 
     return Scaffold(
       body: SafeArea(
@@ -180,7 +188,7 @@ class _NotificationInvitationPageState
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: _stage == _InvitationStage.withoutNotifications
                     ? _closing(theme)
-                    : _offer(theme, habit),
+                    : _offer(theme, preview),
               ),
             ),
           ),
@@ -189,7 +197,7 @@ class _NotificationInvitationPageState
     );
   }
 
-  List<Widget> _offer(ThemeData theme, Habit? habit) => <Widget>[
+  List<Widget> _offer(ThemeData theme, EveningCheckIn? preview) => <Widget>[
     Text(
       NotificationInvitationPage.question,
       style: theme.textTheme.headlineSmall,
@@ -203,7 +211,7 @@ class _NotificationInvitationPageState
       ),
     ),
     const SizedBox(height: AppSpacing.large),
-    if (habit != null) _NotificationPreview(habit: habit),
+    if (preview != null) _NotificationPreview(checkIn: preview),
     const SizedBox(height: AppSpacing.large),
     FilledButton(
       onPressed: _stage == _InvitationStage.asking ? null : _accept,
@@ -241,24 +249,19 @@ class _NotificationInvitationPageState
 
 /// The actual notification, shown as it will arrive.
 ///
-/// Composed by `composeEveningCheckIn` — the same function the scheduler uses —
-/// rather than written out here, so the screen cannot drift into promising
-/// something the app does not send.
+/// It is handed a composed [EveningCheckIn] rather than composing one, because
+/// composing it needs the reflection composer and the habit's real occasion
+/// calendar — both asynchronous, both the scheduler's own inputs. See
+/// [notificationPreviewProvider], which is where that happens and where the
+/// reasoning lives.
 class _NotificationPreview extends StatelessWidget {
-  const _NotificationPreview({required this.habit});
+  const _NotificationPreview({required this.checkIn});
 
-  final Habit habit;
+  final EveningCheckIn checkIn;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final checkIn = composeEveningCheckIn(
-      habit: habit,
-      occasion: ExpectedOccasion(
-        index: 0,
-        date: LocalDate.from(DateTime.now()).addDays(1),
-      ),
-    );
 
     return Semantics(
       label: 'Example notification. ${checkIn.title}. ${checkIn.body}',

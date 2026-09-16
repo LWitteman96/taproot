@@ -103,6 +103,17 @@ final notificationStartupProvider = FutureProvider<void>((ref) async {
 /// Left as the no-op composer and overridden by the reflection feature when it
 /// lands — the point being that the *notification* is one object with one
 /// slot, not two features racing for the same evening (reflection spec §1).
+///
+/// **Two call sites read this, and they have to stay the same call.**
+/// `NudgeScheduler._queue` composes what is sent; `notificationPreviewProvider`
+/// composes what the invitation screen shows. That screen's entire claim is
+/// that it cannot promise something the app does not send, and overriding this
+/// provider is what makes the claim testable at all: while [NoReflectionPrompt]
+/// is installed the prompt is always null, and null is indistinguishable from
+/// an omitted argument at both ends — which is exactly how the two drifted the
+/// first time. Any change to what this composes belongs in
+/// `test/features/notifications/notification_invitation_page_test.dart` as well
+/// as in the scheduler's tests.
 final reflectionPromptComposerProvider = Provider<ReflectionPromptComposer>(
   (ref) => const NoReflectionPrompt(),
 );
