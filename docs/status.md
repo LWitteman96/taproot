@@ -25,7 +25,7 @@ Update this file in the same commit as the work it describes.
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | **Supabase sync** (`lib/app/sync/`) | **Built — connectivity trigger, paged pull with an overlap cursor, push, last-write-wins** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
-| **Notification permission** | **Built — the invitation after the first habit, denial as a mode, resume-aware** |
+| **Notification permission** | **Built and reviewed — the invitation after the first habit, denial as a mode, resume-aware, restore-aware** |
 | **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule** |
 | Garden rendering | Not started (blocked on external illustrator) |
 | Insight surfacing | Not started |

@@ -216,8 +216,22 @@ class NudgeScheduler {
     // permission to nudge.
     //
     // A future occasion's row earns nothing by existing early: autonomy only
-    // counts rows whose date has passed, and any occasion that slips by
-    // unrecorded is picked up by the backfill above.
+    // counts rows whose date has passed, and an occasion that slips by
+    // unrecorded is picked up by the backfill above **as long as the app is
+    // opened again inside [EngineConstants.nudgeBackfillDays]**.
+    //
+    // That qualifier is the cost of this change, and it is worth naming. The
+    // old behaviour wrote `today - 30` through `today + 7`, so a denied user
+    // who declined and came back five weeks later still had every occasion
+    // recorded: the forward rows from the first visit met the backfill window
+    // of the second, and the overlap quietly covered absences up to 37 days.
+    // Now the span is 30, flat, and days 31–35 of that absence get no row at
+    // all — a hole that reads as "the habit had fewer expected occasions"
+    // rather than as missing data.
+    //
+    // Thirty days is still the right line, and the forward rows were wrong for
+    // exactly the reason they were useful: they committed days that had not
+    // happened, on a permission state one settings trip from changing.
     final windowEnd = access.canPost
         ? today.addDays(EngineConstants.nudgeHorizonDays)
         : today;

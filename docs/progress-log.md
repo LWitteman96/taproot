@@ -21,6 +21,102 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-16 — the invitation's review fixes
+
+Branch: `feature/notification-onboarding`, off `develop`. Five review findings on PR #10, plus the
+merge of `develop` that had left the PR conflicted and therefore running no CI at all.
+
+### Landed
+
+**The invitation can no longer strand anyone.** Both awaits in `_accept` ran after
+`setState(asking)` had disabled both buttons, on a page reached by redirect with no `AppBar` and
+nothing to pop to — so a plugin that failed to initialise left killing the app as the only exit.
+They are caught now, and caught *separately*, because they are not the same failure: a platform that
+cannot be asked cannot post, so that lands on the `withoutNotifications` screen; a record that
+cannot be written is bookkeeping, and folding it into the same branch would have the screen say "no
+notifications, then" while the OS had just granted them.
+
+That surfaced a second thing the finding did not name. `PreferencesInvitationStore` now remembers,
+in memory, that the question was put even when the write fails — otherwise the router's gate, which
+reads only the persisted answer, sends the user straight back to the invitation the moment they
+leave it, and keeps doing it. Nothing persists, so the next launch asks once more, which is the
+designed fail direction.
+
+**The record no longer survives a restore as a silent "already asked".** It is device-local and
+unsynced, but it is not unmoved: Android Auto Backup carries it and iOS `NSUserDefaults` rides
+iCloud. Permission does not travel with it, so a restored phone read `invitationOffered: true` on an
+install that had never prompted — and that user was never offered notifications again, on any
+device. Fixed on both platforms, by the only route each one admits:
+
+- Android excludes the store from cloud backup *and* device-to-device transfer
+  (`res/xml/backup_rules.xml`, `res/xml/data_extraction_rules.xml`). Worth recording: the path is
+  **not** `shared_prefs/`. `shared_preferences_android` backs `SharedPreferencesAsync` with Jetpack
+  DataStore by default, so the file is `files/datastore/FlutterSharedPreferences.preferences_pb` —
+  excluding `shared_prefs` would have looked exactly as correct and protected nothing.
+- iOS cannot exclude `NSUserDefaults` from a backup at all, so the restore is caught on arrival
+  instead: `resolveAppGate` cross-checks the record against the platform, and treats "record says
+  offered, platform says undecided" as not-yet-offered.
+
+That cross-check needed `NotificationMode.undecided` to be reachable, and it was not:
+`flutter_local_notifications` answers a flat `isEnabled` on iOS. `LocalNotificationGateway` now asks
+`permission_handler` when the answer is not "granted", where iOS's `notDetermined` arrives as
+`PermissionStatus.denied` and a real refusal as `permanentlyDenied`. Android gets `denied` either
+way, which is why it needs the backup rules rather than the cross-check.
+
+**The preview is composed through the same call the scheduler makes.** `notificationPreviewProvider`
+now reads `reflectionPromptComposerProvider`, derives the habit's *real* next occasion from the
+occasion calendar rather than a fabricated `ExpectedOccasion(index: 0, …)`, and passes
+`reflectionPrompt` — which the old call site omitted. The omission was invisible because
+`NoReflectionPrompt` always answers null, so both ends agreed by accident and no test could tell.
+The page test now asserts against `composeEveningCheckIn`'s output rather than copied literals, and
+drives the seam with a composer that actually asks something.
+
+The hand-written copy moved with it. "One message in the evening: how today went, and the cue for
+tomorrow" promised the reflection question every evening, when it is scored per occasion against a
+budget and a cooldown and most evenings clears nothing — the one line on the screen that cannot
+over-promise, over-promising.
+
+**Two comments now say what is true rather than what was intended.**
+
+- The denied pass's "any occasion that slips by unrecorded is picked up by the backfill" held only
+  for absences inside `nudgeBackfillDays`. Stopping at today shortened total coverage from
+  back-30-plus-forward-7 to 30 flat, so a denied user away 31–35 days now has occasions with no
+  ledger row — which autonomy reads as fewer expected occasions, not as missing data. The comment
+  says so, and a test pins the span so the claim cannot drift back.
+- `main.dart`'s "Riverpod 3 pauses a provider whose listeners are all paused, so trading this
+  `ref.watch` for a `ref.read` breaks the lifecycle listener" is **false**, and the test said to
+  guard it could not fail. Verified both ways: the provider is not auto-dispose, so one `read` keeps
+  it alive exactly as well, and the app behaves identically. What is load-bearing is that some
+  widget of app lifetime holds the provider *at all*. A new widget test pumps `TaprootApp`, drives
+  `inactive → resumed` through it and fails when the line is dropped; the unit test's claim was
+  rewritten to what it actually demonstrates.
+
+### Decided
+
+- **A failed preference write is not a failed answer.** The two are recorded separately, and the
+  screen follows the user's answer rather than the bookkeeping.
+- **Backup exclusion and the platform cross-check compose rather than duplicate.** Each platform
+  admits exactly one of them, and neither alone covers both.
+- **Every preference this app keeps in `SharedPreferencesAsync` is now device-local across a
+  restore**, because the exclusion is the whole DataStore directory. A preference that should
+  survive a restore needs its own store, not a narrowing of that rule.
+
+### Left open
+
+- The `NudgeScheduler` single-flight guard (PR #10's second review comment) is **not** in here — it
+  belongs to `feature/scheduler-single-flight`, which is the branch that owns it.
+- The PR description still claims "there is a test that fails if the watch is ever traded for a
+  read". The code comments it came from are corrected; the description is not ours to edit.
+- Nothing scans whether the Android backup rules actually take effect on a device — the new test
+  reads the XML and the manifest, which catches a rule that was never wired up, not a rule the
+  platform ignores.
+
+### Next
+
+Merge order is the orchestrator's. Nothing on this branch blocks #11 or #12.
+
+---
+
 ## 2026-09-15 — the notification invitation
 
 Branch: `feature/notification-onboarding`, off `develop`.
