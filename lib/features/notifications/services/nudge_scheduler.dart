@@ -137,6 +137,20 @@ class NudgeScheduler {
 
     final planned = <PlannedOccasion>[];
 
+    // **One question per evening, across every habit** (reflection spec §1).
+    // The app gets "one consistent conversational slot instead of two
+    // competing interruptions", and that is a statement about the user's
+    // evening rather than about one plant: three habits all clearing threshold
+    // for Thursday must not put three questions into Thursday's three
+    // notifications. Only the pass can enforce it, because only the pass sees
+    // every habit — the composer is asked about one habit at a time and would
+    // answer yes to all three.
+    //
+    // Habits are planned in creation order, so when two compete for an evening
+    // the older one keeps the question: deterministic, and the same tie-break
+    // the cap uses.
+    final questionedEvenings = <LocalDate>{};
+
     // **One counter, incremented only when the OS actually took a
     // notification.** Recounting decisions afterwards is what made the cap
     // unreachable: the known-row branch reports `send` for every historical
@@ -151,6 +165,7 @@ class NudgeScheduler {
           access: access,
           pending: pending,
           queuedSoFar: queued,
+          questionedEvenings: questionedEvenings,
         );
         planned.addAll(pass.occasions);
         queued = pass.queued;
@@ -180,6 +195,7 @@ class NudgeScheduler {
     required NotificationAccess access,
     required Set<int> pending,
     required int queuedSoFar,
+    required Set<LocalDate> questionedEvenings,
   }) async {
     // A paused habit expects nothing. Writing occasions through a pause would
     // put days the engine has agreed not to count into the denominator the
@@ -249,18 +265,45 @@ class NudgeScheduler {
         // table. Left alone it would be a nudge the ledger claims and the user
         // never gets, which is the one direction that corrupts the
         // measurement rather than just missing a reminder.
-        if (known.sent &&
-            access.canPost &&
-            queued < EngineConstants.maximumPendingNudges &&
-            !pending.contains(notificationIdFor(known.id)) &&
-            nudgeDeliveryTime(occasion).isAfter(now)) {
-          final requeued = await _queue(
-            habit: habit,
-            occasion: occasion,
-            nudgeId: known.id,
-            deliverAt: nudgeDeliveryTime(occasion),
-          );
-          if (requeued) queued++;
+        final knownDeliverAt = nudgeDeliveryTime(occasion);
+        if (known.sent && access.canPost && knownDeliverAt.isAfter(now)) {
+          final isPending = pending.contains(notificationIdFor(known.id));
+
+          if (!isPending) {
+            if (queued < EngineConstants.maximumPendingNudges) {
+              final requeued = await _queue(
+                habit: habit,
+                occasion: occasion,
+                nudgeId: known.id,
+                deliverAt: knownDeliverAt,
+                questionedEvenings: questionedEvenings,
+              );
+              if (requeued) queued++;
+            }
+          } else if (knownDeliverAt.difference(now) <=
+              EngineConstants.nudgeQuestionRefreshWindow) {
+            // **Still queued, and close enough that its question is worth
+            // re-asking.** The reflection half looks back at the day the
+            // message arrives, and it was written when the notification was
+            // queued — possibly a week earlier, about a day that had not
+            // happened. Re-composing it here is what the note on
+            // `ReflectionPromptComposer` promises when it says re-planning
+            // keeps the question from going stale; without this, the promise
+            // was a comment, because nothing ever rewrote a notification the
+            // OS was already holding.
+            //
+            // Cost is bounded by the window: at one occasion a day, only the
+            // next evening's notification is ever in range. The same
+            // notification id replaces rather than adds, so the pending count
+            // does not move and the cap accounting is untouched.
+            await _queue(
+              habit: habit,
+              occasion: occasion,
+              nudgeId: known.id,
+              deliverAt: knownDeliverAt,
+              questionedEvenings: questionedEvenings,
+            );
+          }
         }
 
         priorOccasions++;
@@ -329,6 +372,7 @@ class NudgeScheduler {
           occasion: occasion,
           nudgeId: nudgeId,
           deliverAt: deliverAt,
+          questionedEvenings: questionedEvenings,
         );
         if (sent) {
           await _nudges.markSent(nudgeId);
@@ -399,13 +443,18 @@ class NudgeScheduler {
     required ExpectedOccasion occasion,
     required String nudgeId,
     required DateTime deliverAt,
+    required Set<LocalDate> questionedEvenings,
   }) async {
     try {
-      final prompt = await _reflection.promptFor(
-        habit: habit,
-        occasion: occasion,
-        deliverAt: deliverAt,
-      );
+      final evening = LocalDate.from(deliverAt);
+      final prompt = questionedEvenings.contains(evening)
+          ? null
+          : await _reflection.promptFor(
+              habit: habit,
+              occasion: occasion,
+              deliverAt: deliverAt,
+            );
+      if (prompt != null) questionedEvenings.add(evening);
       await _gateway.schedule(
         ScheduledNudge(
           notificationId: notificationIdFor(nudgeId),

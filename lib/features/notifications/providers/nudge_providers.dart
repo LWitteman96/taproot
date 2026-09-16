@@ -15,6 +15,7 @@ import 'package:taproot/features/notifications/services/local_notification_gatew
 import 'package:taproot/features/notifications/services/local_nudge_service.dart';
 import 'package:taproot/features/notifications/services/nudge_response_recorder.dart';
 import 'package:taproot/features/notifications/services/nudge_scheduler.dart';
+import 'package:taproot/features/reflection/services/check_in_prompt_composer.dart';
 
 final nudgeServiceProvider = Provider<NudgeRepository>(
   (ref) => LocalNudgeService(database: ref.watch(appDatabaseProvider)),
@@ -100,11 +101,21 @@ final notificationStartupProvider = FutureProvider<void>((ref) async {
 
 /// The reflection question that rides along on the evening notification.
 ///
-/// Left as the no-op composer and overridden by the reflection feature when it
-/// lands — the point being that the *notification* is one object with one
-/// slot, not two features racing for the same evening (reflection spec §1).
+/// The seam this provider exists for is now filled: the notification carries
+/// the same question the check-in screen would ask, composed by the same
+/// functions, because reflection and the next-day nudge are deliberately *one*
+/// message and not two features racing for the same evening (reflection spec
+/// §1).
+///
+/// [NoReflectionPrompt] stays in the tree as the override every test that is
+/// about *scheduling* rather than about the question reaches for — a nudge
+/// test should not have to satisfy the reflection gates to assert a delivery
+/// time.
 final reflectionPromptComposerProvider = Provider<ReflectionPromptComposer>(
-  (ref) => const NoReflectionPrompt(),
+  (ref) => CheckInPromptComposer(
+    loader: ref.watch(habitInputsLoaderProvider),
+    clock: ref.watch(clockProvider),
+  ),
 );
 
 final nudgeSchedulerProvider = Provider<NudgeScheduler>(

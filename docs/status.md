@@ -24,7 +24,7 @@ Update this file in the same commit as the work it describes.
 | **Habit creation** (`lib/features/habits/`) | **Built — the design flow, the tracking opt-out, plant choice, and a live entry gate** |
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
-| **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule** |
+| **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule, and the question on the evening notification** |
 | Garden rendering | Not started (blocked on external illustrator) |
 | Insight surfacing | Not started |
 
@@ -46,10 +46,12 @@ app was actually nudging that habit at the time. The engine's autonomy denominat
 four, as it has since it was written. A `suppression_reason` column on `nudges` closes both at once
 and is the next thing to do to that table.
 
-The check-in is reachable from the garden but **not yet from the evening notification**. Scheduling
-composes its question through `ReflectionPromptComposer`, and the stand-in `NoReflectionPrompt` is
-still the one installed — so the notification fires without a question attached. That seam is a
-follow-up, deliberately kept out of the reflection branch.
+The check-in is reachable from the garden **and from the evening notification**. The two halves of
+that message — *how did today go*, *and tomorrow, then?* — are composed by the same functions the
+screen uses, so the app cannot ask one user the same question in two voices. The question is written
+when the notification is queued, which can be up to seven days early, so two rules hold it honest:
+detection never runs later than *now*, however far out the delivery is, and a queued notification is
+re-composed once it is within a day of firing.
 
 What is deliberately *not* built yet: Supabase and Sentry are still uninitialised (the `.env` files
 hold no credentials, and `Supabase.initialize` on an empty URL throws at launch), and the garden
