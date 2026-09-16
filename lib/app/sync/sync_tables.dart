@@ -1,0 +1,90 @@
+import 'package:taproot/app/database/app_database.dart';
+
+/// One table, as sync sees it.
+///
+/// Sync does not care what a row *means* — it moves rows by their key and lets
+/// the engine make sense of them later. What it needs per table is the key the
+/// row is recognised by, and that is the only thing that differs between them.
+class SyncTable {
+  const SyncTable({
+    required this.name,
+    required this.keyColumns,
+    this.isMutable = false,
+  });
+
+  final String name;
+
+  /// The primary key, in order. It is what makes the same row recognisable on
+  /// both sides, and therefore what makes every push and pull idempotent.
+  final List<String> keyColumns;
+
+  /// Whether a row here can change after it is written.
+  ///
+  /// The append-only ledgers cannot: a completion is an event that already
+  /// happened, and an undo is a second event rather than an edit. Those tables
+  /// have no `updated_at`, need no conflict rule, and merge as a plain union.
+  ///
+  /// The mutable ones carry `updated_at` off the *client's* clock, which is
+  /// what the last-write-wins comparison uses — never `synced_at`, which is the
+  /// server's and is only ever a pull cursor.
+  final bool isMutable;
+
+  /// Identifies this row among rows of the same table.
+  ///
+  /// The separator is NUL, written as an **escape**. A literal NUL byte in the
+  /// source makes the file binary to every text tool that matters: git shows
+  /// `Bin 0 -> 2807 bytes` instead of a diff, so no reviewer ever sees this
+  /// file change, and `git grep -I` â which the secret scan uses â skips it
+  /// entirely. It is a legal Dart string either way; only the spelling differs.
+  ///
+  /// NUL rather than a printable separator because no column value can contain
+  /// it, so two different key tuples cannot collide on their joined form.
+  String keyOf(Map<String, Object?> row) =>
+      keyColumns.map((column) => row[column]).join('\u0000');
+
+  @override
+  String toString() => 'SyncTable($name)';
+}
+
+/// Every table sync drains, in **foreign-key order**.
+///
+/// The order is load-bearing on push. Every child table carries a composite
+/// foreign key into `habits (id, user_id)`, so a completion pushed before the
+/// habit it hangs off is a 23503 — and on a first sync, where both are new,
+/// that is not a rare interleaving but the normal one. Habits go first and
+/// everything else follows.
+///
+/// `profiles` is deliberately absent. It is the one server table with no device
+/// counterpart: created by the `handle_new_user` trigger, keyed by the auth
+/// user id, and carrying no `pending_sync` column to drain. Table-symmetric
+/// code written from "the same tables on both sides" would try to sync it.
+const List<SyncTable> syncTables = <SyncTable>[
+  SyncTable(
+    name: AppSchema.habits,
+    keyColumns: <String>['id'],
+    isMutable: true,
+  ),
+  SyncTable(
+    name: AppSchema.completions,
+    keyColumns: <String>['habit_id', 'id'],
+  ),
+  SyncTable(
+    name: AppSchema.completionRetractions,
+    keyColumns: <String>['habit_id', 'completion_id'],
+  ),
+  SyncTable(
+    name: AppSchema.reflections,
+    keyColumns: <String>['id'],
+    isMutable: true,
+  ),
+  SyncTable(
+    name: AppSchema.nudges,
+    keyColumns: <String>['id'],
+    isMutable: true,
+  ),
+  SyncTable(
+    name: AppSchema.habitPauses,
+    keyColumns: <String>['id'],
+    isMutable: true,
+  ),
+];

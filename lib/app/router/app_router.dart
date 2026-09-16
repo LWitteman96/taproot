@@ -12,6 +12,8 @@ import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/notifications/domain/notification_invitation.dart';
 import 'package:taproot/features/notifications/pages/notification_invitation_page.dart';
 import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
+import 'package:taproot/features/reflection/pages/check_in_page.dart';
+import 'package:taproot/features/reflection/services/check_in_assembler.dart';
 
 /// Every path in the app, in one place.
 abstract final class AppRoutes {
@@ -23,6 +25,10 @@ abstract final class AppRoutes {
 
   /// The notification invitation, offered once, after the first habit.
   static const String notificationInvitation = '/notifications/invitation';
+
+  /// The evening check-in. Reached from the garden today, and from the evening
+  /// notification once that seam is wired.
+  static const String checkIn = '/check-in';
 }
 
 /// What the router needs to know about a user before letting them in.
@@ -154,6 +160,15 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.notificationInvitation,
         builder: (context, state) => const NotificationInvitationPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.checkIn,
+        // The garden hands its already-assembled offer over as `extra`, so the
+        // screen re-verifies one habit instead of re-electing a winner among
+        // all of them. Absent — a deep link, a cold start on this path — the
+        // screen assembles from scratch.
+        builder: (context, state) =>
+            CheckInPage(offered: state.extra as CheckInOffer?),
       ),
     ],
   );

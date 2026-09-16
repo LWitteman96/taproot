@@ -267,10 +267,22 @@ class NudgeScheduler {
         // table. Left alone it would be a nudge the ledger claims and the user
         // never gets, which is the one direction that corrupts the
         // measurement rather than just missing a reminder.
+        //
+        // **Every id the occasion accounts for, not just this row's.** A
+        // collapsed row's `sent` may have been OR'd in from a duplicate that
+        // another device minted, whose notification was queued under *that*
+        // id. Asking only about `known.id` reads a perfectly healthy pending
+        // notification as one the OS lost, and queues a second nudge for the
+        // same evening — with nothing able to cancel the first, because the
+        // scheduler never looks that id up again. See
+        // [NudgeRecord.mergedIds].
+        final isPending = known.occasionIds.any(
+          (nudgeId) => pending.contains(notificationIdFor(nudgeId)),
+        );
         if (known.sent &&
             access.canPost &&
             queued < EngineConstants.maximumPendingNudges &&
-            !pending.contains(notificationIdFor(known.id)) &&
+            !isPending &&
             nudgeDeliveryTime(occasion).isAfter(now)) {
           final requeued = await _queue(
             habit: habit,

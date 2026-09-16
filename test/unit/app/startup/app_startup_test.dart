@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:taproot/app/database/app_database.dart';
 import 'package:taproot/app/database/database_provider.dart';
+import 'package:taproot/app/connectivity/connectivity_providers.dart';
 import 'package:taproot/app/startup/app_startup.dart';
+import 'package:taproot/app/supabase/supabase_config.dart';
+import 'package:taproot/app/sync/sync_drain.dart';
 
 import '../../../utils/store_fixtures.dart';
 
@@ -59,6 +64,8 @@ Matcher throwsMessage(String fragment) => throwsA(
 );
 
 void main() {
+  _syncKeepAliveTests();
+
   group('app startup', () {
     test('resolves once the database is open', () async {
       final opener = CountingOpener();
@@ -209,4 +216,88 @@ void main() {
       expect(opener.opened.last.isOpen, isTrue);
     });
   });
+}
+
+/// Startup is what keeps sync listening.
+///
+/// Its own group because the thing under test is not a value but a
+/// *subscription*, and the bug it guards against is silent: a `SyncService`
+/// nobody listens to is paused by Riverpod, so it never hears the network come
+/// back, and its state still reads `idle` — which is also what a healthy sync
+/// with nothing to do reads. Only the drain running tells the two apart.
+void _syncKeepAliveTests() {
+  group('startup keeps sync alive', () {
+    late StreamController<bool> connectivity;
+    late CountingDrain drain;
+
+    ProviderContainer containerForSync() {
+      final container = ProviderContainer(
+        overrides: [
+          databaseOpenerProvider.overrideWithValue(CountingOpener().call),
+          supabaseConfigProvider.overrideWithValue(
+            const SupabaseConfig(
+              url: 'http://127.0.0.1:54331',
+              publishableKey: 'a-json-web-token',
+            ),
+          ),
+          syncDrainProvider.overrideWithValue(drain),
+          isOnlineProvider.overrideWith((ref) => connectivity.stream),
+        ],
+      );
+      addTearDown(() {
+        connectivity.close();
+      });
+      addTearDown(container.dispose);
+      return container;
+    }
+
+    setUp(() {
+      connectivity = StreamController<bool>.broadcast();
+      drain = CountingDrain();
+    });
+
+    test(
+      'so the network coming back drains, with no screen watching',
+      () async {
+        final container = containerForSync();
+
+        // Exactly what the app does: watch startup, and nothing else.
+        container.listen(appStartupProvider, (previous, next) {});
+        await container.read(appStartupProvider.future);
+
+        connectivity.add(true);
+        await pumpEventQueue();
+
+        expect(drain.runs, 1);
+      },
+    );
+
+    test('and the store is open before the first drain', () async {
+      // Ordered on purpose: the drain reads the local database, so one that
+      // fired before the open would fail on launch for no reason.
+      final container = containerForSync();
+
+      container.listen(appStartupProvider, (previous, next) {});
+      connectivity.add(true);
+      await pumpEventQueue();
+      expect(drain.runs, 0, reason: 'startup has not finished yet');
+
+      await container.read(appStartupProvider.future);
+      connectivity.add(true);
+      await pumpEventQueue();
+
+      expect(drain.runs, 1);
+    });
+  });
+}
+
+/// A drain that only counts.
+class CountingDrain implements SyncDrain {
+  int runs = 0;
+
+  @override
+  Future<DrainOutcome> drain() async {
+    runs++;
+    return DrainOutcome.drained;
+  }
 }
