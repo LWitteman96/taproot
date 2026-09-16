@@ -21,6 +21,323 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-16 — Sync review fixes
+
+Branch: `feature/supabase-sync`. Cross-review of PR #8 by another session; this entry records what
+the review found and what the fixes decided. Nothing here is new feature work.
+
+### The file nobody could read
+
+`lib/app/sync/sync_tables.dart` was the only non-text file in the repository. `keyOf` joined its key
+columns on a **literal NUL byte** rather than the `\u0000` escape, and git calls any blob with a NUL
+in its first 8000 bytes binary — so 81 lines defining every table sync touches, including the
+`isMutable` flags two of the bugs below turn on, appeared as `Bin 2807 -> 3382 bytes` in every diff
+and PR view and in no blame. `dart format` and `flutter analyze` both parse such a file happily, and
+the pre-commit hook returns early without a TTY, so nothing in the pipeline had an opinion.
+
+It also silently exempted the file from this repo's own secret scan, which is `git grep -nIE` — `-I`
+skips binary files.
+
+Three changes, because they fix different halves:
+
+- the escape, which makes the file text (the runtime value is identical);
+- `.gitattributes` `*.dart diff` / `*.sql diff`, which fixes the **display** — note the bare `diff`
+  attribute, not `diff=text`, which names a custom driver that does not exist;
+- a `text-encoding` CI job and a pre-commit check *above* the TTY guard, which is what actually stops
+  the next one. A check that only runs when a human is watching is not a check.
+
+### A deleted habit was resurrected permanently
+
+The worst of the five. `deleted_at` is documented three times as one-way, but `_reconciled` applied
+the rule **only on the branch where the incoming row won `updated_at`** — and a deletion is exactly
+the kind of row that loses, because the device that deleted a habit stops editing it while the other
+device carries on.
+
+Delete on B at t1; rename offline on A at t2 > t1. A's pull reads the deletion, `_incomingWins` says
+no, the row is discarded whole, and the cursor advances past it. The push then fails `pin_soft_delete`
+with PT409, `_push` counts it a loser and clears `pending_sync` — so A holds a live habit the server
+and every other device consider deleted, off the queue, with the only row that would fix it already
+behind the cursor. It never self-heals, and A keeps planning occasions and recording completions
+against it, which push cleanly because the soft-deleted parent still satisfies the composite FK.
+
+Two fixes, at two different points:
+
+1. **The root cause.** `_reconciled` was a winner-side fixup for a rule that is not about winning.
+   `_pinnedOntoLoser` now applies the one-way rules from the other side too: a losing incoming row
+   still stamps its `deleted_at` onto the local row, keeping everything else including
+   `pending_sync`, so the rename is not dropped either.
+2. **The race the pull cannot catch** — a deletion written *after* this drain's pull. That needs the
+   push to recognise it, which needed the two PT409s telling apart.
+
+### The two PT409s mean opposite things
+
+`reject_stale_update` and `pin_soft_delete` share a SQLSTATE because PostgREST reads the three digits
+after `PT` as the HTTP status, so every 409 the schema raises must spell it `PT409`. They do not
+share a recovery:
+
+- **stale** — the winner is *ahead* of the pull cursor. Do nothing; the next pull brings it. This is
+  what `_push`'s "leaving it queued would retry it forever" comment argues, and it is correct.
+- **soft-delete pinned** — the winner is *behind* the cursor. It was written before the pull, read by
+  that pull, and rejected on the way in. Waiting for a pull waits forever.
+
+Both triggers now carry a machine-readable `detail` (`sync_conflict=stale_update`,
+`sync_conflict=soft_delete_pinned`), and `StaleRowRejected` has become a sealed `SyncWriteRejected`
+with two cases so a caller cannot handle one and silently inherit the wrong recovery for the other.
+An unrecognised detail falls back to the stale reading, which is the conservative half — it waits,
+where guessing the other way would stamp a deletion nobody asked for.
+
+### The nudges exemption removed a guard without adding the rule
+
+`20260915100000_pin_last_write_wins.sql` exempts `nudges` from `reject_stale_update` and gives a
+reason: its cross-device story is OR'd flags with a read-time collapse, not last-write-wins. The
+reason is sound and the exemption stays — a flag write from the device that did *not* create the row
+is legitimate, and gating it would reject a `sent` for clock skew, which is the same corrupted
+denominator by another route.
+
+What was missing is that **the OR did not exist for the case the trigger would have covered**.
+`collapseDuplicateOccasions` merges rows with *different ids* for one occasion. Nothing merged two
+versions of *one id*, which is the ordinary case, and `nudges` is `isMutable: true` — an
+unconditional `ON CONFLICT DO UPDATE` with nothing to reject it. A device that had not heard about an
+answer pushed its whole row and cleared `confirmed` on the server permanently: every device pulls the
+cleared flag back, and the device holding the truth is no longer pending so it never re-pushes.
+
+**The invariant, now encoded on both sides:** `sent`, `confirmed` and `declined` are monotonic. Once
+true, never false. Each records that something happened, and nothing that happened can un-happen. A
+row arriving with a flag cleared is a device that has not heard yet, not a retraction.
+
+- Server: `merge_nudge_flags()` ORs the three and clamps `updated_at` forward rather than rejecting.
+- Client: `_reconciled` ORs them when the incoming row wins, `_pinnedOntoLoser` when it loses.
+
+The pgTAP assertion that pinned the exemption was vacuous — it set `confirmed = true` on a row where
+`confirmed` was already true, asserting that the exemption exists (which nothing threatened) and
+nothing about the merge (which did not exist). Replaced with four that pin the exemption *and* the
+rule together.
+
+### The collapse queued a second notification
+
+Introduced by the collapse rather than exposed by it. The merged record is synthetic — `id` from one
+row, `sent` possibly from another — which is right for the *measurement* and wrong for anything
+treating `id` as an addressable identity. `NudgeScheduler` does: it asks the OS whether
+`notificationIdFor(known.id)` is still pending, and a `sent` OR'd in from a duplicate whose
+notification was queued under *that* id reads as one the OS lost. Two nudges the same evening, one
+occasion, and nothing able to cancel the first because that id is never looked up again.
+
+`NudgeRecord.mergedIds` now carries the absorbed ids — a read-time artifact, never persisted, with no
+column — and the requeue check asks about `occasionIds` instead. `scheduledFor` merging to the
+earliest is documented as a record of intent: `nudgeDeliveryTime(occasion)` is authoritative.
+
+There was no test anywhere across this seam: `nudge_scheduler_test.dart` predates the collapse and
+`occasion_collapse_test.dart` tests the function alone. There are three now, including one asserting
+that a genuinely lost notification is *still* requeued, so the guard cannot quietly become "never".
+
+### A signed-out drain said "all backed up"
+
+`drain()` returns early without throwing when nobody is signed in, which is right. `syncNow` could not
+tell that return from a real one and stamped `lastSucceededAt` anyway. Since nothing signs a user in
+yet this is the **only** path a dev build takes, so the first sync UI would have been wired to a
+number that had never once been true. `drain()` now returns a `DrainOutcome`, and `SyncStatus` has a
+`signedOut` case distinct from `idle` — the same argument `unavailable`'s doc-comment already makes.
+
+### Smaller
+
+- The pull's page cap now logs like the push's. Ending there is safe, but a first install restoring a
+  year of history would finish partially and say nothing, and "the next drain" is a connectivity edge
+  rather than a timer.
+- `pullPage` orders on `id` as a secondary key, so a page is the same page every time and the
+  `fresh.isEmpty` escape hatch cannot fire on a reshuffle.
+- `pendingRows` orders oldest-first, which its doc comment already promised.
+
+### Verified
+
+Every fix above was confirmed by reverting it and watching a named test go red, not by reasoning —
+four in the drain tests, one in the scheduler. 701 tests, up from 686.
+
+The two migrations were **not** verified locally: `supabase db reset` is destructive and this repo
+runs one local Supabase instance shared across every worktree, so running it would have wiped
+whatever another worktree had in flight. They were left to the `supabase.yml` workflow, which runs
+`scripts/supabase-verify.sh` on any `supabase/**` change — including the second-application
+idempotency check both are written for. It has since run and passed. The pgTAP plan went 34 → 37.
+
+### Deliberately not fixed, and why
+
+Both were raised in review, both are real, and neither is fixed here — recorded so the next reader
+finds the reasoning rather than the gap.
+
+- **`_reconciled`'s `category` leniency has the same losing-side hole `deleted_at` had.** A category
+  set on one device and beaten by a newer edit on another is discarded rather than merged. Not fixed
+  with the deletion, because it is a different decision: `deleted_at` has one true reading, whereas
+  merging a null `category` from the losing side means choosing between "the user cleared it" and
+  "that build could not decode it" — the ambiguity `readOpenEnum` creates. It wants the open-enum
+  question answered, not a symmetry argument. It also self-heals on the next edit, which the deletion
+  did not.
+- **`priorSent` counts a collapsed duplicate pair as one sent occasion.** This looks like the fade
+  accounting being skewed by every collapsed pair, and it is instead the documented OR applied
+  consistently: one occasion, one entry, sent if either device sent. Changing it would change what
+  the collapse *means*, so it belongs to growth-engine §6 rather than to a bug fix.
+
+### A repeat finding: assertions that cannot fail
+
+The `nudges` exemption was pinned by a pgTAP assertion that set `confirmed = true` on a row where
+`confirmed` was already true — it asserted that the exemption exists, which nothing threatened, and
+nothing about the merge rule, which did not exist. **This is the fourth vacuous assertion this
+project has caught**, which makes it a pattern rather than a coincidence, so the general lesson
+belongs here rather than in one more branch entry:
+
+> A test that passes against the bug is worse than no test, because it is *counted*. The three that
+> have produced one here are always the same shapes:
+>
+> - **Asserting a state the fixture already had.** Setting a flag that was already set, inserting a
+>   row that was already there. The assertion passes on the setup, never reaching the behaviour.
+> - **Asserting something the type system or a `NOT NULL` already guarantees.** It cannot fail, so it
+>   measures nothing.
+> - **Asserting a relation that holds for a reason other than the one under test** — the
+>   `synced_at >= updated_at` case already written up in the backend entry, which passed with an
+>   insert-only trigger because the comparison was vacuous rather than because the trigger worked.
+>
+> The check that catches all three is the one used throughout this branch: **revert the fix and watch
+> the named test go red.** An assertion that stays green with the behaviour removed is not testing
+> that behaviour. It costs one command and it is the only thing that distinguishes a test from a
+> statement of belief.
+
+### Still open — and a security one
+
+**`git grep -nIE` skips binary files, and the secret scan uses it.** Found while fixing the binary
+`sync_tables.dart`: the `secrets` job in `flutter.yml` would not have seen a credential committed
+inside any blob git classifies as binary, on a public repository where a secret committed once is
+compromised even if removed. The `text-encoding` gate added here closes it **only for `lib/` and
+`test/`** — a binary file anywhere else in the tree is still invisible to the scan. The real fix is
+in the scan, not in the encoding gate. Carried to the next branch.
+
+### Next
+
+PR #10 rebases onto this. Its single-flight guard and this branch's absorbed-ids change touch the
+same nudge-identity invariant from opposite ends.
+
+---
+
+## 2026-09-15 — Supabase sync
+
+Branch: `feature/supabase-sync`, on top of the backend and the completion tap.
+
+### Landed
+
+```
+lib/app/supabase/      supabase_config · supabase_providers
+lib/app/connectivity/  connectivity_providers
+lib/app/sync/          sync_state · sync_service · sync_drain · sync_tables
+                       local_sync_store · remote_sync_store · two_way_sync_drain
+lib/app/database/      schema v3 — sync_cursors
+supabase/migrations/   habit_journey_and_category · pin_last_write_wins
+```
+
+`main()` brings Supabase up, the false → true connectivity edge starts a drain, the drain pulls
+every table and then pushes everything still queued, and `sync_cursors` remembers where the pull got
+to.
+
+All three traps the backend branch left written down are closed, and each was verified by
+deleting the guard and watching a test go red rather than by reasoning about it:
+
+- **The pull pages.** PostgREST's `max_rows` is 1000 and it truncates *silently*, so a first-install
+  pull of a year of completions would otherwise get one page and no signal there was more.
+- **The cursor overlaps by 30 seconds.** `synced_at` is stamped when a row is written and the row
+  becomes visible when its transaction commits, which is later — so a cursor advanced exactly to the
+  read time steps over late-committing rows permanently. Re-reading a window is safe because every
+  upsert on both sides is idempotent. `gte` rather than `gt` for the same reason in miniature.
+- **Duplicate nudge occasions collapse at read.** Two devices can each plan the same evening, and
+  sync writes rows by key without meeting the duplicate check `saveNudge` enforces — so the ledger
+  holds two rows for one occasion, which is two entries in autonomy's denominator for something
+  that happened once. Lowest id takes identity (arbitrary but stable, so both devices agree without
+  talking and keep agreeing after a re-pull), flags are OR'd, and it is a read rather than a delete
+  because no client role has DELETE: the duplicate is permanent on the server and would be re-pulled
+  forever, so dropping it locally undoes itself.
+
+### Decided
+
+**No remote services behind the repository interfaces, and the earlier plan that called for them is
+wrong.** That line came from the guide's §8 table, which describes inkBlox, where SQLite is a
+*cache* and the remote is the real store — one interface over both makes sense there. Taproot
+inverted that deliberately: the local store is primary, Supabase is backup and cross-device merge.
+Two consequences kill the idea. Sync performs exactly two operations — *rows changed since a cursor,
+paged* and *rows where `pending_sync = 1`* — and **neither exists on any repository interface**.
+Everything the interfaces do offer is meaningless server-side — a remote `pauseHabit()`, a
+window-checked `retractCompletion()`. Writing them would have produced four classes with no caller
+while sync still needed a second surface next to them. It got that surface instead:
+`RemoteSyncStore` and `LocalSyncStore`, both row-shaped.
+
+**The drain pulls before it pushes, and getting this wrong is the story worth keeping.** It was
+written push-first, with a confident rationale and a passing test. Inverting the order to check the
+test was load-bearing showed it still passed — so it was proving nothing, and working out why showed
+the *design* was wrong rather than the test. **A PostgREST upsert is unconditional**: there is no
+"only if newer", so the server keeps whatever it is last sent, and pushing first lets a device
+holding a stale edit overwrite a newer one made elsewhere. Both devices then agree on the stale
+value and nothing records that an edit was lost. Pulling first puts the last-write-wins comparison
+where it is implemented — a local row that loses is replaced *and comes off the queue*, so the push
+cannot send it. The cost is that a failed pull defers the push a cycle, which is the cheap
+direction: the local store is primary, so late backup costs nothing where a clobbered edit is gone
+for good.
+
+The general lesson, and it has now paid twice on this project: **a test that passes proves nothing
+until you have seen it fail.** Inverting the thing under test is cheap, and it is the only way to
+tell a guard from a decoration.
+
+**Last-write-wins is a constraint, not a convention.** The ordering above is correct and tested, and
+it was still only a convention — nothing stopped a *future* caller upserting a stale row, and "the
+only caller does it in the right order" is true exactly until a second caller exists.
+`reject_stale_update` raises `PT409` when `updated_at` goes backwards, the `pin_soft_delete` shape.
+Scoped to the tables where whole-row last-write-wins is genuinely the reconciliation rule —
+`habits`, `reflections`, `habit_pauses` — and **deliberately not `nudges`**, whose cross-device
+story is OR'd flags with a read-time collapse of duplicate occasions, where a strict gate would
+reject a legitimate flag write from the device that did not create the row. That exemption has its
+own pgTAP assertion, so applying the trigger more widely later fails the suite rather than quietly
+breaking the merge. The append-only ledgers need nothing: no `updated_at`, no UPDATE grant, and a
+replay ignored on its key. **Equal passes** — the overlap window re-reads covered ground and a
+retried push resends a batch verbatim, so an identical row arriving again is what sync does all day.
+
+Three smaller ones:
+
+- **The pull cursor lives in the device database, not in `shared_preferences`.** The two can
+  disagree in one direction that matters: a cursor outliving the rows it describes asks for
+  everything written after a point with nothing behind it, and skips the lot, silently and
+  permanently. Same file means they are wiped together. The opposite direction just re-pulls, which
+  every key here makes free.
+- **A pulled null `category` never erases one already here.** `readOpenEnum` reads a category this
+  build has not heard of as null, so "the user cleared it" and "that device could not decode it" are
+  the same value on the wire. Taken at face value it would erase categories every time an older
+  build synced. Null is *no opinion*.
+- **The queue is cleared conditionally on `updated_at`.** A user can edit a row between it being
+  read for the push and the push returning, which re-queues it; clearing by key alone wipes that
+  flag and the edit is never sent. A silent lost write, and a slower network makes it likelier.
+
+**A fake is only as strict as you make it, and one bug got through anyway.** The push used a merging
+upsert for every table — and every completion this device had ever recorded would have come back
+403, because a merging upsert is `ON CONFLICT DO UPDATE` and the append-only ledgers deliberately
+grant no UPDATE. No Dart test could see it: the fake remote accepted both resolutions. It was found
+by pointing curl at the running stack and watching the real answer. `scripts/supabase-verify.sh`
+gained a fifth step so the invariant is executable in the one CI job that has a database, and its
+failure message says what to do if the grants ever move on purpose.
+
+### Left open
+
+- **The occasion collapse keys on the local date, not the instant.** That matches what the ledger
+  already enforces — `saveNudge` refuses a second row for a habit on a date — and what a completion
+  is matched against. It does mean two occasions deliberately planned for one day would merge. The
+  scheduler does not do that today; if it ever wants to, this is the rule to revisit.
+- **A cleared loser holds stale content until the next pull.** Safe for a specific reason rather
+  than by luck: the row that beat it was written after this device last pulled — that is what made
+  it stale — so the winner sits ahead of the cursor. Written into the code rather than left as a
+  claim.
+- **Nothing is proven against a hosted project.** Every gate here runs against the local stack;
+  `.env.stg` and `.env.prod` are still placeholders, so stg and prod start without a backend and say
+  so as `SyncStatus.unavailable`.
+- **Sync is untested at widget level.** The trigger, the drain and the store are covered against
+  fakes and real SQLite; no test drives the app through an offline edit and a reconnect.
+
+### Next
+
+Auth. Sync does nothing until somebody is signed in — `currentUserId` returning null is an ordinary
+state the drain handles rather than a gap to close here — so nothing synchronises on a real device
+until that branch lands. Then the reflection check-in, the last stage of the build order still
+missing.
 ## 2026-09-15 — the reflection check-in
 
 Branch: `feature/reflection`, on top of notifications.

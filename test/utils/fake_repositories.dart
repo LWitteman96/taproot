@@ -10,6 +10,7 @@ import 'package:taproot/features/habits/domain/completion_repository.dart';
 import 'package:taproot/features/habits/domain/completion_retraction.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/notifications/domain/nudge_repository.dart';
+import 'package:taproot/features/notifications/domain/occasion_collapse.dart';
 import 'package:taproot/features/reflection/domain/reflection_repository.dart';
 
 import 'store_contract.dart';
@@ -293,13 +294,23 @@ class FakeNudgeService implements NudgeRepository {
     }
   }
 
+  /// Puts a row in the ledger the way a **sync pull** does: by key, without
+  /// the one-row-per-occasion guard.
+  ///
+  /// That guard belongs to the local write path, and `saveNudge` is right to
+  /// enforce it. Sync does not go through it — `LocalSyncStore.applyPulled`
+  /// writes rows by key — which is exactly how two devices that each planned
+  /// the same evening end up with two rows for one occasion, and therefore the
+  /// only way to stage the case `collapseDuplicateOccasions` exists for.
+  void injectPulled(NudgeRecord nudge) => _nudges[nudge.id] = nudge;
+
   @override
   Future<List<NudgeRecord>> nudgesFor(String habitId) async =>
-      _nudges.values.where((nudge) => nudge.habitId == habitId).toList()
-        ..sort((a, b) {
-          final byTime = a.expectedOccasionAt.compareTo(b.expectedOccasionAt);
-          return byTime != 0 ? byTime : a.id.compareTo(b.id);
-        });
+      // Collapsed like the SQLite service: a fake that is more forgiving than
+      // the real one is a test that passes where the app does not.
+      collapseDuplicateOccasions(
+        _nudges.values.where((nudge) => nudge.habitId == habitId),
+      );
 
   @override
   Future<void> markSent(String nudgeId) async =>

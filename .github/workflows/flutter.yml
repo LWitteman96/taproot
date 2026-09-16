@@ -46,6 +46,44 @@ jobs:
       - name: Run tests
         run: flutter test
 
+  text-encoding:
+    name: Source is text
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # A single stray NUL byte turns a source file binary to every tool that
+      # reads it by content rather than by extension: git renders it as
+      # `Bin 2807 -> 3382 bytes` instead of a diff, so it appears in no PR view
+      # and no blame, and `git grep -I` skips it — which silently exempts it
+      # from the secret scan in this same workflow.
+      #
+      # `lib/app/sync/sync_tables.dart` was exactly that for a whole branch:
+      # 81 lines defining every table sync touches, reviewed by nobody, because
+      # `keyOf` joined on a literal NUL instead of the `\u0000` escape. Neither
+      # `dart format` nor `flutter analyze` minds — both parse it happily — so
+      # nothing in the pipeline had an opinion. This is the job that does.
+      #
+      # `.gitattributes` fixes how such a file *displays*; only this stops one
+      # being committed.
+      - name: Fail if a source file is not text
+        run: |
+          offenders=""
+          for f in $(git ls-files -- lib test); do
+            [ -f "$f" ] || continue
+            if ! tr -d '\000' < "$f" | cmp -s - "$f"; then
+              offenders="$offenders $f"
+            fi
+          done
+          if [ -n "$offenders" ]; then
+            echo "::error::A source file under lib/ or test/ contains a NUL byte, which makes it binary to git and to grep:$offenders"
+            echo "Write the byte as an escape (\u0000) rather than as a literal."
+            exit 1
+          fi
+          echo "Every tracked source file under lib/ and test/ is text."
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest

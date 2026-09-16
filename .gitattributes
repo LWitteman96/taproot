@@ -10,3 +10,20 @@
 # Caveat worth knowing: union merge never raises a conflict, so it will not tell
 # you the two entries interleaved out of order. Check newest-first after a merge.
 docs/progress-log.md merge=union
+
+# Dart source is text, and git must be told so rather than sniffing for it.
+#
+# Git calls a blob binary when it finds a NUL in the first 8000 bytes. That is
+# a heuristic about content, not about language, so a stray control byte in a
+# `.dart` file turns the whole file into `Bin 1234 -> 5678 bytes` — no diff, no
+# blame, no review. `lib/app/sync/sync_tables.dart` spent this branch that way.
+#
+# This fixes the *display*. It does not stop the byte getting in; the
+# `text-encoding` CI job is what does that.
+#
+# The attribute is `diff` **set**, not `diff=text`. The latter names a custom
+# diff driver, which would have to be defined in git config and is not; the
+# bare form is git's documented "treat as text even when it contains bytes that
+# normally never appear in text files".
+*.dart diff
+*.sql diff
