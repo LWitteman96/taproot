@@ -1,8 +1,8 @@
 <Rive version="1" kind="fragment">
-    <ViewModel defaultInstanceId="0:4" name="Fern" id="0:2">
-        <ViewModelPropertyNumber name="vitality" id="0:3"/>
-        <ViewModelInstance exports="true" name="Default" id="0:4">
-            <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="0:3"/>
+    <ViewModel defaultInstanceId="9:4" name="Fern" id="9:2">
+        <ViewModelPropertyNumber name="vitality" id="9:3"/>
+        <ViewModelInstance exports="true" name="Default" id="9:4">
+            <ViewModelInstanceNumber propertyValue="1" viewModelPropertyId="9:3"/>
         </ViewModelInstance>
     </ViewModel>
 </Rive>

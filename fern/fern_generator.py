@@ -1,68 +1,3 @@
-# ---------- the sway ----------
-SWAY_FRAMES = 300      # 5s at 60fps
-SWAY_SAMPLES = 24      # keyframes per part per loop
-
-# Hand-tuned amplitudes and phases for the mature layout. Any part not listed
-# -- a fiddlehead, a stage-2 frond -- falls back to SWAY_DEFAULT and a spread of
-# phases derived from its position in the stage.
-SWAY = {  # part: (degrees, phase in turns, second-harmonic phase in turns)
-    "frond-back-left":  (1.7, 0.00, 0.31),
-    "frond-back-right": (1.5, 0.37, 0.74),
-    "frond-left":       (2.6, 0.62, 0.12),
-    "frond-right":      (2.4, 0.18, 0.55),
-    "frond-center":     (1.9, 0.81, 0.93),
-}
-SWAY_DEFAULT = {"frond": 2.2, "fiddlehead": 1.3}   # degrees, by kind
-SWAY_HARMONIC = 0.28      # weight of the 2x component, relative to the fundamental
-SWAY_AMPLITUDE = 1.0      # global multiplier on every part's amplitude
-
-# How the parts of one plant relate to each other in time.
-#   "independent" -- each part carries its own phase. Reads as several plants in
-#                    still air, each doing its own thing.
-#   "wind"        -- one shared oscillation crossing the plant left to right,
-#                    each part lagging by its tip's x-position. Reads as one
-#                    plant in moving air.
-# Switchable so the two can be compared in the preview:
-#     python3 fern_generator.py --sway=wind
-SWAY_MODE = "independent"
-SWAY_WIND_LAG = 0.22      # phase lag in turns, across the full width of the plant
-SWAY_WIND_HARMONIC = 0.17 # fixed offset of the harmonic, in wind mode
-
-# Irrational-ish steps, so parts with no hand-tuned phase still spread out
-# rather than landing on top of each other.
-SWAY_PHASE_STEP = 0.37
-SWAY_HARMONIC_STEP = 0.61
-
-def sway_degrees(part):
-    if part.gid in SWAY:
-        return SWAY[part.gid][0]
-    return SWAY_DEFAULT[part.kind]
-
-def sway_phases(part, index, parts):
-    """(fundamental phase, harmonic phase) in turns, per the current mode."""
-    if SWAY_MODE == "wind":
-        xs = [p.tip[0] for p in parts]
-        span = (max(xs) - min(xs)) or 1
-        lag = (part.tip[0] - min(xs)) / span * SWAY_WIND_LAG
-        return lag, lag + SWAY_WIND_HARMONIC
-    if part.gid in SWAY:
-        _, phase, phase2 = SWAY[part.gid]
-        return phase, phase2
-    return (index * SWAY_PHASE_STEP) % 1.0, (index * SWAY_HARMONIC_STEP) % 1.0
-
-def sway_angle(part, index, parts, t):
-    """Rotation in radians at loop fraction t, for one part.
-
-    A fundamental plus a quarter-weight second harmonic. Both are whole numbers
-    of cycles per loop, so frame 0 and the last frame agree exactly and the loop
-    is seamless. The harmonic is what stops several parts on one period from
-    reading as a metronome, and it survives both phase modes.
-    """
-    amplitude = math.radians(sway_degrees(part)) * SWAY_AMPLITUDE
-    phase, phase2 = sway_phases(part, index, parts)
-    return (amplitude * math.sin(2*math.pi * (t + phase))
-            + amplitude * SWAY_HARMONIC * math.sin(4*math.pi * (t + phase2)))
-
 """Taproot fern generator — produces layered, animation-ready SVGs and RML.
 
 Plant canvases: 1024x1024, ground line at y=GROUND, stems emerge from (512, GROUND-18).
@@ -323,6 +258,73 @@ def base_mound(width=120):
         Dots("base-clumps", clumps, SOIL_DARK),
     ])
 
+# ---------- stage 0: the seed ----------
+SEED = "#B8895A"; SEED_SHADE = "#9A6E45"; SEED_LIGHT = "#D9B386"
+SEED_CENTRE = (512, GROUND - 40)   # rests in the mound; the soil lip hides the bottom edge
+SEED_SIZE = (74, 56)               # length, width
+SEED_TILT = -28                    # degrees; the pointed end lifts to the right
+K = 0.5523                         # cubic handle length for a circular quarter
+
+def _seed_frame():
+    (cx, cy), a = SEED_CENTRE, math.radians(SEED_TILT)
+    ca, sa = math.cos(a), math.sin(a)
+    return lambda u, v: (cx + u*ca - v*sa, cy + u*sa + v*ca)
+
+def seed_body():
+    """A plump egg with a soft point, a flat shadow along its underside, and a shine."""
+    P = _seed_frame(); L, Wd = SEED_SIZE; hl, hw = L / 2, Wd / 2
+    tail, top, tip, bot = P(-hl, 0), P(-hl*0.1, -hw), P(hl, 0), P(-hl*0.1, hw)
+    body = Contour([
+        (tail, P(-hl, hw*K),          P(-hl, -hw*K)),
+        (top,  P(-hl*0.1 - hl*0.9*K, -hw), P(hl*0.62, -hw)),
+        (tip,  P(hl*1.0, -hw*0.36),  P(hl*1.0, hw*0.36)),
+        (bot,  P(hl*0.62, hw),        P(-hl*0.1 - hl*0.9*K, hw)),
+    ], closed=True)
+    # shadow: the lower edge of the body, closed by a shallower inner curve
+    s_tail, s_tip, s_mid = P(-hl*0.93, hw*0.32), P(hl*0.90, hw*0.18), P(-hl*0.05, hw*0.40)
+    shade = Contour([
+        (s_tail, P(-hl*0.62, hw*0.44), P(-hl*0.72, hw*0.86)),
+        (P(-hl*0.1, hw*0.99), P(-hl*0.45, hw*1.0), P(hl*0.42, hw*0.99)),
+        (s_tip, P(hl*0.78, hw*0.52), P(hl*0.55, hw*0.30)),
+        (s_mid, P(hl*0.40, hw*0.44), P(-hl*0.45, hw*0.38)),
+    ], closed=True)
+    shine = Dot(*P(-hl*0.38, -hw*0.42), L*0.11, Wd*0.085)
+    return Group("seed", [
+        Path("seed-body", [body], fill=SEED),
+        Path("seed-shade", [shade], fill=SEED_SHADE),
+        Path("seed-outline", [body], stroke=ROOT_OUTLINE, stroke_width=2.6),
+        Dots("seed-shine", [shine], SEED_LIGHT),
+    ], tip=P(hl, 0), kind="seed")
+
+def seed_bed(width=112):
+    """The mound behind the seed, and a low lip of soil in front of it."""
+    x0, x1, h = 512 - width/2, 512 + width/2, width * 0.22
+    a, b, c = (x0, GROUND), (512, GROUND - h), (x1, GROUND)
+    c_out, a_in = quad_to_cubic(c, (512, GROUND + 5), a)
+    mound = Contour([(a, a_in, (x0 + width*0.10, GROUND - h*0.9)),
+                     (b, (512 - width*0.25, GROUND - h*1.1), (512 + width*0.25, GROUND - h*1.1)),
+                     (c, (x1 - width*0.10, GROUND - h*0.9), c_out)], closed=True)
+    lw, lh = width * 0.80, h * 0.62          # the lip: lower and narrower, in front
+    la, lb, lc = (512 - lw/2, GROUND), (512 + 4, GROUND - lh), (512 + lw/2, GROUND)
+    lc_out, la_in = quad_to_cubic(lc, (512, GROUND + 4), la)
+    lip = Contour([(la, la_in, (512 - lw*0.30, GROUND - lh*0.35)),
+                   (lb, (512 - lw*0.22, GROUND - lh*1.05), (512 + lw*0.22, GROUND - lh*0.95)),
+                   (lc, (512 + lw*0.30, GROUND - lh*0.30), lc_out)], closed=True)
+    clumps = [Dot(512 - width*0.24, GROUND - h*0.30, 3.4, 2.6),
+              Dot(512 + width*0.20, GROUND - h*0.22, 2.8, 2.1),
+              Dot(512 + width*0.02, GROUND - h*0.12, 2.2, 1.7)]
+    back = Group("base", [Path("base-mound", [mound], fill=SOIL_DARK, stroke=ROOT_OUTLINE, stroke_width=2.6)])
+    front = Group("soil-front", [
+        Path("soil-front-lip", [lip], fill=SOIL, stroke=ROOT_OUTLINE, stroke_width=2.6),
+        Dots("soil-front-clumps", clumps, SOIL_DARK),
+    ])
+    return back, front
+
+def seed_stage():
+    """SVG order: mound (back), seed, soil lip (front)."""
+    back, front = seed_bed()
+    return [back, Group("plant", [seed_body()]), front]
+
 # ---------- the mature layout (shared by Young / Mature / Bloom) ----------
 FRONDS = {  # id: (ctrl1, ctrl2, tip, back, pairs, max_len, seed)
     "frond-back-left":  ((500, 700), (380, 470), (318, 205), True, 13, 88, 11),
@@ -341,12 +343,16 @@ def frond_by_id(fid, scale=1.0, sori=False, pairs_override=None):
 STAGE_MOUND = {1: 70, 2: 90, 3: 105, 4: 125, 5: 125}
 
 def stage_parts(n):
-    """(animatable parts, mound) for one stage, in SVG order.
+    """(animatable parts, back, front) for one stage.
 
-    The parts are the things that sway and droop — fronds and fiddleheads. The
-    mound does neither, so it is kept separate rather than being filtered back
-    out of the list later.
+    The parts are the things that sway and droop. `back` and `front` are the
+    static soil layers either side of them: stages 1-5 have only a mound in
+    front of the stems, and the seed has a mound behind it *and* a lip of soil
+    in front, which is what hides the bottom edge of the seed.
     """
+    if n == 0:    # Seed: three layers, and the only stage with a back element
+        back, plant, front = seed_stage()
+        return plant.children, back, front
     parts = []
     if n == 1:    # Sprout: one tight fiddlehead
         parts.append(fiddlehead("fiddlehead-1", (515, 800), (490, 730), (498, 680), coil=38, turns=1.75, side=1, stem_w=13))
@@ -362,12 +368,16 @@ def stage_parts(n):
     else:         # Mature (4) / Bloom (5)
         for fid in MATURE_ORDER:
             parts.append(frond_by_id(fid, sori=(n == 5)))
-    return parts, base_mound(STAGE_MOUND[n])
+    return parts, None, base_mound(STAGE_MOUND[n])
 
 def stage(n):
-    """The drawables for one stage, as the SVG writer wants them."""
-    parts, mound = stage_parts(n)
-    return [Group("plant", parts), mound]
+    """The drawables for one stage, as the SVG writer wants them: back to front."""
+    parts, back, front = stage_parts(n)
+    out = [back] if back else []
+    out.append(Group("plant", parts))
+    if front:
+        out.append(front)
+    return out
 
 # ---------- roots ----------
 class Root:
@@ -607,12 +617,81 @@ def sway_animation(parts, nodes, ids, anim_id, depth=2):
     out.append(f'{ind}</LinearAnimation>')
     return out
 
+# ---------- the sway ----------
+SWAY_FRAMES = 300      # 5s at 60fps
+SWAY_SAMPLES = 24      # keyframes per part per loop
+
+# Hand-tuned amplitudes and phases for the mature layout. Any part not listed
+# -- a fiddlehead, a stage-2 frond -- falls back to SWAY_DEFAULT and a spread of
+# phases derived from its position in the stage.
+SWAY = {  # part: (degrees, phase in turns, second-harmonic phase in turns)
+    "frond-back-left":  (1.7, 0.00, 0.31),
+    "frond-back-right": (1.5, 0.37, 0.74),
+    "frond-left":       (2.6, 0.62, 0.12),
+    "frond-right":      (2.4, 0.18, 0.55),
+    "frond-center":     (1.9, 0.81, 0.93),
+}
+# A seed does not sway like a frond -- it rocks, gently, in its bed.
+SWAY_DEFAULT = {"frond": 2.2, "fiddlehead": 1.3, "seed": 1.2}   # degrees, by kind
+SWAY_HARMONIC = 0.28      # weight of the 2x component, relative to the fundamental
+SWAY_AMPLITUDE = 1.0      # global multiplier on every part's amplitude
+
+# How the parts of one plant relate to each other in time.
+#   "independent" -- each part carries its own phase. Reads as several plants in
+#                    still air, each doing its own thing.
+#   "wind"        -- one shared oscillation crossing the plant left to right,
+#                    each part lagging by its tip's x-position. Reads as one
+#                    plant in moving air.
+# Switchable so the two can be compared in the preview:
+#     python3 fern_generator.py --sway=wind
+SWAY_MODE = "independent"
+SWAY_WIND_LAG = 0.22      # phase lag in turns, across the full width of the plant
+SWAY_WIND_HARMONIC = 0.17 # fixed offset of the harmonic, in wind mode
+
+# Irrational-ish steps, so parts with no hand-tuned phase still spread out
+# rather than landing on top of each other.
+SWAY_PHASE_STEP = 0.37
+SWAY_HARMONIC_STEP = 0.61
+
+def sway_degrees(part):
+    if part.gid in SWAY:
+        return SWAY[part.gid][0]
+    return SWAY_DEFAULT[part.kind]
+
+def sway_phases(part, index, parts):
+    """(fundamental phase, harmonic phase) in turns, per the current mode."""
+    if SWAY_MODE == "wind":
+        xs = [p.tip[0] for p in parts]
+        span = (max(xs) - min(xs)) or 1
+        lag = (part.tip[0] - min(xs)) / span * SWAY_WIND_LAG
+        return lag, lag + SWAY_WIND_HARMONIC
+    if part.gid in SWAY:
+        _, phase, phase2 = SWAY[part.gid]
+        return phase, phase2
+    return (index * SWAY_PHASE_STEP) % 1.0, (index * SWAY_HARMONIC_STEP) % 1.0
+
+def sway_angle(part, index, parts, t):
+    """Rotation in radians at loop fraction t, for one part.
+
+    A fundamental plus a quarter-weight second harmonic. Both are whole numbers
+    of cycles per loop, so frame 0 and the last frame agree exactly and the loop
+    is seamless. The harmonic is what stops several parts on one period from
+    reading as a metronome, and it survives both phase modes.
+    """
+    amplitude = math.radians(sway_degrees(part)) * SWAY_AMPLITUDE
+    phase, phase2 = sway_phases(part, index, parts)
+    return (amplitude * math.sin(2*math.pi * (t + phase))
+            + amplitude * SWAY_HARMONIC * math.sin(4*math.pi * (t + phase2)))
+
 # ---------- the vitality droop ----------
 DROOP_MAX_DEGREES = 25     # what a fully upright part gives up at vitality 0
 NEAR_VERTICAL_DEGREES = 80 # above this, which way a part leans is an accident
 
 # A fiddlehead is a young shoot, not a laden frond -- it gives less.
-DROOP_KIND_SCALE = {"frond": 1.0, "fiddlehead": 0.6}
+# A seed is 0: the engine has no vitality before the first completion, so
+# stage 0 ignores it. Both droop poses then key the same rotation, which is what
+# "key every blended property in every pose" asks for anyway.
+DROOP_KIND_SCALE = {"frond": 1.0, "fiddlehead": 0.6, "seed": 0.0}
 
 # Which way a near-vertical part falls. Above NEAR_VERTICAL_DEGREES the tip's
 # x-offset is too small to mean anything -- frond-center leans right by 36px out
@@ -642,6 +721,10 @@ def droop_angle(part, n):
     dx, dy = part.tip[0] - BASE[0], part.tip[1] - BASE[1]
     elevation = math.degrees(math.atan2(-dy, abs(dx)))          # 0 = flat, 90 = straight up
     magnitude = math.radians(DROOP_MAX_DEGREES * elevation / 90) * DROOP_KIND_SCALE[part.kind]
+    # A part that cannot droop has no direction to get wrong, so it is not made
+    # to declare one.
+    if magnitude == 0:
+        return 0.0
     if elevation >= NEAR_VERTICAL_DEGREES:
         if (n, part.gid) not in DROOP_DIRECTION:
             raise ValueError(
@@ -714,6 +797,12 @@ def still_pose(anim_id, parts, nodes, ids, depth=2):
 SMOOTHING_SECONDS = 0.6   # how long a changed vitality takes to arrive
 SWAY_FLOOR = 40           # blend weight at vitality 0: the sway never fully stops
 
+# Stage 0 is the exception. There is no vitality before the first completion, so
+# the seed must not react to it at all -- and a floor equal to the ceiling makes
+# the range mapper a constant, which is vitality-independence without giving
+# stage 0 a differently-shaped state machine from every other stage.
+SEED_SWAY_FLOOR = 100
+
 def converter_chain(name, ids, min_output, max_output, ease, group_id):
     """A DataConverterGroup: smooth the incoming value, then remap its range."""
     smoother_id, mapper_id, interpolator_id, ease_id = ids(), ids(), ids(), ids()
@@ -746,8 +835,10 @@ SWAY_EASE = (0.4, 0, 1, 1)
 # The view model is shared by every stage artboard, declared once in its own
 # file. Names are the host's surface: one `Fern` with one `vitality`, whichever
 # stage is on screen.
-DATA_CLIENT = 0
-VIEWMODEL_ID, VITALITY_ID, INSTANCE_ID = "0:2", "0:3", "0:4"
+# Client 9, not 0: stage_rml uses Ids(client=n) and stage 0 is the seed, so the
+# data file would collide with it.
+DATA_CLIENT = 9
+VIEWMODEL_ID, VITALITY_ID, INSTANCE_ID = "9:2", "9:3", "9:4"
 
 def data_rml():
     return "\n".join([
@@ -772,7 +863,7 @@ def stage_rml(n, name):
     Each file gets its own id client, so ids cannot collide across the five even
     though they share one document and one namespace.
     """
-    parts, mound = stage_parts(n)
+    parts, back, front = stage_parts(n)
     ids = Ids(client=n)
     artboard_id, machine_id, style_id = ids(), ids(), ids()
     sway_layer_id, sway_blend_id, sway_bindable_id = ids(), ids(), ids()
@@ -781,16 +872,21 @@ def stage_rml(n, name):
     droop_group_id, sway_group_id = ids(), ids()
     nodes, paints = {}, {}
     body = []
-    # reversed: the mound is painted last in SVG, so it is declared first here
-    body += rml_item(mound, (0, 0), ids, 2, paints)
+    # RML draw order is the reverse of SVG's: the first Shape declared paints on
+    # top. So the front soil goes first, the plant next, and whatever sits
+    # behind the plant goes last.
+    if front:
+        body += rml_item(front, (0, 0), ids, 2, paints)
     for part in reversed(parts):
         body += part_node(part, ids, 2, nodes, paints)
+    if back:
+        body += rml_item(back, (0, 0), ids, 2, paints)
 
     artboard = f"Fern{name.capitalize()}"
     head = [
         '<Rive version="1" kind="fragment">',
         f'    <Artboard defaultStateMachineId="{machine_id}" viewModelId="{VIEWMODEL_ID}" '
-        f'viewModelInstanceId="{INSTANCE_ID}" x="{(n - 1) * (W + STAGE_GUTTER)}" y="0" '
+        f'viewModelInstanceId="{INSTANCE_ID}" x="{n * (W + STAGE_GUTTER)}" y="0" '
         f'width="{W}" height="{W}" styleId="{style_id}" name="{artboard}" id="{artboard_id}">',
         f'        <LayoutComponentStyle name="Artboard Style" id="{style_id}"/>',
         '',
@@ -850,14 +946,15 @@ def stage_rml(n, name):
         '',
     ] + converter_chain("Droop", ids, 0, 100, DROOP_EASE, droop_group_id) + [
         '',
-    ] + converter_chain("Sway", ids, SWAY_FLOOR, 100, SWAY_EASE, sway_group_id) + [
+    ] + converter_chain("Sway", ids, SEED_SWAY_FLOOR if n == 0 else SWAY_FLOOR,
+                        100, SWAY_EASE, sway_group_id) + [
         '</Rive>',
         '',
     ]
     # the shapes were emitted at depth 2; the wrapping plant Node sits at depth 2 too
     return "\n".join(head + ["    " + line if line else line for line in body] + tail)
 
-STAGES = {1: "sprout", 2: "seedling", 3: "young", 4: "mature", 5: "bloom"}
+STAGES = {0: "seed", 1: "sprout", 2: "seedling", 3: "young", 4: "mature", 5: "bloom"}
 
 if __name__ == "__main__":
     import sys

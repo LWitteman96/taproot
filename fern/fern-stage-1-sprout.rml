@@ -1,5 +1,5 @@
 <Rive version="1" kind="fragment">
-    <Artboard defaultStateMachineId="1:3" viewModelId="0:2" viewModelInstanceId="0:4" x="0" y="0" width="1024" height="1024" styleId="1:4" name="FernSprout" id="1:2">
+    <Artboard defaultStateMachineId="1:3" viewModelId="9:2" viewModelInstanceId="9:4" x="1144" y="0" width="1024" height="1024" styleId="1:4" name="FernSprout" id="1:2">
         <LayoutComponentStyle name="Artboard Style" id="1:4"/>
 
         <Node name="plant" id="1:250">
@@ -329,7 +329,7 @@
                 </EntryState>
                 <BlendState1DViewModel x="160" y="0" id="1:6">
                     <BindablePropertyNumber id="1:7">
-                        <DataBindContext sourcePathIds="0:2-0:3" propertyKey="636" converterId="1:16"/>
+                        <DataBindContext sourcePathIds="9:2-9:3" propertyKey="636" converterId="1:16"/>
                     </BindablePropertyNumber>
                     <BlendAnimation1D animationId="1:12" value="0"/>
                     <BlendAnimation1D animationId="1:11" value="100"/>
@@ -346,7 +346,7 @@
                 </EntryState>
                 <BlendState1DViewModel x="160" y="0" id="1:9">
                     <BindablePropertyNumber id="1:10">
-                        <DataBindContext sourcePathIds="0:2-0:3" propertyKey="636" converterId="1:15"/>
+                        <DataBindContext sourcePathIds="9:2-9:3" propertyKey="636" converterId="1:15"/>
                     </BindablePropertyNumber>
                     <!-- ascending value order: the runtime binary-searches these -->
                     <BlendAnimation1D animationId="1:14" value="0"/>

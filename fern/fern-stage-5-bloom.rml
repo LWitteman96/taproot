@@ -1,5 +1,5 @@
 <Rive version="1" kind="fragment">
-    <Artboard defaultStateMachineId="5:3" viewModelId="0:2" viewModelInstanceId="0:4" x="4576" y="0" width="1024" height="1024" styleId="5:4" name="FernBloom" id="5:2">
+    <Artboard defaultStateMachineId="5:3" viewModelId="9:2" viewModelInstanceId="9:4" x="5720" y="0" width="1024" height="1024" styleId="5:4" name="FernBloom" id="5:2">
         <LayoutComponentStyle name="Artboard Style" id="5:4"/>
 
         <Node name="plant" id="5:1757">
@@ -2355,7 +2355,7 @@
                 </EntryState>
                 <BlendState1DViewModel x="160" y="0" id="5:6">
                     <BindablePropertyNumber id="5:7">
-                        <DataBindContext sourcePathIds="0:2-0:3" propertyKey="636" converterId="5:16"/>
+                        <DataBindContext sourcePathIds="9:2-9:3" propertyKey="636" converterId="5:16"/>
                     </BindablePropertyNumber>
                     <BlendAnimation1D animationId="5:12" value="0"/>
                     <BlendAnimation1D animationId="5:11" value="100"/>
@@ -2372,7 +2372,7 @@
                 </EntryState>
                 <BlendState1DViewModel x="160" y="0" id="5:9">
                     <BindablePropertyNumber id="5:10">
-                        <DataBindContext sourcePathIds="0:2-0:3" propertyKey="636" converterId="5:15"/>
+                        <DataBindContext sourcePathIds="9:2-9:3" propertyKey="636" converterId="5:15"/>
                     </BindablePropertyNumber>
                     <!-- ascending value order: the runtime binary-searches these -->
                     <BlendAnimation1D animationId="5:14" value="0"/>
