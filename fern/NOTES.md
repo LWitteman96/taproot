@@ -472,6 +472,10 @@ Each of these produces a clean run and a misleading result:
 - **The `--data` path takes no view model name.** It is `--data=vitality=0.3`,
   not `--data=Fern/vitality=0.3` — the path is relative to the instance bound to
   the artboard. A wrong path does say so: `no property at "..."`.
+- **`--data-dump=` takes a path, `--data=` takes a value**, and they are one
+  character apart. `--data-dump=vitality=0` writes the dump to a **file called
+  `vitality=0`** in the working directory, sets no data, and reports success.
+  Two of these were found in the repo root. Use `--data-dump=-` for stdout.
 
 ### Comparing two renders
 
