@@ -9,6 +9,8 @@ import 'package:taproot/features/garden/pages/garden_page.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/pages/habit_creation_page.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
+import 'package:taproot/features/reflection/pages/check_in_page.dart';
+import 'package:taproot/features/reflection/services/check_in_assembler.dart';
 
 /// Every path in the app, in one place.
 abstract final class AppRoutes {
@@ -17,6 +19,10 @@ abstract final class AppRoutes {
 
   /// Where a user with no habits yet is sent.
   static const String habitCreation = '/habits/new';
+
+  /// The evening check-in. Reached from the garden today, and from the evening
+  /// notification once that seam is wired.
+  static const String checkIn = '/check-in';
 }
 
 /// What the router needs to know about a user before letting them in.
@@ -113,6 +119,15 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.habitCreation,
         builder: (context, state) => const HabitCreationPage(),
+      ),
+      GoRoute(
+        path: AppRoutes.checkIn,
+        // The garden hands its already-assembled offer over as `extra`, so the
+        // screen re-verifies one habit instead of re-electing a winner among
+        // all of them. Absent — a deep link, a cold start on this path — the
+        // screen assembles from scratch.
+        builder: (context, state) =>
+            CheckInPage(offered: state.extra as CheckInOffer?),
       ),
     ],
   );

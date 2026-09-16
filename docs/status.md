@@ -24,17 +24,32 @@ Update this file in the same commit as the work it describes.
 | **Habit creation** (`lib/features/habits/`) | **Built — the design flow, the tracking opt-out, plant choice, and a live entry gate** |
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
-| Reflection check-in and chips | Not started |
+| **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule** |
 | Garden rendering | Not started (blocked on external illustrator) |
 | Insight surfacing | Not started |
 
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
 tap → Supabase sync → notifications and the nudge ledger → reflection check-in → garden → insights.
-The first four are done, and two stages have landed on top of them: habit creation — a prerequisite
-the build order does not name, since every stage after it needs habits a user actually made — and
-notifications, taken ahead of Supabase sync because the two share no code. So **Supabase sync is
-next**: a pusher over the `pending_sync` column the schema already carries. The backend now exists
-ahead of that order, but only as a schema: nothing in `lib/` talks to it yet.
+The first four are done, and three stages have landed on top of them: habit creation — a
+prerequisite the build order does not name, since every stage after it needs habits a user actually
+made — and notifications and the reflection check-in, both taken ahead of Supabase sync because none
+of the three share code. So **Supabase sync is next**: a pusher over the `pending_sync` column the
+schema already carries. The backend now exists ahead of that order, but only as a schema: nothing in
+`lib/` talks to it yet.
+
+One thing the check-in **says** is narrower than the data behind it. An un-nudged occasion is
+autonomy's whole measurement, but `sent: false` is written for four different reasons — the fade
+rule choosing silence, an evening already past when the backfill ran, no notification permission,
+and the pending-notification cap — and the ledger does not keep which. So the autonomy framing, the
+one that tells the user *"you did this without us asking"*, is gated on separate evidence that the
+app was actually nudging that habit at the time. The engine's autonomy denominator still counts all
+four, as it has since it was written. A `suppression_reason` column on `nudges` closes both at once
+and is the next thing to do to that table.
+
+The check-in is reachable from the garden but **not yet from the evening notification**. Scheduling
+composes its question through `ReflectionPromptComposer`, and the stand-in `NoReflectionPrompt` is
+still the one installed — so the notification fires without a question attached. That seam is a
+follow-up, deliberately kept out of the reflection branch.
 
 What is deliberately *not* built yet: Supabase and Sentry are still uninitialised (the `.env` files
 hold no credentials, and `Supabase.initialize` on an empty URL throws at launch), and the garden
