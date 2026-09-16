@@ -289,23 +289,36 @@ class _CheckInLookBackState extends ConsumerState<CheckInLookBack> {
         (!widget.offer.isFirstReflection ||
             CheckInLookBack.allowCantRememberOnFirstReflection);
 
+    // The left two wrap. "Something else", "Can't remember" and "Skip" together
+    // are wider than a 402pt screen at 14pt, and a footer that overflows rather
+    // than wrapping loses the way out entirely.
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        CheckInFooterLink(
-          label: CheckInLookBack.somethingElseLabel,
-          onPressed: isSaving ? null : () => setState(() => _typing = true),
-        ),
-        if (showCantRemember)
-          CheckInFooterLink(
-            label: CheckInLookBack.cantRememberLabel,
-            onPressed: isSaving
-                ? null
-                : () => _answer(
-                    CheckInLookBack.cantRememberLabel,
-                    controller.cantRemember,
-                  ),
+        Expanded(
+          child: Wrap(
+            spacing: 12,
+            children: [
+              CheckInFooterLink(
+                label: CheckInLookBack.somethingElseLabel,
+                onPressed: isSaving
+                    ? null
+                    : () => setState(() => _typing = true),
+              ),
+              if (showCantRemember)
+                CheckInFooterLink(
+                  label: CheckInLookBack.cantRememberLabel,
+                  onPressed: isSaving
+                      ? null
+                      : () => _answer(
+                          CheckInLookBack.cantRememberLabel,
+                          controller.cantRemember,
+                          inputMode: InputMode.cantRemember,
+                        ),
+                ),
+            ],
           ),
-        const Spacer(),
+        ),
         CheckInFooterLink(
           label: CheckInLookBack.skipLabel,
           isQuiet: true,
