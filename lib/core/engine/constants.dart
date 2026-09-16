@@ -347,6 +347,23 @@ abstract final class EngineConstants {
   /// but an unbounded backfill would re-derive a year of history on a launch.
   static const int nudgeBackfillDays = 30;
 
+  /// How close to delivery a queued notification's **question** is re-composed.
+  ///
+  /// The reflection half of the evening message looks back at the day it
+  /// arrives, but it is written when the notification is queued — up to
+  /// [nudgeHorizonDays] earlier, against a day that had not happened yet. The
+  /// planning pass therefore re-composes a pending notification once it is
+  /// this close to firing, which is what makes "re-planning on every launch
+  /// and after every completion keeps it from going stale" true rather than
+  /// merely intended.
+  ///
+  /// Twenty-four hours, because the question is about *today*: a pass inside
+  /// this window is reading the day the message will actually ask about. It is
+  /// also what bounds the cost — at one occasion per habit per day, only the
+  /// next evening's notification is ever in range, so a re-plan re-queues at
+  /// most one notification per habit rather than the whole horizon.
+  static const Duration nudgeQuestionRefreshWindow = Duration(hours: 24);
+
   /// Ceiling on notifications queued at once, across all habits.
   ///
   /// iOS keeps only the 64 soonest pending notifications and silently drops

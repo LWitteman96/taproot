@@ -25,7 +25,7 @@ Update this file in the same commit as the work it describes.
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | **Supabase sync** (`lib/app/sync/`) | **Built — connectivity trigger, paged pull with an overlap cursor, push, last-write-wins** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
-| **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule** |
+| **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule, and the question on the evening notification** |
 | Garden rendering | Not started (blocked on external illustrator) |
 | Insight surfacing | Not started |
 
@@ -37,6 +37,25 @@ notifications, the reflection check-in and Supabase sync. That completes the bui
 last two entries, so what remains is **garden rendering**, which is blocked on the external
 illustrator, and **insight surfacing**, which now has reflection data to surface. Two follow-ups sit
 alongside them: the notification-permission invitation and the check-in composer seam below.
+
+One thing the check-in **says** is narrower than the data behind it. An un-nudged occasion is
+autonomy's whole measurement, but `sent: false` is written for four different reasons — the fade
+rule choosing silence, an evening already past when the backfill ran, no notification permission,
+and the pending-notification cap — and the ledger does not keep which. So the autonomy framing, the
+one that tells the user *"you did this without us asking"*, is gated on separate evidence that the
+app was actually nudging that habit at the time. The engine's autonomy denominator still counts all
+four, as it has since it was written. A `suppression_reason` column on `nudges` closes both at once
+and is the next thing to do to that table.
+
+The check-in is reachable from the garden **and from the evening notification**. The two halves of
+that message — *how did today go*, *and tomorrow, then?* — are composed by the same functions the
+screen uses, so the app cannot ask one user the same question in two voices. The question is written
+when the notification is queued, which can be up to seven days early, so two rules hold it honest:
+detection never runs later than *now*, however far out the delivery is, and a queued notification is
+re-composed once it is within a day of firing. A third rule makes the one-question-an-evening
+promise survive a pass that sees only one habit: a single-habit re-plan seeds itself from the
+evenings the other habits' pending notifications already speak for, so watering one plant in the
+afternoon cannot put a second question into an evening another plant has taken.
 
 What is deliberately *not* built yet: Sentry is still uninitialised, no remote Supabase project is
 provisioned — `.env.dev` points at the local stack and stg and prod are placeholders, so those two
