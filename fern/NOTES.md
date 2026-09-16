@@ -18,8 +18,10 @@ builds clean, inspects clean, and does the wrong thing at runtime.
 - [RML capabilities](#rml-capabilities) — paths, bones, view models
 - [Traps: silent failures](#traps-silent-failures)
 - [Conventions](#conventions)
-- [Adding a stage](#adding-a-stage)
-- [Progress](#progress)
+- [Previewing: a cheatsheet](#previewing-a-cheatsheet) — the commands
+- [Verification recipes](#verification-recipes) — proving a change works
+- [Adding a stage, or another plant](#adding-a-stage-or-another-plant)
+- [Progress](#progress) — what landed, step by step
 
 ---
 
@@ -28,6 +30,7 @@ builds clean, inspects clean, and does the wrong thing at runtime.
 ```
 fern_generator.py     the source of truth: geometry, SVG writer, RML emitter
 pngdiff.py            dependency-free PNG reader, for measuring render changes
+preview.sh            renders every stage at every vitality into build/preview/
 fern-data.rml         generated — the shared Fern view model
 fern-stage-*.rml      generated — one artboard per growth stage
 fern-stage-*.svg      generated — the same five, as flat art
@@ -48,6 +51,8 @@ A project compiles every `.rml` in it as one document, so the six files above
 produce one `.riv` with five artboards sharing one view model. `rive fern` opens
 `FernMature` (named in `rive.yaml`); the others are
 `rive fern --artboard=FernSprout` and so on.
+
+---
 
 ## The generator
 
@@ -377,6 +382,216 @@ canvases put their ground line at y=0 so a plant canvas stacks directly on top.
 
 ---
 
+## Previewing: a cheatsheet
+
+The five artboards are `FernSprout`, `FernSeedling`, `FernYoung`, `FernMature`,
+`FernBloom`. `vitality` is `0`–`1` and **defaults to `1`**, which is the upright,
+full-colour pose — so a preview with no `--data` looks static on purpose.
+
+### Live preview
+
+```bash
+rive fern                                       # FernMature (rive.yaml names it)
+rive fern --artboard=FernSprout                 # any other stage
+rive fern --artboard=FernYoung --data=vitality=0.3
+```
+
+`--data` is a launch value, not a scrubber: it is applied **before the scene
+runs**, so changing it means relaunching. The watcher rebuilds on file change,
+so re-running the generator in another terminal updates the open preview — which
+is how to compare sway modes:
+
+```bash
+python3 fern_generator.py --sway=wind          # then look at the open preview
+python3 fern_generator.py --sway=independent   # back to the default
+python3 fern_generator.py --amplitude=1.6      # exaggerate, to see it clearly
+```
+
+### Stills
+
+One frame, any stage, any vitality:
+
+```bash
+mkdir -p build/shots
+rive fern --screenshot=build/shots/young-30.png \
+          --artboard=FernYoung --data=vitality=0.3 --advance=60
+```
+
+`--advance=60` steps 60 frames at 60fps before capturing. Without it you get the
+pose before anything has advanced; and since the sway is a 300-frame loop, the
+frame number is *which* moment of the sway you are looking at. Use the same
+number across a comparison set or the sway will look like a difference.
+
+The whole grid — every stage at every vitality — is one script:
+
+```bash
+./preview.sh                                  # 5 stages x 5 vitalities
+STAGES="Mature Bloom" ./preview.sh            # just those
+VITALITIES="1 0" ./preview.sh                 # just the ends
+FRAME=150 ./preview.sh                        # a different point in the sway
+VIEWPORT=384x384 ./preview.sh                 # smaller, faster
+```
+
+Output lands in `build/preview/` (gitignored).
+
+### Seeing the sway
+
+A screenshot is a still, so the sway is invisible in one. Capture the same
+artboard and vitality at several frames:
+
+```bash
+for f in 1 75 150 225; do
+  rive fern --screenshot=build/shots/sway-$f.png --artboard=FernMature \
+            --data=vitality=1 --advance=$f
+done
+```
+
+Frames 0 and 300 are the same pose — the loop is seamless by construction.
+
+### Checking a value landed
+
+```bash
+rive fern --data-dump=- --data=vitality=0.25 --advance=1
+```
+
+```json
+{ "name": "vitality", "path": "vitality", "type": "number",
+  "value": 0.25, "changed": true }
+```
+
+### Three ways to preview nothing
+
+Each of these produces a clean run and a misleading result:
+
+- **A wrong `--artboard` name is not an error.** `--artboard=Nope` renders the
+  *default* artboard and writes the png as though nothing happened. The only
+  signal is the `showing FernMature [1/5]` line in the log — check it, or let
+  `preview.sh` validate the name for you.
+- **A screenshot path whose directory does not exist writes nothing**, prints no
+  error, and exits 0. `mkdir -p` first.
+- **The `--data` path takes no view model name.** It is `--data=vitality=0.3`,
+  not `--data=Fern/vitality=0.3` — the path is relative to the instance bound to
+  the artboard. A wrong path does say so: `no property at "..."`.
+
+### Comparing two renders
+
+Hashes answer *did it change*; `pngdiff.py` answers *by how much*.
+
+```bash
+md5 -q build/preview/Mature-v1.png build/preview/Mature-v0.png
+python3 -c "import pngdiff; print(pngdiff.changed_pixels(
+    'build/preview/Mature-v1.png', 'build/preview/Mature-v0.png'))"
+```
+
+Only compare renders that differ in one thing. Pixel counts across two different
+droop poses are not comparable with each other.
+
+### After any change to the generator
+
+```bash
+python3 fern_generator.py && rive fern --verify && rive inspect fern --summary
+```
+
+`--verify` catches names; `inspect` catches wiring. Neither catches a bind that
+resolves and drives nothing — for that, change the data and look.
+
+---
+
+## Verification recipes
+
+What has actually been used on this project, in increasing order of what it
+proves. The first two are cheap enough to run on every change.
+
+```bash
+rive . --verify                   # names: misspelled elements, unknown attributes
+rive inspect . --summary          # wiring: problems, plus type counts
+```
+
+Type counts are the cheapest real check — they catch "emitted nothing" bugs that
+a clean build hides. Know roughly what you expect: 250 `PointsPath` for the
+mature fern is 5 stems + 133 leaflets + 111 midribs + 1 mound.
+
+**Geometry** — reconstruct emitted vertices back to absolute coordinates and
+diff against the model both writers read. Catches the polar-handle conversion,
+the origin offset and the straight/cubic choice in one pass. Used in step 2;
+1176 vertices at a max error of 0.005 px.
+
+**Animation** — read the built file rather than trusting the markup:
+
+```bash
+rive inspect . --json    # then assert on KeyedObject.objectId, propertyKey,
+                         # and enums.interpolationType per keyframe
+```
+
+Used in step 3 to confirm all five `objectId`s pointed at `*-sway` nodes rather
+than `*-droop` ones, and that no keyframe had silently kept the `hold` default.
+Both would have built clean.
+
+**Loop seams** — compare the first and last keyframe values. Exact equality is
+the only thing that makes a loop invisible.
+
+**Data binding** — A/B the render, since nothing else proves a bind drives
+anything:
+
+```bash
+rive . --screenshot=a.png --data=vitality=1 --advance=1
+rive . --screenshot=b.png --data=vitality=0 --advance=1
+```
+
+Two useful variants of the same trick:
+
+- **Identical is sometimes the assertion.** At vitality 1 the render is
+  byte-identical to the pre-droop capture at the same frame, which proves the
+  droop contributes exactly zero when healthy.
+- **Two frames at one data value** must differ if something else is still
+  animating — that is how the sway was shown to survive under the droop.
+
+**An effect you cannot A/B by flipping its enum.** Removing the interpolator
+child changes the render; changing `interpolationType` does not. Disable the
+thing itself, not the label on it.
+
+**A change that only happens mid-run** — `--data` sets a value *before* the
+scene runs, so it cannot exercise anything that eases a *change*. To test one,
+inject a listener that writes the property, drive it with `--pointer`, and
+capture on either side:
+
+```xml
+<!-- temporary scaffold: click the mound to water the fern -->
+<StateMachineListenerSingle targetId="<mound>" listenerTypeValue="click" name="Water">
+    <ListenerViewModelChange>
+        <BindablePropertyNumber propertyValue="1">
+            <DataBindContext sourcePathIds="<vm>-<vitality>" propertyKey="636" direction="true"/>
+        </BindablePropertyNumber>
+    </ListenerViewModelChange>
+</StateMachineListenerSingle>
+```
+
+`direction="true"` is the whole trick — without it the bind reads instead of
+writes and the click does nothing, silently.
+
+```bash
+rive . --screenshot=a.png --data=vitality=0.2 --advance=30 \
+       --pointer=click@512,890 --advance=0
+```
+
+`--data-dump` on the same command confirms the click landed (`vitality = 1`).
+Then compare against the same capture with the interpolator dropped from the
+chain: smoothed, the fern is still fully drooped the instant after the click;
+unsmoothed, it is already upright. Remove the scaffold afterwards — it is a test
+fixture, not part of the scene.
+
+**Measuring "less", not just "different".** Screenshot hashes answer *did it
+change*; they cannot answer *by how much*. A ~40-line pure-Python PNG reader
+(zlib + un-filtering scanlines, no dependencies) counts differing pixels, which
+is enough to show that the sway at vitality 0 moves less than at 1, or that a
+`SWAY_FLOOR` of 0 freezes the plant outright. Compare poses that are otherwise
+identical — pixel counts across two different droop poses are not comparable.
+
+Screenshots are `md5 -q` comparable, which is enough for all of the above
+without an image library.
+
+---
+
 ## Adding a stage, or another plant
 
 All five fern stages are built, and the machinery that got there is generic. A
@@ -413,6 +628,8 @@ the rest.
   `DataConverterInterpolator` under [Converters](#converters-and-the-one-the-app-will-need)
   is already handled — the chains smooth by default — but the host still has to
   pick an artboard per stage and write the property by name.
+
+---
 
 ## Progress
 
@@ -555,100 +772,6 @@ All four were settled in step 5. Kept here because the reasoning is the record:
 - **Sway amplitude not falling with vitality** — **implemented**. See step 5.
 
 ---
-
-## Verification recipes
-
-What has actually been used on this project, in increasing order of what it
-proves. The first two are cheap enough to run on every change.
-
-```bash
-rive . --verify                   # names: misspelled elements, unknown attributes
-rive inspect . --summary          # wiring: problems, plus type counts
-```
-
-Type counts are the cheapest real check — they catch "emitted nothing" bugs that
-a clean build hides. Know roughly what you expect: 250 `PointsPath` for the
-mature fern is 5 stems + 133 leaflets + 111 midribs + 1 mound.
-
-**Geometry** — reconstruct emitted vertices back to absolute coordinates and
-diff against the model both writers read. Catches the polar-handle conversion,
-the origin offset and the straight/cubic choice in one pass. Used in step 2;
-1176 vertices at a max error of 0.005 px.
-
-**Animation** — read the built file rather than trusting the markup:
-
-```bash
-rive inspect . --json    # then assert on KeyedObject.objectId, propertyKey,
-                         # and enums.interpolationType per keyframe
-```
-
-Used in step 3 to confirm all five `objectId`s pointed at `*-sway` nodes rather
-than `*-droop` ones, and that no keyframe had silently kept the `hold` default.
-Both would have built clean.
-
-**Loop seams** — compare the first and last keyframe values. Exact equality is
-the only thing that makes a loop invisible.
-
-**Data binding** — A/B the render, since nothing else proves a bind drives
-anything:
-
-```bash
-rive . --screenshot=a.png --data=vitality=1 --advance=1
-rive . --screenshot=b.png --data=vitality=0 --advance=1
-```
-
-Two useful variants of the same trick:
-
-- **Identical is sometimes the assertion.** At vitality 1 the render is
-  byte-identical to the pre-droop capture at the same frame, which proves the
-  droop contributes exactly zero when healthy.
-- **Two frames at one data value** must differ if something else is still
-  animating — that is how the sway was shown to survive under the droop.
-
-**An effect you cannot A/B by flipping its enum.** Removing the interpolator
-child changes the render; changing `interpolationType` does not. Disable the
-thing itself, not the label on it.
-
-**A change that only happens mid-run** — `--data` sets a value *before* the
-scene runs, so it cannot exercise anything that eases a *change*. To test one,
-inject a listener that writes the property, drive it with `--pointer`, and
-capture on either side:
-
-```xml
-<!-- temporary scaffold: click the mound to water the fern -->
-<StateMachineListenerSingle targetId="<mound>" listenerTypeValue="click" name="Water">
-    <ListenerViewModelChange>
-        <BindablePropertyNumber propertyValue="1">
-            <DataBindContext sourcePathIds="<vm>-<vitality>" propertyKey="636" direction="true"/>
-        </BindablePropertyNumber>
-    </ListenerViewModelChange>
-</StateMachineListenerSingle>
-```
-
-`direction="true"` is the whole trick — without it the bind reads instead of
-writes and the click does nothing, silently.
-
-```bash
-rive . --screenshot=a.png --data=vitality=0.2 --advance=30 \
-       --pointer=click@512,890 --advance=0
-```
-
-`--data-dump` on the same command confirms the click landed (`vitality = 1`).
-Then compare against the same capture with the interpolator dropped from the
-chain: smoothed, the fern is still fully drooped the instant after the click;
-unsmoothed, it is already upright. Remove the scaffold afterwards — it is a test
-fixture, not part of the scene.
-
-**Measuring "less", not just "different".** Screenshot hashes answer *did it
-change*; they cannot answer *by how much*. A ~40-line pure-Python PNG reader
-(zlib + un-filtering scanlines, no dependencies) counts differing pixels, which
-is enough to show that the sway at vitality 0 moves less than at 1, or that a
-`SWAY_FLOOR` of 0 freezes the plant outright. Compare poses that are otherwise
-identical — pixel counts across two different droop poses are not comparable.
-
-Screenshots are `md5 -q` comparable, which is enough for all of the above
-without an image library.
-
 
 ### Step 5 — colour, curve, smoothing, and a sway that listens
 
