@@ -268,6 +268,7 @@ runtime. Ordered by how easy they are to hit.
 | **`Feather` inside a `Fill`** | the paint vanishes entirely | feather strokes; for a soft fill use a `RadialGradient` with an alpha-`00` outer stop |
 | **`GradientStop` with no `position`** | all stops sit at 0, gradient renders flat | always set `position` |
 | **A `ViewModelInstanceValue` whose `viewModelPropertyId` points at nothing** | silently inert; these ids are never resolved, so `inspect` says nothing | check by hand |
+| **`--data` cannot change a value mid-run** | it sets the property *before the scene runs*, so a converter that eases changes has nothing to ease | drive the change from a listener (see [Verification recipes](#verification-recipes)) |
 | **`sourcePathIds` is not emitted by `inspect --json`** | the bind's path is absent from the tree, like `interpolatorId` — you cannot eyeball it | read `problems` for `unresolved-bind-path`, and A/B with `--data` |
 | **`DataConverterRangeMapper.interpolationType` defaults to `linear`** | same attribute name as a keyframe's, opposite default (`hold`) | a converter eases by default once given an interpolator; a keyframe does not |
 | **Skinning: `indices` is 1-based** | a `0` slot is the identity transform — looks exactly like bones not working | `tendonIndex + 1` |
@@ -352,7 +353,13 @@ overwriting one another. Two state machine layers writing the same property
 would not — the later layer wins.
 
 **Colours are carried verbatim** from the palette constants through `argb()`.
-No re-picking, no approximation.
+No re-picking, no approximation. The one exception is the droop's dry palette,
+which is a second set of constants (`LEAF_DRY`, `LEAF_BACK_DRY`) mapped from the
+healthy ones by `DRY_FILL` — so a palette change updates both ends together.
+
+**Names are the public surface.** The state machine is `Fern`, the view model is
+`Fern`, its property is `vitality`. The host addresses all of these by name, so
+renaming one is a breaking change in a way renumbering an id is not.
 
 **Canvas.** 1024×1024, ground line at y=900, plant base at (512, 882). Root
 canvases put their ground line at y=0 so a plant canvas stacks directly on top.
@@ -515,25 +522,16 @@ Verified:
   is live. **Flipping `interpolationType` does not** — see the trap table; the
   first attempt at this check was measuring nothing.
 
-#### Open calibration questions
+#### Open calibration questions — since resolved
 
-Deliberately left open rather than settled quietly:
+All four were settled in step 5. Kept here because the reasoning is the record:
 
-- **`DROOP_MAX_DEGREES = 25`** is a look, not a derived number. At vitality 0
-  the fern reads as collapsed-but-alive; a wilt that should look worse wants a
-  larger value.
-- **The ease curve.** Symmetric ease-in-out makes no claim about whether a user
-  should see early feedback from a small vitality dip. A curve weighted toward
-  the top of the range would show trouble sooner, which is a product question
-  about the growth engine's feedback loop, not a drawing one.
-- **The centre frond's lean.** It is near-vertical, so `sign(dx)` picks its side
-  on a 36 px offset — it leans right because the art happens to. That is
-  defensible for a wilting plant but it is arbitrary, and it is the one place
-  the droop looks asymmetric.
-- **Sway amplitude does not fall with vitality.** A wilted plant arguably moves
-  less. The amplitude is baked into the sway keyframes, so this would need
-  either a second blend axis or the sway scaled some other way.
-
+- **`DROOP_MAX_DEGREES = 25`** — reviewed and **kept**. The way the fronds fall
+  away from the centre reads as drooping at this magnitude.
+- **The ease curve** — **replaced**. See step 5; it is now asymmetric, and the
+  product question it encodes has been answered in favour of early feedback.
+- **The centre frond's lean** — **kept, and made explicit**. See step 5.
+- **Sway amplitude not falling with vitality** — **implemented**. See step 5.
 
 ---
 
@@ -590,5 +588,154 @@ Two useful variants of the same trick:
 child changes the render; changing `interpolationType` does not. Disable the
 thing itself, not the label on it.
 
+**A change that only happens mid-run** — `--data` sets a value *before* the
+scene runs, so it cannot exercise anything that eases a *change*. To test one,
+inject a listener that writes the property, drive it with `--pointer`, and
+capture on either side:
+
+```xml
+<!-- temporary scaffold: click the mound to water the fern -->
+<StateMachineListenerSingle targetId="<mound>" listenerTypeValue="click" name="Water">
+    <ListenerViewModelChange>
+        <BindablePropertyNumber propertyValue="1">
+            <DataBindContext sourcePathIds="<vm>-<vitality>" propertyKey="636" direction="true"/>
+        </BindablePropertyNumber>
+    </ListenerViewModelChange>
+</StateMachineListenerSingle>
+```
+
+`direction="true"` is the whole trick — without it the bind reads instead of
+writes and the click does nothing, silently.
+
+```bash
+rive . --screenshot=a.png --data=vitality=0.2 --advance=30 \
+       --pointer=click@512,890 --advance=0
+```
+
+`--data-dump` on the same command confirms the click landed (`vitality = 1`).
+Then compare against the same capture with the interpolator dropped from the
+chain: smoothed, the fern is still fully drooped the instant after the click;
+unsmoothed, it is already upright. Remove the scaffold afterwards — it is a test
+fixture, not part of the scene.
+
+**Measuring "less", not just "different".** Screenshot hashes answer *did it
+change*; they cannot answer *by how much*. A ~40-line pure-Python PNG reader
+(zlib + un-filtering scanlines, no dependencies) counts differing pixels, which
+is enough to show that the sway at vitality 0 moves less than at 1, or that a
+`SWAY_FLOOR` of 0 freezes the plant outright. Compare poses that are otherwise
+identical — pixel counts across two different droop poses are not comparable.
+
 Screenshots are `md5 -q` comparable, which is enough for all of the above
 without an image library.
+
+
+### Step 5 — colour, curve, smoothing, and a sway that listens
+
+Six changes from review. Every one verified rather than assumed; the mechanisms
+that turned out to need a new kind of test are written up under
+[Verification recipes](#verification-recipes).
+
+**Leaflet fill fades with vitality.** `KeyFrameColor` on the leaflets'
+`SolidColor` (propertyKey 37), keyed in **both** poses like every other blended
+property. `#6FA35A → #98A585` front, `#4E7F43 → #71806A` back — desaturated
+toward grey-green rather than brown, so the fern reads as thirsty, not dead. The
+emitter now records each fill's `SolidColor` id into a `paints` registry as it
+walks, so the animation can key a colour without hunting the tree.
+
+**The droop direction is now declared, not inferred.** Above
+`NEAR_VERTICAL_DEGREES = 80` the tip's x-offset is too small to mean anything —
+`frond-center` leans right by 36 px out of 743, so `sign(dx)` would have flipped
+on a trivial edit to the art. `DROOP_DIRECTION` declares it (`+1`, right, as
+drawn) and the generator **raises** for any near-vertical frond that is not in
+the table. Falling back to `sign(dx)` would have been exactly the silent flip
+the declaration exists to prevent. Angles are unchanged: ±20.6°, ±11.8°, +24.2°.
+
+**The ease curve is asymmetric.** `(0.4, 0, 1, 1)` instead of the symmetric
+ease-in-out: steep at the top of the range, flattening toward 0.
+
+| vitality | blend | droop |
+|---|---|---|
+| 1.0 | 100.0 | 0% |
+| 0.95 | 92.0 | 8% |
+| 0.9 | 84.4 | 15.6% |
+| 0.5 | 32.5 | 67.5% |
+| 0.25 | 9.9 | 90.1% |
+
+Vitality 0.9 now differs from 1.0 across **9.13% of the canvas** — clearly
+visible, where the old symmetric curve gave about 4% droop and read as nothing.
+
+**A changed vitality animates instead of snapping.** Each bind's `converterId`
+now points at a `DataConverterGroup`: a `DataConverterInterpolator`
+(`duration="0.6"`, ease-out) first, then the range mapper. Smoothing the raw
+0–1 value means the shaping curve applies all the way through a transition, and
+keeps the range mapper as the one place the 0–1 → 0–100 shaping lives.
+
+Worth knowing: **the interpolator does not ramp at startup.** It begins at its
+target, so a scene opened at vitality 0 is already drooped on frame 1 rather
+than falling over as you watch.
+
+**The sway scales with vitality, with a floor.** The Sway layer is now a
+`BlendState1DViewModel` between a static `Still` pose (value 0) and `Sway`
+(value 100), on its own converter chain mapping vitality 0 → **40**, 1 → 100. A
+wilted fern moves less but never freezes. `Still` keys the same five rotations
+`Sway` does, for the same reason the droop poses key each other's properties.
+
+The floor is load-bearing: rebuilt with `SWAY_FLOOR = 0`, vitality 0 froze the
+plant **completely** — 0 pixels changed across 80 frames. At 40 it is 109,252.
+
+**Sway amplitude and phase are parameters.** `SWAY_AMPLITUDE` scales every
+frond. `SWAY_MODE` picks how the fronds relate in time:
+
+- `independent` (default) — each frond carries its own phase. Five plants in
+  still air.
+- `wind` — one oscillation crossing the plant left to right, each frond lagging
+  by its tip's x-position. One plant in moving air. Phases come out ordered by
+  tip x (0.000, 0.058, 0.120, 0.162, 0.220 turns), and the second harmonic is
+  carried at a fixed offset so the correlation does not flatten it.
+
+Switchable without editing the file:
+
+```bash
+python3 fern_generator.py --sway=wind
+python3 fern_generator.py --amplitude=1.4
+```
+
+Loop seams stay exact in both modes — measured at 1e-17 or better.
+
+**Housekeeping.** The state machine is named `Fern` rather than
+`State Machine 1`. `.gitignore` covers `build/`, `__pycache__/` and `.DS_Store`.
+
+#### Built state
+
+```
+FernMature   1024x1024
+  LinearAnimation 4      Sway, Still, Upright, Drooped
+  StateMachineLayer 2    Sway (blend), Vitality (blend)
+  BlendState1DViewModel 2 / BlendAnimation1D 4 / DataBindContext 2
+  KeyedObject 30         5 sway + 5 still + 2 x (5 rotation + 5 colour)
+  KeyFrameDouble 140 / KeyFrameColor 10
+roots
+  DataConverterGroup 2 + DataConverterGroupItem 4
+  DataConverterInterpolator 2 + DataConverterRangeMapper 2 + CubicEaseInterpolator 4
+  ViewModel 1 (Fern.vitality)
+```
+
+Two chains rather than one shared: the droop and the sway need different output
+ranges, and the interpolator is stateful, so each gets its own instance rather
+than being shared between two binds.
+
+#### Performance baseline
+
+`rive fern --bench=600`, 1024×1024, this machine:
+
+```
+advance  mean 0.020ms   p50 0.019ms   p95 0.024ms   max 0.030ms
+render   mean 0.100ms   p50 0.103ms   p95 0.128ms   max 2.862ms
+memory   0 -> 0 wasm pages (+0) over 600 frames
+```
+
+Built `.riv` is 32 KB. At a 16.7 ms frame budget the whole scene costs well
+under 1%, and the `max 2.862ms` render is the first frame warming up, not a
+recurring spike. No memory growth over 600 frames. Recorded so the next change
+has something to regress against — the number to watch is `advance`, since that
+is what the 1,500-object tree and two blend states cost.
