@@ -21,8 +21,19 @@ const String fernAssetPath = 'assets/rive/fern.riv';
 /// machine runs — so this is load-bearing, not a label.
 const String fernStateMachineName = 'Fern';
 
-/// The number the garden writes. 0–1, the engine's own range, no conversion.
+/// The numbers the garden writes. Both 0–1, both the engine's own ranges, no
+/// conversion either way.
 const String fernVitalityProperty = 'vitality';
+const String fernRootsProperty = 'roots';
+
+/// The root system. Not a stage — 1024 x 520 with its ground line at its **top**
+/// edge, so it stacks directly under a stage artboard with the two lines
+/// meeting.
+///
+/// It is a separate artboard rather than part of each stage because roots are
+/// the same art at every stage, and because `roots` drives it *and* a lean on
+/// the plant above it — see the stacking contract below.
+const String fernRootsArtboard = 'FernRoots';
 
 /// The artboard that draws [stage].
 ///

@@ -325,12 +325,14 @@ class _Plant extends ConsumerWidget {
             if (drawn)
               // Anchored on canvas y = 900, not on the canvas bottom: the
               // artboard is square and larger than the plant, so the rest of it
-              // hangs below the ground line where the soil covers it.
+              // hangs below the ground line where the soil covers it. The roots
+              // artboard continues underneath, its own top edge on the same
+              // line, which is why the box is taller than it is wide.
               Positioned(
                 left: (GardenLayout.slotPitch - GardenLayout.stageSize) / 2,
                 top: groundLine - GardenLayout.stageAboveGround,
                 width: GardenLayout.stageSize,
-                height: GardenLayout.stageSize,
+                height: GardenLayout.stageSize + GardenLayout.rootsDepth,
                 child: PlantArtView(habitId: habitId),
               )
             else ...[

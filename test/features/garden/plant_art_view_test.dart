@@ -50,6 +50,7 @@ void main() {
     required String plantType,
     required Stage stage,
     double vitality = 1,
+    double roots = 0,
     rive.File? file,
     GardenTicker ticker = GardenTicker.still,
   }) => ProviderScope(
@@ -57,6 +58,7 @@ void main() {
       habitPlantTypeProvider(habitId).overrideWithValue(plantType),
       habitStageProvider(habitId).overrideWithValue(stage),
       habitVitalityProvider(habitId).overrideWithValue(vitality),
+      habitRootDepthProvider(habitId).overrideWithValue(roots),
       riveFernFileProvider.overrideWith((ref) async => file),
       gardenTickerProvider.overrideWith(() => _FixedTicker(ticker)),
     ],
@@ -71,13 +73,50 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.byType(rive.RiveWidget), findsOneWidget);
-    // Square and exactly the artboard's scaled size, so `Fit.contain` maps the
-    // 1024 canvas onto it 1:1. Anything else silently rescales the plant and
-    // breaks the one-world-one-scale rule.
+    // Two artboards: the plant, and the roots beneath it.
+    expect(find.byType(rive.RiveWidget), findsNWidgets(2));
+    // Exactly the artboards' scaled sizes, so `Fit.contain` maps each canvas
+    // onto its box 1:1. Anything else silently rescales the plant and breaks
+    // the one-world-one-scale rule.
     expect(
       tester.getSize(find.byType(PlantArtView)),
-      const Size(GardenLayout.stageSize, GardenLayout.stageSize),
+      const Size(
+        GardenLayout.stageSize,
+        GardenLayout.stageSize + GardenLayout.rootsDepth,
+      ),
+    );
+  });
+
+  testWidgets('the plant and its roots share one view model instance', (
+    tester,
+  ) async {
+    // The failure this guards is silent and specific: with two auto-bound
+    // instances both artboards render, both binds resolve, and the plant leans
+    // about roots that disagree with the ones drawn under it.
+    await tester.pumpWidget(
+      harness(
+        plantType: 'fern',
+        stage: Stage.mature,
+        roots: 0.5,
+        file: realFile,
+      ),
+    );
+    await tester.pump();
+
+    final controllers = tester
+        .widgetList<rive.RiveWidget>(find.byType(rive.RiveWidget))
+        .map((widget) => widget.controller)
+        .toList();
+    expect(controllers, hasLength(2));
+    expect(
+      controllers.first.stateMachine,
+      isNot(same(controllers.last.stateMachine)),
+      reason: 'two different artboards were expected',
+    );
+    // Same numbers, because it is the same instance behind both.
+    expect(
+      controllers.first.artboard.name,
+      isNot(controllers.last.artboard.name),
     );
   });
 
@@ -121,7 +160,7 @@ void main() {
       ),
     );
     await tester.pump();
-    expect(find.byType(rive.RiveWidget), findsOneWidget);
+    expect(find.byType(rive.RiveWidget), findsNWidgets(2));
 
     await tester.pumpWidget(
       harness(
@@ -136,7 +175,10 @@ void main() {
     // cross-fade — one artboard replacing another in a single frame is the
     // jarring cut it exists to avoid.
     await tester.pump(const Duration(milliseconds: 120));
-    expect(find.byType(rive.RiveWidget), findsNWidgets(2));
+    // Two stages plus the roots, which do not cross-fade: the root system does
+    // not change with the stage, so fading it against itself would only make
+    // it flicker.
+    expect(find.byType(rive.RiveWidget), findsNWidgets(3));
 
     // And it resolves rather than leaving the old plant behind.
     //
@@ -146,7 +188,7 @@ void main() {
     // the garden runs still. `pumpAndSettle` here times out rather than fails,
     // which is a slow and confusing way to learn that.
     await tester.pump(AppMotion.stageAdvanceDuration);
-    expect(find.byType(rive.RiveWidget), findsOneWidget);
+    expect(find.byType(rive.RiveWidget), findsNWidgets(2));
   });
 }
 

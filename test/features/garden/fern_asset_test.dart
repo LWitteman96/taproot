@@ -16,7 +16,12 @@ library;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rive/rive.dart';
 
-const String fernAsset = 'assets/rive/fern.riv';
+import 'package:taproot/core/engine/domain.dart';
+import 'package:taproot/features/garden/domain/plant_art.dart';
+
+// Named from the app's constants, so the test cannot pass against a path or
+// a name the app no longer uses.
+const String fernAsset = fernAssetPath;
 
 /// Every growth stage the engine can report, and the artboard that draws it.
 ///
@@ -30,23 +35,16 @@ const String fernAsset = 'assets/rive/fern.riv';
 /// completion. It sways; it does not droop. Do not extend these tests with
 /// "writing vitality changes the render" without exempting it.
 ///
-/// Not every artboard is a stage: `fern/` also has [rootsArtboard], which draws
+/// Not every artboard is a stage: `fern/` also has [fernRootsArtboard], which draws
 /// below the ground line and is composed separately.
-const Map<String, String> stageArtboards = {
-  'seed': 'FernSeed',
-  'sprout': 'FernSprout',
-  'seedling': 'FernSeedling',
-  'young': 'FernYoung',
-  'mature': 'FernMature',
-  'bloom': 'FernBloom',
+final Map<String, String> stageArtboards = {
+  for (final stage in Stage.values) stage.name: fernArtboardFor(stage),
 };
 
-/// The root system. Not a stage — 1024x520 with its ground line at the top
-/// edge, so it stacks directly under a stage artboard with the lines meeting.
-const String rootsArtboard = 'FernRoots';
-
-/// The two numbers the garden writes. Both 0-1, both the engine's own ranges.
-const List<String> fernNumbers = ['vitality', 'roots'];
+/// The two numbers the garden writes, named from the app's own constants rather
+/// than retyped — a test that spells them itself would still pass after a
+/// rename that broke the app.
+const List<String> fernNumbers = [fernVitalityProperty, fernRootsProperty];
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -66,12 +64,12 @@ void main() {
     file = loaded!;
   });
 
-  for (final name in [...stageArtboards.values, rootsArtboard]) {
+  for (final name in [...stageArtboards.values, fernRootsArtboard]) {
     test('$name exposes the state machine and both numbers', () {
       final controller = RiveWidgetController(
         file,
         artboardSelector: ArtboardNamed(name),
-        stateMachineSelector: const StateMachineNamed('Fern'),
+        stateMachineSelector: const StateMachineNamed(fernStateMachineName),
       );
       addTearDown(controller.dispose);
       final instance = controller.dataBind(DataBind.auto());
@@ -117,7 +115,7 @@ void main() {
     );
     final roots = RiveWidgetController(
       file,
-      artboardSelector: const ArtboardNamed(rootsArtboard),
+      artboardSelector: const ArtboardNamed(fernRootsArtboard),
       stateMachineSelector: const StateMachineNamed('Fern'),
     );
     addTearDown(plant.dispose);
@@ -127,9 +125,9 @@ void main() {
     final boundToRoots = roots.dataBind(DataBind.byInstance(shared));
 
     // One write, seen by both. This is the whole assertion.
-    shared.number('roots')!.value = 0.5;
-    expect(boundToPlant.number('roots')!.value, closeTo(0.5, 1e-9));
-    expect(boundToRoots.number('roots')!.value, closeTo(0.5, 1e-9));
+    shared.number(fernRootsProperty)!.value = 0.5;
+    expect(boundToPlant.number(fernRootsProperty)!.value, closeTo(0.5, 1e-9));
+    expect(boundToRoots.number(fernRootsProperty)!.value, closeTo(0.5, 1e-9));
 
     // And both artboards accept being advanced against it. `fern/` eases this
     // value over 1.2s, so the poses are reached by elapsed time rather than by
@@ -149,15 +147,15 @@ void main() {
     );
     final roots = RiveWidgetController(
       file,
-      artboardSelector: const ArtboardNamed(rootsArtboard),
+      artboardSelector: const ArtboardNamed(fernRootsArtboard),
       stateMachineSelector: const StateMachineNamed('Fern'),
     );
     addTearDown(plant.dispose);
     addTearDown(roots.dispose);
 
-    plant.dataBind(DataBind.auto()).number('roots')!.value = 0.75;
+    plant.dataBind(DataBind.auto()).number(fernRootsProperty)!.value = 0.75;
     expect(
-      roots.dataBind(DataBind.auto()).number('roots')!.value,
+      roots.dataBind(DataBind.auto()).number(fernRootsProperty)!.value,
       isNot(closeTo(0.75, 1e-9)),
       reason: 'auto-bound instances are meant to be independent',
     );
