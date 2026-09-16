@@ -186,7 +186,7 @@ void main() {
 
     expect(find.byType(FrictionAnswers), findsOneWidget);
     expect(find.byType(CueAnswers), findsNothing);
-    expect(find.textContaining('what got in the way?'), findsOneWidget);
+    expect(find.textContaining('What got in the way?'), findsOneWidget);
     expect(find.textContaining('missed'), findsNothing);
 
     await tester.tap(find.widgetWithText(ActionChip, 'just forgot'));

@@ -129,10 +129,16 @@ class _Question extends ConsumerWidget {
     final question = checkInQuestion(
       framing: offer.framing,
       habit: offer.habit,
+    );
+    // The preamble is gone (check-in-design §1) and a neutral fact line took
+    // its place. This page is replaced by the sheet in build step 3; until
+    // then it shows the new line so the two cannot say different things.
+    final preamble = checkInFact(
+      framing: offer.framing,
+      habit: offer.habit,
       occasionAt: offer.candidate.occasion.at,
       now: now,
     );
-    final preamble = checkInPreamble(offer.framing);
 
     return SingleChildScrollView(
       child: Column(
@@ -146,7 +152,7 @@ class _Question extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpacing.small),
           Text(question, style: theme.textTheme.headlineSmall),
-          if (preamble != null) ...[
+          ...[
             const SizedBox(height: AppSpacing.small),
             Text(
               preamble,

@@ -1,7 +1,9 @@
 import 'package:meta/meta.dart';
 
+import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/models/habit.dart';
 import 'package:taproot/features/notifications/domain/expected_occasions.dart';
+import 'package:taproot/features/reflection/domain/check_in_question.dart';
 
 /// The text of one evening notification.
 @immutable
@@ -80,14 +82,24 @@ EveningCheckIn composeEveningCheckIn({
   required Habit habit,
   required ExpectedOccasion occasion,
   String? reflectionPrompt,
+  Framing framing = Framing.discovery,
+  DateTime? now,
 }) {
-  final cue = habit.designedCue?.trim();
-  final tomorrow = cue == null || cue.isEmpty
-      ? 'Tomorrow, then — ${habit.name}?'
-      : 'Tomorrow, then — $cue?';
+  // Composed from the same functions the sheet uses, so the notification and
+  // the screen it opens can never ask the same thing two different ways
+  // (check-in-design §5). The framing only changes the wording for diagnosis,
+  // and the scheduler knows it by the time it queues the notification.
+  final forward = commitLine(
+    habit: habit,
+    framing: framing,
+    nextOccasionAt: occasion.date.startOfDay,
+    // The notification is composed for the evening *before* the occasion,
+    // so that is the 'now' the wording is relative to unless told otherwise.
+    now: now ?? occasion.date.addDays(-1).startOfDay,
+  );
 
   return EveningCheckIn(
     title: habit.name,
-    body: reflectionPrompt == null ? tomorrow : '$reflectionPrompt\n$tomorrow',
+    body: reflectionPrompt == null ? forward : '$reflectionPrompt\n$forward',
   );
 }
