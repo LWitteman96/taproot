@@ -292,3 +292,53 @@ Two things dealt with along the way:
 `rive` does **not** rewrite ids on `--verify` or `inspect` (checked by
 checksum), but the generator mints one for every element anyway, vertices
 included, so a future `push` has nothing to write back into a generated file.
+
+
+---
+
+## Step 3 result — the sway
+
+One `LinearAnimation` (`Sway`, 300 frames at 60fps, `loopValue="loop"`) keying
+`rotation` (propertyKey 15, radians) on each frond's **inner `*-sway` node**.
+The outer `*-droop` nodes are untouched and stay free for step 4.
+
+Each frond's curve is a fundamental plus a second harmonic at 28% weight, each
+with its own phase:
+
+```
+sway_angle(t) = A·sin(2π(t + φ₁)) + 0.28·A·sin(4π(t + φ₂))
+```
+
+Both components complete a whole number of cycles per loop, so frame 0 and
+frame 300 agree **exactly** — confirmed off the built file, `f0 == fN` to six
+decimals on all five fronds. The harmonic is what stops five fronds sharing one
+period from reading as a metronome; with only a fundamental, everything
+re-synchronises visibly every 5 seconds.
+
+| Frond | Amplitude | Tip radius | Tip sweep |
+|---|---|---|---|
+| `frond-back-left` | 1.86° | 704 px | 45.6 px |
+| `frond-back-right` | 1.52° | 704 px | 37.3 px |
+| `frond-left` | 2.92° | 558 px | 56.9 px |
+| `frond-right` | 2.43° | 558 px | 47.3 px |
+| `frond-center` | 1.92° | 743 px | 49.8 px |
+
+Two decisions worth recording:
+
+- **The curve is sampled (24 keyframes per frond), not keyed at its extremes.**
+  Two components at different phases means there is no small set of frames where
+  the turning points line up, so keying extremes would need per-frond frame
+  numbers and would still only approximate the sum. Sampling sidesteps it, and
+  makes the shape of the curve a pure function of `sway_angle()`. Measured
+  linear-interpolation error is **1.43% of amplitude** — about 0.04°.
+- **`interpolationType="linear"` is written on every keyframe.**
+  `rive schema KeyFrameDouble` gives the default as **`hold`**, not linear — left
+  off, the sway would step between samples 12 times a second and build perfectly
+  clean. This is the same class of silent failure as the `cubic`-without-an-
+  interpolator trap.
+
+Verified: `problems: []`, 5 `KeyedObject` / 5 `KeyedProperty` / 125
+`KeyFrameDouble`, every `objectId` resolving to a `*-sway` node (not a droop
+one) and every keyframe reading back as `linear`. Screenshots at frames 1, 75,
+150 and 225 are four distinct images, with the stem bases staying planted in the
+mound.

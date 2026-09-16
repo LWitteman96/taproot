@@ -465,30 +465,85 @@ def rml_item(item, origin, ids, depth):
     out.append(f'{ind}</Shape>')
     return out
 
-def frond_node(group, ids, depth):
+def frond_node(group, ids, depth, nodes):
     """A frond gets two nested transforms, both pivoted on the shared base point.
 
-    The outer one is reserved for the vitality droop, the inner for the sway
-    loop. Keeping them separate means each rotation has exactly one owner, so
-    the two timelines compose instead of overwriting one another.
+    The outer one carries the vitality droop, the inner the sway loop. Keeping
+    them separate means each rotation has exactly one owner, so the two
+    timelines compose instead of overwriting one another. `nodes` collects the
+    two ids so the animations can key them.
     """
     ind = "    " * depth
-    out = [f'{ind}<Node x="{BASE[0]}" y="{BASE[1]}" name="{group.gid}-droop" id="{ids()}">',
-           f'{ind}    <Node name="{group.gid}-sway" id="{ids()}">']
+    droop_id, sway_id = ids(), ids()
+    nodes[group.gid] = {"droop": droop_id, "sway": sway_id}
+    out = [f'{ind}<Node x="{BASE[0]}" y="{BASE[1]}" name="{group.gid}-droop" id="{droop_id}">',
+           f'{ind}    <Node name="{group.gid}-sway" id="{sway_id}">']
     for child in reversed(group.children):
         out += rml_item(child, BASE, ids, depth + 2)
     out += [f'{ind}    </Node>', f'{ind}</Node>']
+    return out
+
+# ---------- the sway ----------
+SWAY_FRAMES = 300      # 5s at 60fps
+SWAY_SAMPLES = 24      # keyframes per frond per loop
+
+SWAY = {  # frond: (degrees, phase in turns, second-harmonic phase in turns)
+    "frond-back-left":  (1.7, 0.00, 0.31),
+    "frond-back-right": (1.5, 0.37, 0.74),
+    "frond-left":       (2.6, 0.62, 0.12),
+    "frond-right":      (2.4, 0.18, 0.55),
+    "frond-center":     (1.9, 0.81, 0.93),
+}
+SWAY_HARMONIC = 0.28   # weight of the 2x component, relative to the fundamental
+
+def sway_angle(fid, t):
+    """Rotation in radians at loop fraction t, for one frond.
+
+    A fundamental plus a quarter-weight second harmonic, each with its own phase
+    per frond. Both are whole numbers of cycles per loop, so frame 0 and the
+    last frame agree exactly and the loop is seamless. The harmonic is what
+    stops five fronds on one period from reading as a metronome.
+    """
+    degrees, phase, phase2 = SWAY[fid]
+    amplitude = math.radians(degrees)
+    return (amplitude * math.sin(2*math.pi * (t + phase))
+            + amplitude * SWAY_HARMONIC * math.sin(4*math.pi * (t + phase2)))
+
+def sway_animation(nodes, ids, anim_id, depth=2):
+    """Key rotation (propertyKey 15, radians) on every frond's inner sway node.
+
+    The curve is sampled rather than keyed at its extremes: the two components
+    have different phases, so there is no small set of frames where all the
+    turning points line up. At 24 samples the linear error is under 1% of the
+    amplitude, which at a couple of degrees is nothing.
+    """
+    ind = "    " * depth
+    out = [f'{ind}<LinearAnimation loopValue="loop" fps="60" duration="{SWAY_FRAMES}" '
+           f'name="Sway" id="{anim_id}">']
+    for fid in MATURE_ORDER:
+        out.append(f'{ind}    <KeyedObject objectId="{nodes[fid]["sway"]}" id="{ids()}">')
+        out.append(f'{ind}        <KeyedProperty propertyKey="15" id="{ids()}">')
+        for i in range(SWAY_SAMPLES + 1):
+            frame = round(SWAY_FRAMES * i / SWAY_SAMPLES)
+            angle = sway_angle(fid, i / SWAY_SAMPLES)
+            # interpolationType defaults to hold, which would step the sway
+            out.append(f'{ind}            <KeyFrameDouble frame="{frame}" value="{angle:.6f}" '
+                       f'interpolationType="linear" id="{ids()}"/>')
+        out.append(f'{ind}        </KeyedProperty>')
+        out.append(f'{ind}    </KeyedObject>')
+    out.append(f'{ind}</LinearAnimation>')
     return out
 
 def mature_rml():
     ids = Ids()
     artboard_id, machine_id, layer_id, anim_id, state_id = ids(), ids(), ids(), ids(), ids()
     style_id = ids()
+    nodes = {}
     body = []
     # reversed: base is painted last in SVG, so it is declared first here
     body += rml_item(base_mound(125), (0, 0), ids, 2)
     for fid in reversed(MATURE_ORDER):
-        body += frond_node(frond_by_id(fid), ids, 2)
+        body += frond_node(frond_by_id(fid), ids, 2, nodes)
 
     head = [
         '<Rive version="1" kind="fragment">',
@@ -501,7 +556,7 @@ def mature_rml():
     tail = [
         '        </Node>',
         '',
-        f'        <LinearAnimation loopValue="loop" duration="240" name="Sway" id="{anim_id}"/>',
+    ] + sway_animation(nodes, ids, anim_id) + [
         '',
         f'        <StateMachine name="State Machine 1" id="{machine_id}">',
         f'            <StateMachineLayer name="Sway" id="{layer_id}">',
