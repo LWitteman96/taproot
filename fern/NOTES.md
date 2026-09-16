@@ -114,6 +114,13 @@ inRotation(P1)  = atan2(c2 - P1)    inDistance(P1)  = |c2 - P1|
 `rotation` is radians. This conversion is the whole reason RML is generated
 rather than typed.
 
+**Vertex properties are bindable as well as animatable** — `x`, `y` and all four
+cubic handle properties carry `AB` in the schema. So data can drive individual
+vertices and their handles directly, which is a route to shape morphing with no
+bones and no `Skin`: a fiddlehead uncurling is a candidate. Untested here; the
+cost is one bind per vertex, so it suits a handful of control points rather than
+a 130-vertex stem.
+
 Also:
 
 - A `Shape` may hold **several** `PointsPath` children; they combine into one
@@ -203,9 +210,36 @@ Two ways to consume a number:
 </BlendState1DViewModel>
 ```
 
+**`cubic` and `cubicValue` are not variants of one thing.** They take the same
+four numbers and read them completely differently: `cubic` with a
+`CubicEaseInterpolator` shapes **time**, normalized 0–1, so the result stays
+between the two keyframed values. `cubicValue` with a `CubicValueInterpolator`
+shapes the **value** — the bezier's control points are `[from, y1, y2, to]` and
+`y1`/`y2` are in the property's own units, so the motion can leave the
+keyframed range. That is the one to reach for if a frond should overshoot on
+the way back up.
+
 `propertyKey="636"` is `BindablePropertyNumber.propertyValue`
 (`rive schema BindablePropertyNumber`, typeKey 473). `sourcePathIds` is
 `viewModelId-propertyId`, absolute.
+
+### Converters, and the one the app will need
+
+`DataConverterRangeMapper` is one of about eleven converters (`docs data` →
+"Converters"), all root elements named from a bind by `converterId`. The others
+cover arithmetic (`DataConverterOperationValue`, `DataConverterFormula`),
+rounding, and number↔string conversion.
+
+One is worth knowing about before the Flutter integration:
+**`DataConverterInterpolator` eases a bound value over `duration` seconds**
+rather than remapping it, so a value that *changes* animates to its new setting
+instead of jumping. That is a different job from the range mapper's static
+remap, and it is what a live `vitality` will want — the app recomputing vitality
+after a completion would otherwise snap the fern to its new pose in one frame.
+Converters chain through a `DataConverterGroup`, so the two compose.
+
+Not wired yet: nothing sets `vitality` at runtime, so nothing has been seen to
+jump.
 
 Names are the public surface — the host reads and writes properties by name,
 `--data=fern/vitality=0.3` addresses them by name, and renaming one is a
@@ -234,6 +268,8 @@ runtime. Ordered by how easy they are to hit.
 | **`Feather` inside a `Fill`** | the paint vanishes entirely | feather strokes; for a soft fill use a `RadialGradient` with an alpha-`00` outer stop |
 | **`GradientStop` with no `position`** | all stops sit at 0, gradient renders flat | always set `position` |
 | **A `ViewModelInstanceValue` whose `viewModelPropertyId` points at nothing** | silently inert; these ids are never resolved, so `inspect` says nothing | check by hand |
+| **`sourcePathIds` is not emitted by `inspect --json`** | the bind's path is absent from the tree, like `interpolatorId` — you cannot eyeball it | read `problems` for `unresolved-bind-path`, and A/B with `--data` |
+| **`DataConverterRangeMapper.interpolationType` defaults to `linear`** | same attribute name as a keyframe's, opposite default (`hold`) | a converter eases by default once given an interpolator; a keyframe does not |
 | **Skinning: `indices` is 1-based** | a `0` slot is the identity transform — looks exactly like bones not working | `tendonIndex + 1` |
 | **Skinning: `values` must total 255** | the runtime divides by 255 and does not renormalize | split an even blend 128/127 |
 | **Skinning: `Tendon` matrix order** | `Mat2D(xx, xy, yx, yy, tx, ty)`; x-unit is `(xx, xy)` | swapping renders mirrored or collapsed, `problems` empty |
@@ -244,6 +280,19 @@ Unit traps, which at least fail loudly once you look:
 - `LinearAnimation.duration` is **frames** (`fps` defaults to 60).
 - `StateTransition.duration` is **milliseconds**.
 - `exitTimeIsPercetange` is misspelled in the format. Write the typo.
+
+**`--verify` does not catch a broken bind. `inspect` does.** Demonstrated on
+this project by pointing `sourcePathIds` at a view model that does not exist:
+
+```
+rive . --verify          → verified (0 errors, 0 warnings)
+rive inspect . --summary → {"kind": "unresolved-bind-path",
+                            "message": "sourcePathIds root view model 0:9998
+                                        is not declared in this file"}
+```
+
+This is the concrete reason `AGENTS.md` asks for both commands rather than
+either. A green `--verify` on a data-bound file means almost nothing.
 
 And the meta-trap: **a clean `--verify` proves names, not wiring.** Misspelled
 elements and unknown attributes *are* caught. What survives is everything where
@@ -326,6 +375,14 @@ The mature stage is the only one emitted to RML so far. The path for the rest:
    a growth transition between stages would argue the other way.
 5. Roots are a second canvas with its own artboard, and the one place bones are
    clearly worth it.
+6. `droop_angle()` reads `FRONDS`, so it generalises to any stage built from
+   those entries — but stages 1–3 scale their fronds, and fiddleheads are not in
+   `FRONDS` at all. Decide what a coil does as vitality drops before reusing the
+   blend wholesale.
+7. The view model is per-artboard. Five stage artboards each need their own
+   `viewModelId`/`viewModelInstanceId` wiring, or one shared `Fern` view model
+   with five instances — the ids are cheap, the naming is what matters, since
+   `vitality` is the app's public surface.
 
 ---
 
@@ -476,3 +533,62 @@ Deliberately left open rather than settled quietly:
 - **Sway amplitude does not fall with vitality.** A wilted plant arguably moves
   less. The amplitude is baked into the sway keyframes, so this would need
   either a second blend axis or the sway scaled some other way.
+
+
+---
+
+## Verification recipes
+
+What has actually been used on this project, in increasing order of what it
+proves. The first two are cheap enough to run on every change.
+
+```bash
+rive . --verify                   # names: misspelled elements, unknown attributes
+rive inspect . --summary          # wiring: problems, plus type counts
+```
+
+Type counts are the cheapest real check — they catch "emitted nothing" bugs that
+a clean build hides. Know roughly what you expect: 250 `PointsPath` for the
+mature fern is 5 stems + 133 leaflets + 111 midribs + 1 mound.
+
+**Geometry** — reconstruct emitted vertices back to absolute coordinates and
+diff against the model both writers read. Catches the polar-handle conversion,
+the origin offset and the straight/cubic choice in one pass. Used in step 2;
+1176 vertices at a max error of 0.005 px.
+
+**Animation** — read the built file rather than trusting the markup:
+
+```bash
+rive inspect . --json    # then assert on KeyedObject.objectId, propertyKey,
+                         # and enums.interpolationType per keyframe
+```
+
+Used in step 3 to confirm all five `objectId`s pointed at `*-sway` nodes rather
+than `*-droop` ones, and that no keyframe had silently kept the `hold` default.
+Both would have built clean.
+
+**Loop seams** — compare the first and last keyframe values. Exact equality is
+the only thing that makes a loop invisible.
+
+**Data binding** — A/B the render, since nothing else proves a bind drives
+anything:
+
+```bash
+rive . --screenshot=a.png --data=vitality=1 --advance=1
+rive . --screenshot=b.png --data=vitality=0 --advance=1
+```
+
+Two useful variants of the same trick:
+
+- **Identical is sometimes the assertion.** At vitality 1 the render is
+  byte-identical to the pre-droop capture at the same frame, which proves the
+  droop contributes exactly zero when healthy.
+- **Two frames at one data value** must differ if something else is still
+  animating — that is how the sway was shown to survive under the droop.
+
+**An effect you cannot A/B by flipping its enum.** Removing the interpolator
+child changes the render; changing `interpolationType` does not. Disable the
+thing itself, not the label on it.
+
+Screenshots are `md5 -q` comparable, which is enough for all of the above
+without an image library.
