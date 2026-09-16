@@ -25,17 +25,18 @@ Update this file in the same commit as the work it describes.
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | **Supabase sync** (`lib/app/sync/`) | **Built — connectivity trigger, paged pull with an overlap cursor, push, last-write-wins** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
-| Reflection check-in and chips | Not started |
+| **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule** |
 | Garden rendering | Not started (blocked on external illustrator) |
 | Insight surfacing | Not started |
 
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
 tap → Supabase sync → notifications and the nudge ledger → reflection check-in → garden → insights.
-The first four are done, and two stages have landed on top of them: habit creation — a prerequisite
-the build order does not name, since every stage after it needs habits a user actually made — and
-notifications, taken ahead of Supabase sync because the two share no code. With sync now built, the
-whole of that order up to insights is done bar the reflection check-in, so **the reflection check-in
-is next**.
+The first four are done, and four stages have landed on top of them: habit creation — a prerequisite
+the build order does not name, since every stage after it needs habits a user actually made — plus
+notifications, the reflection check-in and Supabase sync. That completes the build order up to its
+last two entries, so what remains is **garden rendering**, which is blocked on the external
+illustrator, and **insight surfacing**, which now has reflection data to surface. Two follow-ups sit
+alongside them: the notification-permission invitation and the check-in composer seam below.
 
 What is deliberately *not* built yet: Sentry is still uninitialised, no remote Supabase project is
 provisioned — `.env.dev` points at the local stack and stg and prod are placeholders, so those two
