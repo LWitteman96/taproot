@@ -60,9 +60,24 @@ damp patch, the ripple, the landing-time vitality write), **time of day** (step 
 cross-fade but nothing re-checks the hour, and there is no plant-light filter), and the **art pass**
 in `fern/` (step 7 — outline widths and root recolour for the 0.15 scale).
 
-Five of six species still have no art and render as placeholder silhouettes. Two questions are open
-and neither is technical — whether the generator approach suits a tree as well as a fern, and
-whether six generated species can look like one garden. The method is in `fern/NOTES.md`.
+**Two of six species now have generated art.** The generator's shared half lives in `plantgen/` —
+the geometry model, both writers, and the sway / droop / lean / roots wiring — and `fern/` and
+`oak/` are each just a palette, a set of parts, and a table of tuning. The fern's output was
+byte-identical across that move. `assets/rive/oak.riv` ships with the app, but **the garden does not
+draw oaks yet**: `plant_art.dart` hard-codes the fern, and generalising it to per-species names is
+its own task.
+
+So the first of the two open questions has an answer: **the generator approach does work for a
+tree.** The oak built, verified and rendered correctly on the first attempt with the rive CLI, and
+its Rive output matches the reviewed SVG art to antialiasing alone. It needed four additions to the
+shared half — pivots, nested parts, motion twins, and per-part droop directions — all inert for the
+fern. Two caveats: an oak is **3× the fern's render cost**, which puts `OakMature` and `OakBloom`
+over the per-artboard budget `oak/NOTES.md` set, and the `.riv` is 544 KB against the fern's 171 KB.
+Neither has been addressed, because every way to slim it changes art that has been reviewed.
+
+The second question — **whether six generated species can look like one garden** — stays open, and
+four species still have no art and render as placeholder silhouettes. The method is in
+`fern/NOTES.md`, what the oak adds is in `oak/NOTES.md`.
 
 The router's gate is no longer stubbed — it reads the habit count, so a user with nothing planted is
 sent to plant something and only then gets a garden. The debug-only dev-flavor seed button that used
