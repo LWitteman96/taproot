@@ -38,9 +38,15 @@ class PlantDetailCard extends ConsumerWidget {
   /// than one completion a day and the engine counts them.
   final VoidCallback? onUndo;
 
-  /// Only when `checkInOfferProvider` offers *this* habit. Otherwise Water
-  /// takes the full width — reflection-logic's "don't ask every time" is the
-  /// rule, and an always-present button quietly argues the opposite.
+  /// Only when there is a watering nobody has asked about yet — see
+  /// `canReflectOnProvider`. Otherwise Water takes the full width.
+  ///
+  /// Deliberately *not* gated on the check-in offer. Those gates —
+  /// reflection-logic's "don't ask every time" — exist to stop the app from
+  /// bringing things up unprompted, and a user who just watered this plant and
+  /// wants to say why is not being interrupted by anyone. Answering removes the
+  /// occasion, which is what takes the button away again and what stops the
+  /// evening check-in asking about the same watering twice.
   final VoidCallback? onReflect;
 
   static const String undoLabel = 'Undo';

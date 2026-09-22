@@ -121,17 +121,18 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.checkIn,
-        // The garden hands its already-assembled offer over as `extra`, so the
-        // screen re-verifies one habit instead of re-electing a winner among
-        // all of them. Absent — a deep link, a cold start on this path — the
-        // screen assembles from scratch.
+        // How the sheet was opened travels as `extra`: the garden's
+        // already-assembled offer, so the screen re-verifies one habit instead
+        // of re-electing a winner among all of them, or the habit the user
+        // tapped Reflect on. Absent — a deep link, a cold start on this path —
+        // the screen assembles from scratch.
         // The garden *with the sheet up*, not a screen of its own. The roots
         // growing behind the sheet are the payoff (check-in-design §1), so a
         // route that replaced the garden would have nothing to grow. The deep
         // link keeps working; what it opens changed.
         builder: (context, state) => GardenPage(
           showCheckIn: true,
-          checkIn: state.extra as CheckInOffer?,
+          checkIn: state.extra as CheckInEntry?,
         ),
       ),
     ],

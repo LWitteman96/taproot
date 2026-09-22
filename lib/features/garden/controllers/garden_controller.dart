@@ -17,6 +17,7 @@ import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/habits/services/habit_inputs_loader.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
+import 'package:taproot/features/reflection/providers/reflection_providers.dart';
 
 /// The garden: every habit, and what the engine derives for it.
 ///
@@ -196,6 +197,7 @@ class GardenController extends Notifier<GardenState> {
     try {
       await _completions.recordCompletion(completion);
       await _replanNudges(habitId);
+      _refreshCheckInOffer();
       return completion;
     } on UnknownHabitException {
       // The habit was deleted on another device. Expected but abnormal — a
@@ -221,6 +223,22 @@ class GardenController extends Notifier<GardenState> {
     }
   }
 
+  /// Let the garden's check-in invitation re-read the store.
+  ///
+  /// A watering can be the occasion that makes a check-in worth offering, and
+  /// undoing one can take that occasion away. The invitation is a provider the
+  /// garden watches, so without this it keeps showing whatever it computed when
+  /// the page opened — which is exactly the state it was in *before* the
+  /// watering that just happened.
+  ///
+  /// The detail card's Reflect button deliberately does not go through here:
+  /// it reads garden state, so it lands in the same frame as the tap rather
+  /// than after a round trip to the store.
+  void _refreshCheckInOffer() {
+    if (!ref.mounted) return;
+    ref.invalidate(checkInOfferProvider);
+  }
+
   /// Undoes a watering — the correction, not the primary defence.
   Future<void> undo(String habitId, String completionId) async {
     final plant = state.plants[habitId];
@@ -238,6 +256,7 @@ class GardenController extends Notifier<GardenState> {
     try {
       await _completions.retractCompletion(habitId, completionId);
       await _replanNudges(habitId);
+      _refreshCheckInOffer();
     } on CompletionNotRetractableException {
       if (!ref.mounted) return;
       // Normal: the garden was left open across midnight and the offer went
