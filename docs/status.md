@@ -76,7 +76,18 @@ over the per-artboard budget `oak/NOTES.md` set, and the `.riv` is 544 KB agains
 Neither has been addressed, because every way to slim it changes art that has been reviewed.
 
 The second question — **whether six generated species can look like one garden** — stays open, and
-four species still have no art and render as placeholder silhouettes. The method is in
+four species still have no art and render as placeholder silhouettes.
+
+**In progress: the sunflower.** `sunflower/` generates the third species on `plantgen` — six stages
+and `SunflowerRoots`, reviewed as flat art beside the fern and the oak. It has **not been built with
+the rive CLI yet** and is not committed. The next steps are in
+[`sunflower/HANDOFF.md`](../sunflower/HANDOFF.md).
+
+**In progress: the lavender.** `lavender/` generates the fourth species — six stages and
+`LavenderRoots`, reviewed as flat art beside the other three — and `plantgen/species.py` gained a
+per-part stated droop (inert for the other plants; their output is byte-identical). Not built with
+the rive CLI and not committed. The next steps are in [`lavender/HANDOFF.md`](../lavender/HANDOFF.md),
+which runs after the sunflower's. The method is in
 `fern/NOTES.md`, what the oak adds is in `oak/NOTES.md`.
 
 **The evening check-in is a sheet over the garden.** `docs/check-in-design.md` governs it, and all six

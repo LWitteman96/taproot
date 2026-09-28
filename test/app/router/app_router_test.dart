@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:taproot/app/database/database_provider.dart';
 import 'package:taproot/app/router/app_router.dart';
 import 'package:taproot/features/garden/pages/garden_page.dart';
+import 'package:taproot/features/garden/providers/plant_art_providers.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/pages/habit_creation_page.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
@@ -21,6 +22,10 @@ Widget appWith({
 }) => ProviderScope(
   overrides: [
     databaseOpenerProvider.overrideWithValue(openTestDatabaseInWidgetTest),
+    // The garden is reachable from here, and a drawn plant sways forever —
+    // `pumpAndSettle` would never settle. These tests are about routing, not
+    // the picture, so the art stays out of them.
+    plantArtFileProvider.overrideWith((ref, plantType) async => null),
     if (habits != null) habitServiceProvider.overrideWithValue(habits),
     if (gateResolver != null)
       appGateResolverProvider.overrideWithValue(gateResolver),

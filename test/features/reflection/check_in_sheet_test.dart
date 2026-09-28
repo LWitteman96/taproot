@@ -181,7 +181,7 @@ class _Harness {
       clockProvider.overrideWithValue(clock.call),
       // No plant art: these tests are about the sheet, and loading the native
       // library for them would make every one depend on a setup step.
-      riveFernFileProvider.overrideWith((ref) async => null),
+      plantArtFileProvider.overrideWith((ref, plantType) async => null),
       gardenTickerProvider.overrideWith(_StillTicker.new),
     ],
     child: MaterialApp(

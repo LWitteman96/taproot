@@ -6,10 +6,17 @@ import 'package:rive/rive.dart' as rive;
 import 'package:taproot/features/garden/domain/plant_art.dart';
 import 'package:taproot/features/garden/providers/garden_selectors.dart';
 
-/// The decoded Rive file, loaded once and shared by every plant on screen.
+/// The decoded Rive file for one species, keyed by `Habit.plantType`.
 ///
-/// One file, many artboards: each card builds its own controller and its own
-/// view model instance from this, so plants do not share a vitality.
+/// **One file per species, not one per plant.** Every fern on screen shares a
+/// decoded `fern.riv` and every oak a decoded `oak.riv`; each card then builds
+/// its own controller and its own view model instance from it, so two plants of
+/// the same species do not share a vitality. Keying the family by species
+/// rather than by habit is what keeps that true — a family per habit would
+/// decode the same megabyte once per card.
+///
+/// A species with no art returns null without touching the filesystem, which is
+/// the four species in `plantChoices` that `plantArts` does not cover.
 ///
 /// **Null is a supported outcome, not an error to surface.** `rive_native`
 /// needs a platform library that `pub get` does not fetch (`dart run
@@ -18,7 +25,12 @@ import 'package:taproot/features/garden/providers/garden_selectors.dart';
 /// so falling back to it costs the user nothing but the picture. That also
 /// keeps every existing widget test working without a native dependency: they
 /// override this with `null` and never construct a Rive widget.
-final riveFernFileProvider = FutureProvider<rive.File?>((ref) async {
+final plantArtFileProvider = FutureProvider.family<rive.File?, String>((
+  ref,
+  plantType,
+) async {
+  final art = plantArtFor(plantType);
+  if (art == null) return null;
   try {
     if (!await rive.RiveNative.init()) {
       dev.log(
@@ -31,11 +43,11 @@ final riveFernFileProvider = FutureProvider<rive.File?>((ref) async {
     // context and aborts the process in native code without one, which takes
     // `flutter test` down with a SIGABRT rather than a failed expectation.
     final file = await rive.File.asset(
-      fernAssetPath,
+      art.assetPath,
       riveFactory: rive.Factory.flutter,
     );
     if (file == null) {
-      dev.log('$fernAssetPath did not decode', name: 'PlantArt');
+      dev.log('${art.assetPath} did not decode', name: 'PlantArt');
     }
     ref.onDispose(() => file?.dispose());
     return file;
@@ -43,7 +55,7 @@ final riveFernFileProvider = FutureProvider<rive.File?>((ref) async {
     // Deliberately not rethrown. A plant that cannot be drawn is a degraded
     // garden, not a broken one, and the card behind it still says everything.
     dev.log(
-      'could not load plant art',
+      'could not load ${art.assetPath}',
       name: 'PlantArt',
       error: error,
       stackTrace: stackTrace,

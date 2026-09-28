@@ -58,7 +58,7 @@ void main() {
           // garden. No plant art: the sheet is what is under test, and
           // loading the native library would make every one of these depend on
           // a setup step outside `flutter pub get`.
-          riveFernFileProvider.overrideWith((ref) async => null),
+          plantArtFileProvider.overrideWith((ref, plantType) async => null),
           gardenTickerProvider.overrideWith(_StillTicker.new),
         ],
         child: const MaterialApp(home: GardenPage(showCheckIn: true)),

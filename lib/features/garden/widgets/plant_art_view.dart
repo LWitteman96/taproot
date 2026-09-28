@@ -12,10 +12,14 @@ import 'package:taproot/features/garden/providers/plant_art_providers.dart';
 
 /// The drawn plant and the roots beneath it, on one shared view model.
 ///
-/// Nothing is the common case for now — five of six species have no art, and a
+/// Nothing is still the common case — four of six species have no art, and a
 /// device without the native library has none either. The garden says the whole
 /// plant in words anyway, so this draws or it gets out of the way; it never
 /// shows an error or a spinner.
+///
+/// Species-agnostic: everything it needs comes off the [PlantArt] for the
+/// habit's `plantType`, so adding a species is a line in `plantArts` and an
+/// asset, not a change here.
 ///
 /// **The two artboards share one [rive.ViewModelInstance].** `roots` drives the
 /// root system on one and a lean on the other, so two auto-bound instances
@@ -52,36 +56,37 @@ class _PlantArtViewState extends ConsumerState<PlantArtView> {
   rive.ViewModelInstanceNumber? _roots;
   rive.File? _boundTo;
 
-  void _bind(rive.File file) {
+  void _bind(rive.File file, PlantArt art) {
     if (identical(_boundTo, file)) return;
     // `createDefaultInstance` rather than a controller's `dataBind`: the
     // instance has to exist before either artboard does, because both of them
     // are handed this one.
-    final artboard = file.artboard(fernArtboardFor(Stage.mature));
+    final artboard = file.artboard(art.artboardFor(Stage.mature));
     final viewModel = artboard == null
         ? null
         : file.defaultArtboardViewModel(artboard);
     _instance = viewModel?.createDefaultInstance();
-    _vitality = _instance?.number(fernVitalityProperty);
-    _roots = _instance?.number(fernRootsProperty);
+    _vitality = _instance?.number(plantVitalityProperty);
+    _roots = _instance?.number(plantRootsProperty);
     _boundTo = file;
   }
 
   @override
   Widget build(BuildContext context) {
     final plantType = ref.watch(habitPlantTypeProvider(widget.habitId));
-    if (plantType == null || !hasPlantArt(plantType)) {
-      return const SizedBox.shrink();
-    }
+    final art = plantArtFor(plantType);
+    if (art == null) return const SizedBox.shrink();
 
     final stage = ref.watch(habitStageProvider(widget.habitId));
     if (stage == null) return const SizedBox.shrink();
 
     // `.value` and not a `when`: while the file is loading this is null, which
-    // is the same "draw nothing" branch as never having loaded at all.
-    final file = ref.watch(riveFernFileProvider).value;
+    // is the same "draw nothing" branch as never having loaded at all. The
+    // family is keyed by species, so a garden of ferns and oaks decodes two
+    // files between them rather than one per plant.
+    final file = ref.watch(plantArtFileProvider(art.plantType)).value;
     if (file == null) return const SizedBox.shrink();
-    _bind(file);
+    _bind(file, art);
 
     final instance = _instance;
     if (instance == null) return const SizedBox.shrink();
@@ -118,10 +123,14 @@ class _PlantArtViewState extends ConsumerState<PlantArtView> {
                 child: _Artboard(
                   // The key is the whole mechanism: a new stage is a new child,
                   // so AnimatedSwitcher fades it in as the old one fades out.
-                  key: ValueKey<Stage>(stage),
+                  // Species is in the key too: a habit that changed plant would
+                  // otherwise keep the old species' controller for the stage it
+                  // was already on.
+                  key: ValueKey<String>('${art.plantType}.${stage.name}'),
                   file: file,
                   instance: instance,
-                  artboard: fernArtboardFor(stage),
+                  artboard: art.artboardFor(stage),
+                  stateMachine: art.stateMachineName,
                   ticker: ticker,
                 ),
               ),
@@ -135,7 +144,8 @@ class _PlantArtViewState extends ConsumerState<PlantArtView> {
               child: _Artboard(
                 file: file,
                 instance: instance,
-                artboard: fernRootsArtboard,
+                artboard: art.rootsArtboard,
+                stateMachine: art.stateMachineName,
                 ticker: ticker,
               ),
             ),
@@ -152,6 +162,7 @@ class _Artboard extends StatefulWidget {
     required this.file,
     required this.instance,
     required this.artboard,
+    required this.stateMachine,
     required this.ticker,
     super.key,
   });
@@ -159,6 +170,7 @@ class _Artboard extends StatefulWidget {
   final rive.File file;
   final rive.ViewModelInstance instance;
   final String artboard;
+  final String stateMachine;
   final GardenTicker ticker;
 
   @override
@@ -168,7 +180,8 @@ class _Artboard extends StatefulWidget {
 class _ArtboardState extends State<_Artboard> {
   rive.RiveWidgetController? _controller;
 
-  /// Comfortably past the longer of `fern/`'s two interpolators.
+  /// Comfortably past the longer of the generator's two interpolators. Every
+  /// species is built by `plantgen` with the same pair, so this is one number.
   static const double _settleSeconds = 1.5;
 
   @override
@@ -178,9 +191,7 @@ class _ArtboardState extends State<_Artboard> {
       final controller = rive.RiveWidgetController(
         widget.file,
         artboardSelector: rive.ArtboardNamed(widget.artboard),
-        stateMachineSelector: const rive.StateMachineNamed(
-          fernStateMachineName,
-        ),
+        stateMachineSelector: rive.StateMachineNamed(widget.stateMachine),
       );
       // byInstance, never auto: auto would mint this artboard its own copy of
       // the numbers and quietly decouple it from the rest of the plant.

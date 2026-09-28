@@ -8,6 +8,7 @@ import 'package:taproot/core/models/habit.dart';
 import 'package:taproot/core/models/habit_category.dart';
 import 'package:taproot/core/models/habit_journey.dart';
 import 'package:taproot/features/garden/pages/garden_page.dart';
+import 'package:taproot/features/garden/providers/plant_art_providers.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/pages/habit_creation_page.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
@@ -35,6 +36,10 @@ void main() {
             openTestDatabaseInWidgetTest,
           ),
           habitServiceProvider.overrideWithValue(habits ?? FakeHabitService()),
+          // The garden is reachable from here, and a drawn plant sways
+          // forever — `pumpAndSettle` would never settle. These tests are about
+          // the flow, not the picture, so the art stays out of them.
+          plantArtFileProvider.overrideWith((ref, plantType) async => null),
         ],
         child: const TaprootApp(),
       ),

@@ -84,7 +84,7 @@ here come from the handoff README, "Layers".
 | 9 | **Plants** | **Rive — stage artboard** | One per plant (§4.3). |
 | 10 | Watering drop + ripple | Flutter | §6.1. |
 | 11 | Header | Flutter | Greeting, status line, check-in chip. Fixed. |
-| 12 | Toast | Flutter | §6.2. |
+| 12 | Toast | Flutter | One-line confirmations. Not used after a check-in (§6.2). |
 | 13 | Detail card | Flutter | Fixed, floats over the soil. §4.4. |
 
 The garden scrolls **horizontally**. Layers 1–3, 11 and 13 stay put; layers 4–10 scroll together.
@@ -149,11 +149,13 @@ As in the handoff README ("Detail card"), with these changes:
   (`Hold to water`, then `Hold to water again`). It stays enabled after a watering, because the
   app already records more than one completion a day. An `Undo` text button sits alongside while
   the undo offer lasts. The prototype's disabled `Watered today` state is not adopted.
-- **Reflect button:** shown only when `checkInOfferProvider` offers *this* habit. It opens
-  `AppRoutes.checkIn` with that offer. Otherwise the Water button takes the full width. This
-  keeps reflection-logic's "don't ask every time" (see §10, open question 3).
+- **Reflect button:** shown only when `checkInOfferProvider` offers *this* habit. It opens the
+  **check-in sheet** over the garden with that offer (see [check-in-design.md](check-in-design.md)).
+  Otherwise the Water button takes the full width. This keeps reflection-logic's "don't ask every
+  time" (see §10, open question 3).
 - **Lines:** `Cue worked {hit} of {total} times` and
-  `{N} reflections · {rootDepthLabel(R)}`, using the **existing** `plant_descriptions.dart`
+  `{n} reflections · {rootDepthLabel(R)}`, where `n` is the plain count of answered
+  reflections (never the weighted credit sum), using the **existing** `plant_descriptions.dart`
   bands, not the prototype's (§9).
 - **Hint:** the prototype's three rules, first match wins. "Shallow" uses the engine's advisory
   threshold for the stage (young 0.30, mature 0.50), read from `constants.dart`.
@@ -227,12 +229,14 @@ the Rive file (`cubicValue` on the droop, per `fern/NOTES.md`), not as a Flutter
 
 ### 6.2 Reflection
 
-A completed check-in returns to the garden with a higher `R`. On return:
+Reflection happens in the check-in sheet over this garden, and its roots payoff plays behind the
+sheet: see [check-in-design.md](check-in-design.md) §3 and §7. The garden itself only:
 
-- write `roots` to the plant's view model; Rive grows the roots over 1.2 s, and a Young or Mature
-  plant straightens as its roots pass the threshold;
-- show the toast `Roots deepened · {N} reflections` (prototype toast spec);
-- keep the reflected plant selected.
+- keeps the reflected plant selected;
+- shows the new roots wording on the detail card once the sheet closes.
+
+There is **no toast** after a check-in; the sheet's done state already says it. The toast layer
+stays for other one-line confirmations.
 
 ### 6.3 Stage advance
 
@@ -329,7 +333,7 @@ Each step keeps the three gates green and ends with a screenshot on a device.
    `fernRootsProperty` to `plant_art.dart` and to `fern_asset_test.dart`. Write `roots` from the
    engine. Test that one write is visible through both artboards.
 5. **Moments.** Watering choreography (§6.1) with the landing-time vitality write, damp patch,
-   ripple and haptic; undo; the reflection return and toast (§6.2).
+   ripple and haptic; undo (§6.1).
 6. **Time of day.** Modes, cross-fades, plant light filter (§7).
 7. **Art pass in `fern/`** (can run in parallel with steps 1–3). Outline widths × 2, root
    recolour without outline, rebuild, copy `fern.riv` into `assets/rive/`.
@@ -346,7 +350,7 @@ These are calibration questions, not settled. Implement the default and name the
 2. **The seed at about 11pt.** Readable in the mock-up, but it may need a marker stake when a
    user's first habit is still a seed.
 3. **Reflect only when offered.** This follows reflection-logic, but it means a user can't choose
-   to reflect. Revisit once the check-in design lands.
+   to reflect. The check-in design keeps this rule; revisit with usage data.
 4. **Reduced motion and the Rive interpolators.** Flutter can't skip the 0.6 s and 1.2 s eases in
    the file. If instant is required, the file needs a smoothing switch.
 5. **Plant light filter amounts** per time-of-day mode.

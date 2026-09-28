@@ -159,6 +159,10 @@ class Species:
         """
         if part.meta.get("follows"):
             part, _ = self.leader(part, parts)
+        # A generator that lays parts out by rule can state each part's droop
+        # outright, when "more upright falls further" is the wrong rule for it.
+        if "droop_degrees" in part.meta:
+            return math.radians(part.meta["droop_degrees"])
         pivot = part.pivot or BASE
         dx, dy = part.tip[0] - pivot[0], part.tip[1] - pivot[1]
         elevation = math.degrees(math.atan2(-dy, abs(dx)))          # 0 = flat, 90 = straight up

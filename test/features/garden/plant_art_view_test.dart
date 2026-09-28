@@ -1,9 +1,10 @@
 /// The drawn plant: when it appears, when it gets out of the way, and what a
 /// stage advance does.
 ///
-/// Unlike the rest of the garden tests these load the real Rive file, so they
-/// need the native library — `dart run rive_native:setup --platform macos` — and
-/// they are the only widget tests that do.
+/// Unlike the rest of the garden tests these load the real Rive files — one per
+/// species in `plantArts` — so they need the native library
+/// (`dart run rive_native:setup --platform macos`) and they are the only widget
+/// tests that do.
 library;
 
 import 'package:flutter/material.dart';
@@ -23,18 +24,23 @@ import 'package:taproot/features/garden/widgets/plant_art_view.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  rive.File? realFile;
+  /// The real decoded asset per species, so a test can assert on the oak's
+  /// artboards and not just the fern's.
+  final realFiles = <String, rive.File>{};
 
   setUpAll(() async {
     if (await rive.RiveNative.init()) {
-      realFile = await rive.File.asset(
-        fernAssetPath,
-        riveFactory: rive.Factory.flutter,
-      );
+      for (final art in plantArts) {
+        final file = await rive.File.asset(
+          art.assetPath,
+          riveFactory: rive.Factory.flutter,
+        );
+        if (file != null) realFiles[art.plantType] = file;
+      }
     }
     expect(
-      realFile,
-      isNotNull,
+      realFiles.keys,
+      containsAll(plantArts.map((art) => art.plantType)),
       reason: 'run `dart run rive_native:setup --platform macos`',
     );
   });
@@ -46,12 +52,17 @@ void main() {
   /// Overriding the selectors rather than assembling a whole [PlantState] is
   /// not a shortcut: it is the same surface the widget actually depends on, so
   /// a test cannot pass by accident on a field the widget never reads.
+  ///
+  /// [art] true hands the widget the real decoded file for whichever species it
+  /// asks for, false hands it null — the device-without-the-native-library
+  /// case. The override is on the family itself, so it answers for every
+  /// species rather than one.
   Widget harness({
     required String plantType,
     required Stage stage,
     double vitality = 1,
     double roots = 0,
-    rive.File? file,
+    bool art = true,
     GardenTicker ticker = GardenTicker.still,
   }) => ProviderScope(
     overrides: [
@@ -59,7 +70,9 @@ void main() {
       habitStageProvider(habitId).overrideWithValue(stage),
       habitVitalityProvider(habitId).overrideWithValue(vitality),
       habitRootDepthProvider(habitId).overrideWithValue(roots),
-      riveFernFileProvider.overrideWith((ref) async => file),
+      plantArtFileProvider.overrideWith(
+        (ref, species) async => art ? realFiles[species] : null,
+      ),
       gardenTickerProvider.overrideWith(() => _FixedTicker(ticker)),
     ],
     child: const MaterialApp(
@@ -68,9 +81,7 @@ void main() {
   );
 
   testWidgets('a fern draws itself, at world scale', (tester) async {
-    await tester.pumpWidget(
-      harness(plantType: 'fern', stage: Stage.mature, file: realFile),
-    );
+    await tester.pumpWidget(harness(plantType: 'fern', stage: Stage.mature));
     await tester.pump();
 
     // Two artboards: the plant, and the roots beneath it.
@@ -94,12 +105,7 @@ void main() {
     // instances both artboards render, both binds resolve, and the plant leans
     // about roots that disagree with the ones drawn under it.
     await tester.pumpWidget(
-      harness(
-        plantType: 'fern',
-        stage: Stage.mature,
-        roots: 0.5,
-        file: realFile,
-      ),
+      harness(plantType: 'fern', stage: Stage.mature, roots: 0.5),
     );
     await tester.pump();
 
@@ -120,13 +126,76 @@ void main() {
     );
   });
 
+  testWidgets('an oak draws itself too, from its own asset', (tester) async {
+    // The second species, and the reason [PlantArt] exists. It is a different
+    // `.riv` with different artboard names behind the same two numbers, so the
+    // hard-coded fern this replaced would draw nothing at all here.
+    await tester.pumpWidget(harness(plantType: 'oak', stage: Stage.mature));
+    await tester.pump();
+
+    expect(find.byType(rive.RiveWidget), findsNWidgets(2));
+
+    final artboards = tester
+        .widgetList<rive.RiveWidget>(find.byType(rive.RiveWidget))
+        .map((widget) => widget.controller.artboard.name)
+        .toList();
+    // Named from the map rather than spelled here, so this fails if the widget
+    // drew the fern's artboards for an oak habit — the actual regression.
+    expect(artboards, contains(oakArt.artboardFor(Stage.mature)));
+    expect(artboards, contains(oakArt.rootsArtboard));
+
+    // And it occupies exactly the box the fern does, because
+    // `GardenLayout.rootsDepth` is one constant for every species.
+    expect(
+      tester.getSize(find.byType(PlantArtView)),
+      const Size(
+        GardenLayout.stageSize,
+        GardenLayout.stageSize + GardenLayout.rootsDepth,
+      ),
+    );
+  });
+
+  testWidgets('each species draws from its own file, not a shared one', (
+    tester,
+  ) async {
+    // The family is keyed by species. Keyed by anything else — or not a family
+    // at all — every plant in the garden would draw out of whichever file
+    // loaded first, which looks like the right plant for a fern and like
+    // nothing at all for an oak.
+    final loaded = <String>[];
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          habitPlantTypeProvider(habitId).overrideWithValue('oak'),
+          habitStageProvider(habitId).overrideWithValue(Stage.young),
+          habitVitalityProvider(habitId).overrideWithValue(1),
+          habitRootDepthProvider(habitId).overrideWithValue(0),
+          plantArtFileProvider.overrideWith((ref, species) async {
+            loaded.add(species);
+            return realFiles[species];
+          }),
+          gardenTickerProvider.overrideWith(
+            () => _FixedTicker(GardenTicker.still),
+          ),
+        ],
+        child: const MaterialApp(
+          home: Scaffold(body: PlantArtView(habitId: habitId)),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(loaded, ['oak'], reason: 'an oak habit must ask for the oak file');
+  });
+
   testWidgets('a species with no art takes no space at all', (tester) async {
-    // Not a spinner and not a gap: five of six species have nothing to draw,
+    // Not a spinner and not a gap: four of six species have nothing to draw,
     // and a reserved empty box on every one of them would be worse than the
     // card simply being shorter.
-    await tester.pumpWidget(
-      harness(plantType: 'oak', stage: Stage.mature, file: realFile),
-    );
+    //
+    // `lotus` is offered by `plantChoices` and absent from `plantArts`, which
+    // is exactly this case. The oak used to stand here and now draws.
+    await tester.pumpWidget(harness(plantType: 'lotus', stage: Stage.mature));
     await tester.pump();
 
     expect(find.byType(rive.RiveWidget), findsNothing);
@@ -137,7 +206,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      harness(plantType: 'fern', stage: Stage.mature, file: null),
+      harness(plantType: 'fern', stage: Stage.mature, art: false),
     );
     await tester.pump();
 
@@ -155,7 +224,6 @@ void main() {
       harness(
         plantType: 'fern',
         stage: Stage.young,
-        file: realFile,
         ticker: GardenTicker.lively,
       ),
     );
@@ -166,7 +234,6 @@ void main() {
       harness(
         plantType: 'fern',
         stage: Stage.mature,
-        file: realFile,
         ticker: GardenTicker.lively,
       ),
     );
