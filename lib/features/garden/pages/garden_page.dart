@@ -50,7 +50,7 @@ class GardenPage extends ConsumerWidget {
   /// The offer the garden already assembled, when there is one. A deep link
   /// arrives without it and the sheet assembles from scratch, which is why
   /// this is separate from [showCheckIn] rather than doubling as it.
-  final CheckInOffer? checkIn;
+  final CheckInEntry? checkIn;
 
   static const String emptyHeadline = 'Nothing planted yet';
   static const String emptyBody =
@@ -100,12 +100,13 @@ class GardenPage extends ConsumerWidget {
     // re-verification can land on a different habit than the garden guessed.
     final reflectingId = !showCheckIn
         ? null
-        : (ref.watch(
+        : ref
+                  .watch(
                     checkInControllerProvider.select((state) => state.offer),
-                  ) ??
-                  checkIn)
-              ?.habit
-              .id;
+                  )
+                  ?.habit
+                  .id ??
+              checkIn?.habitId;
     final reflectingIndex = reflectingId == null
         ? -1
         : habitIds.indexOf(reflectingId);
@@ -187,7 +188,7 @@ class GardenPage extends ConsumerWidget {
             },
             sheet: !showCheckIn
                 ? null
-                : CheckInSheetHost(offered: checkIn, ticker: ticker),
+                : CheckInSheetHost(entry: checkIn, ticker: ticker),
           ),
         ),
       ),
@@ -508,12 +509,12 @@ class _SelectedPlantCard extends ConsumerWidget {
     final controller = ref.read(gardenControllerProvider.notifier);
     final undoable = plant.undoableCompletion;
 
-    // Reflect is offered **only when the check-in names this habit**
-    // (garden-design §4.4). A standing button would quietly argue the opposite
-    // of reflection-logic's "don't ask every time", and would open a sheet with
-    // nothing to ask most days.
-    final offer = ref.watch(checkInOfferProvider).value;
-    final reflectsThisPlant = offer != null && offer.habit.id == habitId;
+    // Reflect is offered whenever this plant has a watering nobody has asked
+    // about yet — see `canReflectOnProvider`. It is not the check-in offer:
+    // that one is gated to protect the user from the *app* bringing things up,
+    // and a user who just watered a plant and wants to say why is not being
+    // interrupted by anyone.
+    final canReflect = ref.watch(canReflectOnProvider(habitId));
 
     return PlantDetailCard(
       plant: plant,
@@ -524,10 +525,14 @@ class _SelectedPlantCard extends ConsumerWidget {
       onUndo: undoable == null
           ? null
           : () => controller.undo(habitId, undoable.id),
-      // The offer travels with the tap, so the sheet re-verifies one habit
-      // rather than re-electing a winner among all of them.
-      onReflect: reflectsThisPlant
-          ? () => context.push(AppRoutes.checkIn, extra: offer)
+      // The habit travels with the tap, not an offer: there is no assembled
+      // question yet, and composing one for a habit the user named is a single
+      // read rather than the whole ranking.
+      onReflect: canReflect
+          ? () => context.push(
+              AppRoutes.checkIn,
+              extra: RequestedCheckIn(habitId),
+            )
           : null,
     );
   }
@@ -561,7 +566,10 @@ class _CheckInInvitation extends ConsumerWidget {
                 // notification answer can land in between — but against one
                 // habit rather than reassembling every habit's ledgers and
                 // growth ladder to re-elect the one just named here.
-                onPressed: () => context.push(AppRoutes.checkIn, extra: value),
+                onPressed: () => context.push(
+                  AppRoutes.checkIn,
+                  extra: OfferedCheckIn(value),
+                ),
               ),
             ),
       orElse: () => const SizedBox.shrink(),

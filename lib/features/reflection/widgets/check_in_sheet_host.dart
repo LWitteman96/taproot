@@ -27,19 +27,27 @@ import 'package:taproot/features/reflection/widgets/check_in_sheet.dart';
 /// reason the check-in is a sheet at all (check-in-design §1).
 class CheckInSheetHost extends ConsumerStatefulWidget {
   const CheckInSheetHost({
-    required this.offered,
+    required this.entry,
     required this.ticker,
     super.key,
   });
 
-  /// The offer the garden already assembled, when there is one. It is
-  /// re-verified rather than trusted — a notification answer can land in
-  /// between — but re-verifying one habit is a fraction of electing a winner
-  /// among all of them again.
+  /// How the sheet was opened: the garden's already-assembled offer, or the
+  /// user asking about one habit after watering it. See [CheckInEntry].
   ///
   /// Null on a deep link or a cold start on `/check-in`, and then the whole
   /// assembly runs.
-  final CheckInOffer? offered;
+  final CheckInEntry? entry;
+
+  /// The offer that came in with [entry], when one did.
+  ///
+  /// A requested check-in has none — the garden knew only that there was
+  /// something to reflect on — so the sheet shows its spinner for as long as
+  /// composing the question takes, exactly as the deep link already did.
+  CheckInOffer? get offered => switch (entry) {
+    OfferedCheckIn(:final offer) => offer,
+    RequestedCheckIn() || null => null,
+  };
 
   final GardenTicker ticker;
 
@@ -84,18 +92,22 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
     super.initState();
     // After the frame: `load` writes controller state, and doing that during
     // the build that is creating this widget rebuilds a provider mid-frame.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       // Reset at the start rather than cleared on the way out: `dispose` runs
       // while the element is already deactivated, so reading the provider
       // container from it is unsafe — and "every check-in starts at the
       // beginning" is the same guarantee either way.
       ref.read(checkInIsDoneProvider.notifier).set(false);
+      // Before the load, whenever the entry names the habit — which is both
+      // ways in from the garden. Only a deep link has to wait.
       _holdRoots();
-      ref
+      await ref
           .read(checkInControllerProvider.notifier)
-          .load(offered: widget.offered);
-      _previewCommitStep();
+          .load(entry: widget.entry);
+      if (!mounted) return;
+      _holdRoots();
+      await _previewCommitStep();
     });
   }
 
@@ -125,10 +137,22 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
   /// straight away. Pinning here and releasing at done is what makes the growth
   /// land *with* the done state — which is the entire reason the check-in is a
   /// sheet over the garden rather than a page (check-in-design §7.2).
+  ///
+  /// Called twice — once before the question is composed and once after — and
+  /// the first call is the one that matters. A requested check-in composes its
+  /// question against the store, which takes a round trip the user is watching;
+  /// pinning only afterwards would be fine today but is one refactor away from
+  /// pinning after the write. The second call is for the deep link, which is
+  /// the only way in that does not know the habit up front. Holding twice is
+  /// not holding twice: the pin is keyed by habit, and nothing has moved the
+  /// root depth in between.
   void _holdRoots() {
+    if (_heldFor != null) return;
     final habitId =
-        (ref.read(checkInControllerProvider).offer ?? widget.offered)?.habit.id;
+        widget.entry?.habitId ??
+        ref.read(checkInControllerProvider).offer?.habit.id;
     if (habitId == null) return;
+    _heldFor = habitId;
     ref
         .read(heldRootDepthProvider.notifier)
         .hold(
@@ -136,6 +160,9 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
           depth: ref.read(habitRootDepthProvider(habitId)) ?? 0,
         );
   }
+
+  /// The habit whose roots are pinned, so the pin is taken once.
+  String? _heldFor;
 
   /// Reach the done state: lift the scrim and let the roots grow.
   ///
@@ -241,7 +268,7 @@ class _CheckInSheetHostState extends ConsumerState<CheckInSheetHost> {
         actionLabel: CheckInSheetHost.retryLabel,
         onAction: () => ref
             .read(checkInControllerProvider.notifier)
-            .load(offered: widget.offered),
+            .load(entry: widget.entry),
       ),
       // Only reachable on a deep link, before the assembly returns: with an
       // offer in hand there is something to ask straight away.

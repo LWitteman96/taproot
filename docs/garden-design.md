@@ -149,10 +149,27 @@ As in the handoff README ("Detail card"), with these changes:
   (`Hold to water`, then `Hold to water again`). It stays enabled after a watering, because the
   app already records more than one completion a day. An `Undo` text button sits alongside while
   the undo offer lasts. The prototype's disabled `Watered today` state is not adopted.
-- **Reflect button:** shown only when `checkInOfferProvider` offers *this* habit. It opens the
-  **check-in sheet** over the garden with that offer (see [check-in-design.md](check-in-design.md)).
-  Otherwise the Water button takes the full width. This keeps reflection-logic's "don't ask every
-  time" (see §10, open question 3).
+- **Reflect button:** shown whenever this plant has a **watering nobody has asked about yet** —
+  `canReflectOnProvider`, computed off garden state so it appears in the same frame as the
+  watering. It opens the **check-in sheet** over the garden (see
+  [check-in-design.md](check-in-design.md)) with a `RequestedCheckIn(habitId)`, and the assembler
+  composes the question for that habit with the scheduling gates skipped. Otherwise the Water
+  button takes the full width.
+
+  This is **not** the same question as `checkInOfferProvider`. That one is gated hard —
+  once a day app-wide, a weekly budget per habit, a 0.5 priority bar — because those gates exist
+  to stop *the app* from interrupting. None of them describes a user who just watered a plant and
+  wants to say why, so reflection-logic's "don't ask every time" keeps governing what the app
+  raises on its own and nothing else.
+
+  Answering is what takes the button away: `occasionFor` counts only events newer than the last
+  reflection, so a reflection the user volunteered also stops the evening check-in bringing the
+  same watering up again. A user who waters and says nothing is still nudged later, as before.
+
+  A **miss** does not offer the button. It is a real occasion and the scheduler still raises it,
+  with a Diagnosis framing — but putting Reflect on a plant the user has not touched turns the
+  card into a standing invitation to explain themselves. The button answers "you did this", not
+  "you didn't".
 - **Lines:** `Cue worked {hit} of {total} times` and
   `{n} reflections · {rootDepthLabel(R)}`, where `n` is the plain count of answered
   reflections (never the weighted credit sum), using the **existing** `plant_descriptions.dart`
@@ -306,7 +323,7 @@ button labelled "Plant something". The scroll view announces position ("Plant 2 
 | After watering | Button disabled, `Watered today` | App: `Hold to water again` | **Existing copy, stays enabled** |
 | Perk-up | 900 ms overshoot spring after 450 ms | 0.6 s ease, no overshoot | **Art as is.** Overshoot is a possible art follow-up (§6.1). |
 | Vitality write timing | Immediate, CSS delays the visual | Interpolator from the moment of the write | **Write at drop landing** (§6.1) |
-| Reflect | Always visible; increments N, toasts | (n/a) | **Only when offered**; opens the check-in (§4.4) |
+| Reflect | Always visible; increments N, toasts | (n/a) | **Whenever there is a watering to reflect on**; opens the check-in (§4.4) |
 | Plant labels | Mono species/stage on the placeholder | (n/a) | **Placeholders only.** Drawn plants have none. |
 | Selection | Ground glow + 2pt ring on the box | (n/a) | **Glow only** |
 | "sprout" as a species | Journal is `type: sprout` | Sprout is a stage | **Stage only.** Species come from `plant_choices.dart`. |
@@ -349,8 +366,14 @@ These are calibration questions, not settled. Implement the default and name the
    smallest supported phone and on a tablet (does the tablet show more plants or bigger ones?).
 2. **The seed at about 11pt.** Readable in the mock-up, but it may need a marker stake when a
    user's first habit is still a seed.
-3. **Reflect only when offered.** This follows reflection-logic, but it means a user can't choose
-   to reflect. The check-in design keeps this rule; revisit with usage data.
+3. ~~**Reflect only when offered.**~~ **Settled:** the user can always reflect on a watering they
+   have not talked about yet (§4.4). The gates were protecting the user from the app, and were
+   being read as protecting the app from the user. What is still open is the other half: whether a
+   volunteered reflection should also spend the app-wide daily slot and the habit's weekly budget.
+   It currently does — both are derived from reflection rows, and telling them apart would need a
+   `was_prompted` column — which means a user who reflects on their own goes quiet for the rest of
+   the day. That is defensible as "you have had your conversation today" and wrong if volunteering
+   turns out to be the common case.
 4. **Reduced motion and the Rive interpolators.** Flutter can't skip the 0.6 s and 1.2 s eases in
    the file. If instant is required, the file needs a smoothing switch.
 5. **Plant light filter amounts** per time-of-day mode.

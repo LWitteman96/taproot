@@ -306,6 +306,86 @@ void main() {
     });
   });
 
+  group('the check-in the user asked for', () {
+    Future<void> reflect(DateTime at, {String habitId = 'habit-1'}) =>
+        store.reflections.saveReflection(
+          Reflection(
+            id: 'r-${at.millisecondsSinceEpoch}',
+            habitId: habitId,
+            createdAt: at,
+            occasion: Occasion.completion,
+            framing: Framing.validation,
+            inputMode: InputMode.chip,
+            cueReported: 'after breakfast',
+            cueType: CueType.event,
+          ),
+        );
+
+    test('a watering the user has not talked about is askable', () async {
+      await plant();
+      await water(DateTime(2026, 3, 12, 7, 10));
+
+      final offer = await assembler.requestedCheckIn('habit-1');
+
+      expect(offer, isNotNull);
+      expect(offer!.habit.id, 'habit-1');
+      expect(offer.occasion, Occasion.completion);
+      expect(offer.cueChips, isNotEmpty);
+    });
+
+    test('nothing to reflect on is still nothing to ask', () async {
+      await plant();
+
+      expect(await assembler.requestedCheckIn('habit-1'), isNull);
+    });
+
+    test('answering is what takes the question away', () async {
+      await plant();
+      await water(DateTime(2026, 3, 12, 7, 10));
+      await reflect(DateTime(2026, 3, 12, 20, 1));
+
+      // The whole gate on a requested check-in: the completion is no longer
+      // new, so there is nothing left to say about it. This is also what stops
+      // the evening nudge asking about a watering the user already explained.
+      expect(await assembler.requestedCheckIn('habit-1'), isNull);
+    });
+
+    test('the app-wide daily slot does not silence the user asking', () async {
+      await plant();
+      await plant(id: 'habit-2', name: 'Stretch');
+      // Another habit was reflected on minutes ago, which closes the
+      // once-a-day slot for everything the app would raise itself.
+      await reflect(DateTime(2026, 3, 12, 19, 40), habitId: 'habit-2');
+      await water(DateTime(2026, 3, 12, 19, 50));
+
+      expect(await assembler.nextCheckIn(), isNull);
+      expect(await assembler.requestedCheckIn('habit-1'), isNotNull);
+    });
+
+    test('a spent weekly budget does not silence it either', () async {
+      await plant();
+      await reflect(DateTime(2026, 3, 7, 20));
+      await reflect(DateTime(2026, 3, 9, 20));
+      await reflect(DateTime(2026, 3, 11, 20));
+      await water(DateTime(2026, 3, 12, 7, 10));
+
+      expect(await assembler.nextCheckIn(), isNull);
+      expect(await assembler.requestedCheckIn('habit-1'), isNotNull);
+    });
+
+    test('a paused habit is still not asked about', () async {
+      await plant();
+      await water(DateTime(2026, 3, 12, 7, 10));
+      await store.habits.pauseHabit('habit-1');
+
+      expect(await assembler.requestedCheckIn('habit-1'), isNull);
+    });
+
+    test('a habit that is gone is not asked about', () async {
+      expect(await assembler.requestedCheckIn('nobody'), isNull);
+    });
+  });
+
   test('a habit with no category still gets a question', () async {
     await plant(category: null);
     await water(DateTime(2026, 3, 12, 7, 10));

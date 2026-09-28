@@ -99,7 +99,10 @@ void main() {
       final habit = testHabit(id: 'a', name: 'Morning run');
       await harness.store.saveHabit(habit);
       await tester.pumpWidget(
-        harness.app(showCheckIn: true, checkIn: harness.offerFor(habit)),
+        harness.app(
+          showCheckIn: true,
+          checkIn: OfferedCheckIn(harness.offerFor(habit)),
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -116,7 +119,10 @@ void main() {
       final habit = testHabit(id: 'a', name: 'Morning run');
       await harness.store.saveHabit(habit);
       await tester.pumpWidget(
-        harness.app(showCheckIn: true, checkIn: harness.offerFor(habit)),
+        harness.app(
+          showCheckIn: true,
+          checkIn: OfferedCheckIn(harness.offerFor(habit)),
+        ),
       );
       await tester.pumpAndSettle();
 
@@ -169,7 +175,7 @@ class _Harness {
 
   Widget app({
     bool showCheckIn = false,
-    CheckInOffer? checkIn,
+    CheckInEntry? checkIn,
   }) => ProviderScope(
     overrides: [
       habitServiceProvider.overrideWithValue(store),
