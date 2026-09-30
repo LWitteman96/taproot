@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android Auto Backup, for Android 11 and below (API ≤ 30). The API 31+ rules
+  live next door in data_extraction_rules.xml and have to say the same thing;
+  both are declared on <application> because the platform picks by version.
+
+  What is excluded is the async preference store, which on Android is a
+  DataStore file under files/datastore/ (SharedPreferencesAsync, not the legacy
+  SharedPreferences file). It holds the notification-invitation record, and
+  that record must not travel: permission is granted per install, so a restored
+  phone would arrive claiming the question had been answered there when it had
+  not — and the platform, which does not restore permission, would never be
+  asked again. See NotificationInvitationStore and resolveAppGate.
+
+  The exclusion is the whole directory rather than the one file, because
+  DataStore writes through a sibling .tmp and the file name is the plugin's to
+  choose. The consequence is worth writing down: *every* preference this app
+  keeps in SharedPreferencesAsync is device-local across a restore. If one is
+  ever added that should survive one, it needs its own store rather than a
+  narrowing of this rule.
+
+  The local SQLite database is deliberately NOT excluded — the garden should
+  come back on a new phone. That is the whole reason this is a rule rather
+  than android:allowBackup="false".
+-->
+<full-backup-content>
+  <exclude domain="file" path="datastore/" />
+</full-backup-content>

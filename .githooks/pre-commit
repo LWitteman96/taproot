@@ -16,7 +16,7 @@ staged_sources=$(git diff --cached --name-only --diff-filter=ACM -- lib test)
 offenders=""
 for f in $staged_sources; do
   [ -f "$f" ] || continue
-  if ! tr -d '\000' < "$f" | cmp -s - "$f"; then
+  if ! LC_ALL=C tr -d '\000' < "$f" | cmp -s - "$f"; then
     offenders="$offenders $f"
   fi
 done

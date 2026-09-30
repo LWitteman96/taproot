@@ -12,6 +12,8 @@ import 'package:taproot/features/garden/providers/plant_art_providers.dart';
 import 'package:taproot/features/habits/domain/habit_repository.dart';
 import 'package:taproot/features/habits/pages/habit_creation_page.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
+import 'package:taproot/features/notifications/pages/notification_invitation_page.dart';
+import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
 import 'package:taproot/features/habits/widgets/cue_step.dart';
 import 'package:taproot/features/habits/widgets/loop_step.dart';
 import 'package:taproot/features/habits/widgets/name_step.dart';
@@ -28,6 +30,10 @@ void main() {
   Future<void> pumpCreation(
     WidgetTester tester, {
     HabitRepository? habits,
+    // Already offered by default, so these stay tests about the creation flow
+    // rather than about the invitation that now follows the first habit. The
+    // one test that is about that beat says so.
+    bool notificationsOffered = true,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -40,6 +46,9 @@ void main() {
           // forever — `pumpAndSettle` would never settle. These tests are about
           // the flow, not the picture, so the art stays out of them.
           plantArtFileProvider.overrideWith((ref, plantType) async => null),
+          notificationInvitationStoreProvider.overrideWithValue(
+            FakeNotificationInvitationStore(offered: notificationsOffered),
+          ),
         ],
         child: const TaprootApp(),
       ),
@@ -153,6 +162,22 @@ void main() {
     expect(planted.routine, isNull);
     expect(planted.reward, isNull);
     expect(find.byType(GardenPage), findsOneWidget);
+  });
+
+  testWidgets('the first habit leads into the notification invitation', (
+    tester,
+  ) async {
+    // The beat the invitation is designed around: the user has just finished
+    // writing a cue, and what is being asked for is permission to rehearse
+    // that exact cue back to them tomorrow evening.
+    await pumpCreation(tester, notificationsOffered: false);
+
+    await walkTheShared(tester);
+    await tapText(tester, CueStep.optOutLabel);
+    await tapText(tester, HabitCreationPage.plantLabel);
+
+    expect(find.byType(NotificationInvitationPage), findsOneWidget);
+    expect(find.text(NotificationInvitationPage.question), findsOneWidget);
   });
 
   testWidgets('the opt-out is reversible right up to planting', (tester) async {

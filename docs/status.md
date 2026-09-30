@@ -25,8 +25,9 @@ Update this file in the same commit as the work it describes.
 | **Supabase backend** (`supabase/`) | **Built — config, schema, RLS, new-user trigger, delete-account; local only, no remote project** |
 | **Supabase sync** (`lib/app/sync/`) | **Built — connectivity trigger, paged pull with an overlap cursor, push, last-write-wins** |
 | **Notification scheduling + nudge ledger** | **Built — occasion calendar, nudge fading, scheduling, notification actions** |
-| **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule, and the evening check-in as a sheet over the garden with the roots payoff** |
-| **Garden home screen** (`lib/features/garden/`) | **Built — one garden scene: sky, ground, scrolling plants, selection, detail card, and the fern art in its slots. Roots, the watering choreography and time-of-day are not wired yet** |
+| **Notification permission** | **Built and reviewed — the invitation after the first habit, denial as a mode, resume-aware, restore-aware** |
+| **Reflection check-in and chips** (`lib/features/reflection/`) | **Built — priority scoring, the five framings, the authored chip library and its surfacing rule, the question on the evening notification, and the check-in itself as a sheet over the garden with the roots payoff** |
+| **Garden home screen** (`lib/features/garden/`) | **Built — one garden scene: sky, ground, scrolling plants, selection, detail card, and generated art for four of the six species. The watering choreography and time-of-day are not wired yet** |
 | Insight surfacing | Not started |
 
 Build order from the infrastructure guide (§16): engine → local store and repositories → completion
@@ -34,38 +35,63 @@ tap → Supabase sync → notifications and the nudge ledger → reflection chec
 The first four are done, and four stages have landed on top of them: habit creation — a prerequisite
 the build order does not name, since every stage after it needs habits a user actually made — plus
 notifications, the reflection check-in and Supabase sync. That completes the build order up to its
-last two entries, so what remains is **garden rendering**, now largely built — see below — and
-**insight surfacing**, which now has reflection data to surface. Two follow-ups sit alongside them:
-the notification-permission invitation and the check-in composer seam below.
+last two entries, so what remains is **insight surfacing**, which now has reflection data to
+surface. Garden rendering is no longer blocked on the external illustrator and is largely built —
+see below. The notification-permission invitation has landed, which leaves the check-in composer
+seam below as the one follow-up.
+
+One thing the check-in **says** is narrower than the data behind it. An un-nudged occasion is
+autonomy's whole measurement, but `sent: false` is written for four different reasons — the fade
+rule choosing silence, an evening already past when the backfill ran, no notification permission,
+and the pending-notification cap — and the ledger does not keep which. So the autonomy framing, the
+one that tells the user *"you did this without us asking"*, is gated on separate evidence that the
+app was actually nudging that habit at the time. The engine's autonomy denominator still counts all
+four, as it has since it was written. A `suppression_reason` column on `nudges` closes both at once
+and is the next thing to do to that table.
+
+The check-in is reachable from the garden **and from the evening notification**. The two halves of
+that message — *how did today go*, *and tomorrow, then?* — are composed by the same functions the
+screen uses, so the app cannot ask one user the same question in two voices. The question is written
+when the notification is queued, which can be up to seven days early, so two rules hold it honest:
+detection never runs later than *now*, however far out the delivery is, and a queued notification is
+re-composed once it is within a day of firing. A third rule makes the one-question-an-evening
+promise survive a pass that sees only one habit: a single-habit re-plan seeds itself from the
+evenings the other habits' pending notifications already speak for, so watering one plant in the
+afternoon cannot put a second question into an evening another plant has taken.
 
 What is deliberately *not* built yet: Sentry is still uninitialised, no remote Supabase project is
 provisioned — `.env.dev` points at the local stack and stg and prod are placeholders, so those two
 flavors start without a backend and say so as `SyncStatus.unavailable` — nothing signs a user in, so
-sync has nobody to sync for, and the garden still renders its plants as words rather than art.
+sync has nobody to sync for, and two of the six species still render as words rather than art.
 
 **The garden is drawn.** The home screen is no longer a list of cards: it is one vertical
 cross-section — sky, a ground line, soil — with every habit standing on the same ground at one world
 scale, a floating detail card, and a horizontal scroll. `docs/garden-design.md` governs it, and
 build steps 1–3 of its §10 have landed.
 
-**The plant art is no longer blocked on the external illustrator, for one plant.** `fern/` is a Rive
-CLI project that *generates* a fern from Python — six stage artboards plus `FernRoots`, a looping
-sway, and a droop, colour fade and root-depth lean bound to the `vitality` and `roots` numbers the
-engine already computes. `assets/rive/fern.riv` ships with the app and the stage art is live in the
-garden, driven by vitality.
+**The plant art is no longer blocked on the external illustrator.** Each of `fern/`, `oak/`,
+`sunflower/` and `lavender/` is a Rive CLI project that *generates* its species from Python — six
+stage artboards plus a roots artboard, a looping sway, and a droop, colour fade and root-depth lean
+bound to the `vitality` and `roots` numbers the engine already computes. All four `.riv` files ship
+in `assets/rive/`, all four are named in `plantArts`, and the garden draws them.
 
-What is **not** wired yet, from garden-design §10: **roots** (step 4 — `FernRoots` and the shared
-`ViewModelInstance` the stacking needs), **the watering choreography** (step 5 — the drop, the
-damp patch, the ripple, the landing-time vitality write), **time of day** (step 6 — the modes
+The roots are wired too: the roots artboard stacks under the stage artboard sharing **one**
+`ViewModelInstance`, which is what keeps a plant from leaning as though it were shallow while the
+roots drawn beneath it are deep. The check-in sheet pins the depth on the way in and releases it at
+the done state, so the growth lands with the payoff rather than before it.
+
+What is **not** wired yet, from garden-design §10: **the watering choreography** (step 5 — the drop,
+the damp patch, the ripple, the landing-time vitality write), **time of day** (step 6 — the modes
 cross-fade but nothing re-checks the hour, and there is no plant-light filter), and the **art pass**
-in `fern/` (step 7 — outline widths and root recolour for the 0.15 scale).
+(step 7 — outline widths and root recolour for the 0.15 scale, now due once in `plantgen/` for all
+four plants rather than per species).
 
-**Two of six species now have generated art.** The generator's shared half lives in `plantgen/` —
-the geometry model, both writers, and the sway / droop / lean / roots wiring — and `fern/` and
-`oak/` are each just a palette, a set of parts, and a table of tuning. The fern's output was
-byte-identical across that move. `assets/rive/oak.riv` ships with the app, but **the garden does not
-draw oaks yet**: `plant_art.dart` hard-codes the fern, and generalising it to per-species names is
-its own task.
+**Four of six species now have generated art.** The generator's shared half lives in `plantgen/` —
+the geometry model, both writers, the sway / droop / lean / roots wiring, and the checks every plant
+runs — and each species directory is just a palette, a set of parts, and a table of tuning. Every
+plant's output stayed byte-identical across each move into the shared half. The **lotus** and the
+**pine** have no art and still draw as placeholder silhouettes; adding one is `plantArts` plus the
+asset, and nothing else in the app changes.
 
 So the first of the two open questions has an answer: **the generator approach does work for a
 tree.** The oak built, verified and rendered correctly on the first attempt with the rive CLI, and
@@ -137,10 +163,10 @@ sent to plant something and only then gets a garden. The debug-only dev-flavor s
 to stand on the empty garden has been **removed**: the real flow supersedes it, and with the gate
 live the screen it sat on is only transiently reachable.
 
-The notification permission prompt is wired but not *placed* — nothing calls
-`requestNotificationAccess` yet, because onboarding is where it belongs and onboarding does not
-exist, so a real device runs in the denied mode until it does. Occasions are still recorded in that
-mode, so the engine keeps its inputs either way.
+The notification permission prompt is now placed: it is offered once, on the beat after the first
+habit is planted, and never again. Occasions are still recorded when it is declined, so the engine
+keeps its inputs either way — but only for days that have already passed, so a later change of mind
+in system settings finds the coming week still open.
 
 What the **backend** does not include, deliberately: any Dart that talks to it. There is no
 `supabaseClientProvider`, no remote service behind the repository interfaces and no sync — that is

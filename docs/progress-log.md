@@ -405,6 +405,333 @@ Wiring one stage into the garden screen end to end — asset, widget, and the vi
 already computes — would answer more than another four plants would. It is also the first point at
 which `DataConverterInterpolator` earns its place: the chains already smooth a changed vitality over
 0.6s, so a completion tap should ease the fern upright rather than snapping it.
+## 2026-09-16 — the invitation's review fixes
+
+Branch: `feature/notification-onboarding`, off `develop`. Five review findings on PR #10, plus the
+merge of `develop` that had left the PR conflicted and therefore running no CI at all.
+
+### Landed
+
+**The invitation can no longer strand anyone.** Both awaits in `_accept` ran after
+`setState(asking)` had disabled both buttons, on a page reached by redirect with no `AppBar` and
+nothing to pop to — so a plugin that failed to initialise left killing the app as the only exit.
+They are caught now, and caught *separately*, because they are not the same failure: a platform that
+cannot be asked cannot post, so that lands on the `withoutNotifications` screen; a record that
+cannot be written is bookkeeping, and folding it into the same branch would have the screen say "no
+notifications, then" while the OS had just granted them.
+
+That surfaced a second thing the finding did not name. `PreferencesInvitationStore` now remembers,
+in memory, that the question was put even when the write fails — otherwise the router's gate, which
+reads only the persisted answer, sends the user straight back to the invitation the moment they
+leave it, and keeps doing it. Nothing persists, so the next launch asks once more, which is the
+designed fail direction.
+
+**The record no longer survives a restore as a silent "already asked".** It is device-local and
+unsynced, but it is not unmoved: Android Auto Backup carries it and iOS `NSUserDefaults` rides
+iCloud. Permission does not travel with it, so a restored phone read `invitationOffered: true` on an
+install that had never prompted — and that user was never offered notifications again, on any
+device. Fixed on both platforms, by the only route each one admits:
+
+- Android excludes the store from cloud backup *and* device-to-device transfer
+  (`res/xml/backup_rules.xml`, `res/xml/data_extraction_rules.xml`). Worth recording: the path is
+  **not** `shared_prefs/`. `shared_preferences_android` backs `SharedPreferencesAsync` with Jetpack
+  DataStore by default, so the file is `files/datastore/FlutterSharedPreferences.preferences_pb` —
+  excluding `shared_prefs` would have looked exactly as correct and protected nothing.
+- iOS cannot exclude `NSUserDefaults` from a backup at all, so the restore is caught on arrival
+  instead: `resolveAppGate` cross-checks the record against the platform, and treats "record says
+  offered, platform says undecided" as not-yet-offered.
+
+That cross-check needed `NotificationMode.undecided` to be reachable, and it was not:
+`flutter_local_notifications` answers a flat `isEnabled` on iOS. `LocalNotificationGateway` now asks
+`permission_handler` when the answer is not "granted", where iOS's `notDetermined` arrives as
+`PermissionStatus.denied` and a real refusal as `permanentlyDenied`. Android gets `denied` either
+way, which is why it needs the backup rules rather than the cross-check.
+
+**The preview is composed through the same call the scheduler makes.** `notificationPreviewProvider`
+now reads `reflectionPromptComposerProvider`, derives the habit's *real* next occasion from the
+occasion calendar rather than a fabricated `ExpectedOccasion(index: 0, …)`, and passes
+`reflectionPrompt` — which the old call site omitted. The omission was invisible because
+`NoReflectionPrompt` always answers null, so both ends agreed by accident and no test could tell.
+The page test now asserts against `composeEveningCheckIn`'s output rather than copied literals, and
+drives the seam with a composer that actually asks something.
+
+The hand-written copy moved with it. "One message in the evening: how today went, and the cue for
+tomorrow" promised the reflection question every evening, when it is scored per occasion against a
+budget and a cooldown and most evenings clears nothing — the one line on the screen that cannot
+over-promise, over-promising.
+
+**Two comments now say what is true rather than what was intended.**
+
+- The denied pass's "any occasion that slips by unrecorded is picked up by the backfill" held only
+  for absences inside `nudgeBackfillDays`. Stopping at today shortened total coverage from
+  back-30-plus-forward-7 to 30 flat, so a denied user away 31–35 days now has occasions with no
+  ledger row — which autonomy reads as fewer expected occasions, not as missing data. The comment
+  says so, and a test pins the span so the claim cannot drift back.
+- `main.dart`'s "Riverpod 3 pauses a provider whose listeners are all paused, so trading this
+  `ref.watch` for a `ref.read` breaks the lifecycle listener" is **false**, and the test said to
+  guard it could not fail. Verified both ways: the provider is not auto-dispose, so one `read` keeps
+  it alive exactly as well, and the app behaves identically. What is load-bearing is that some
+  widget of app lifetime holds the provider *at all*. A new widget test pumps `TaprootApp`, drives
+  `inactive → resumed` through it and fails when the line is dropped; the unit test's claim was
+  rewritten to what it actually demonstrates.
+
+### Decided
+
+- **A failed preference write is not a failed answer.** The two are recorded separately, and the
+  screen follows the user's answer rather than the bookkeeping.
+- **Backup exclusion and the platform cross-check compose rather than duplicate.** Each platform
+  admits exactly one of them, and neither alone covers both.
+- **Every preference this app keeps in `SharedPreferencesAsync` is now device-local across a
+  restore**, because the exclusion is the whole DataStore directory. A preference that should
+  survive a restore needs its own store, not a narrowing of that rule.
+
+### Left open
+
+- The `NudgeScheduler` single-flight guard (PR #10's second review comment) is **not** in here — it
+  belongs to `feature/scheduler-single-flight`, which is the branch that owns it.
+- The PR description still claims "there is a test that fails if the watch is ever traded for a
+  read". The code comments it came from are corrected; the description is not ours to edit.
+- Nothing scans whether the Android backup rules actually take effect on a device — the new test
+  reads the XML and the manifest, which catches a rule that was never wired up, not a rule the
+  platform ignores.
+
+### Next
+
+Merge order is the orchestrator's. Nothing on this branch blocks #11 or #12.
+
+---
+
+## 2026-09-15 — the notification invitation
+
+Branch: `feature/notification-onboarding`, off `develop`.
+
+### Landed
+
+The one moment the app asks for notification permission, and the machinery that keeps the answer
+honest afterwards.
+
+```
+lib/features/notifications/domain/     notification_invitation — the store interface
+lib/features/notifications/services/   preferences_invitation_store
+lib/features/notifications/pages/      notification_invitation_page
+lib/features/notifications/providers/  notification_onboarding_providers — store, newest habit,
+                                       the lifecycle refresh
+lib/app/router/app_router.dart         AppGate gains notificationsOffered; the invitation route
+lib/main.dart                          watches the lifecycle refresh
+```
+
+20 new tests — 633 in total. Three gates green.
+
+### Decided
+
+- **The beat is after the first habit, not at launch.** The user has just finished writing a cue,
+  and what is being asked for is permission to rehearse that exact cue back to them tomorrow
+  evening. Asked on first launch it is a system dialog about an app you have not used yet, and the
+  only honest answer is no. It falls out of the router rather than being wired into habit creation:
+  planting leaves for the garden, lands on the root path, and the gate sends them on — so habit
+  creation does not have to know the invitation exists.
+- **The screen shows the real notification.** The preview is built by `composeEveningCheckIn`, the
+  same function the scheduler uses, so the screen cannot promise something the app does not send.
+- **The question is put once.** Recorded for both answers, and *before* the platform dialog
+  resolves, so dismissing the system prompt without answering does not bring the screen back on the
+  next launch. An app that nags for permission to nudge is arguing with its own thesis.
+- **The app keeps its own record, in `SharedPreferences`, and it must not sync.** The platform
+  cannot answer "have we asked" — Android reports the same "not enabled" for a refusal and for a
+  question never put. It stays device-local because permission is granted per install: a row that
+  rode along with the habits would arrive on a new phone claiming a question had been answered
+  there when it had not, and that user would never be offered notifications at all. What it does
+  *not* record is the answer; that lives with the platform, which is the only copy that stays true
+  when someone changes their mind in settings.
+- **A refusal ends in a designed screen, not an error.** No warning colour, no retry, no trip to
+  system settings — it says what still works and gets out of the way. Asserted, including the
+  absence of an error icon.
+- **The two halves of the fail-safe gate fail in opposite directions.** Habit creation is somewhere
+  to *be*, so an unresolved gate sends you there; the invitation is somewhere to be *asked*, and a
+  failed read is no reason to put a permission request in front of someone who may have answered it
+  already.
+- **A denied pass no longer plans days that have not happened.** This is a change to the scheduler
+  that PR #7 merged, and it is the fix for a gap this branch surfaced: with the old behaviour, a
+  user who declined had the next seven days written as un-nudged immediately, so turning
+  notifications on in settings bought a week of silence — and those days counted in autonomy's
+  denominator as evidence the habit stood on its own, over occasions the app never had permission
+  to nudge. Occasions already past are still recorded, because no notification reached the user and
+  that much is true. A future row earns nothing by existing early: autonomy only counts rows whose
+  date has passed, and anything that slips by unrecorded is picked up by the backfill.
+- **Resume does work, not just noticing.** Revocation is what the lifecycle listener exists for,
+  but the mirror case needs more than a refreshed value: a user who switched notifications *on* has
+  occasions recorded with nothing queued against them, so the resume re-plans as well as
+  invalidating. Planning is idempotent, so a resume that changed nothing writes nothing.
+- **`TaprootApp` watches the lifecycle provider rather than reading it.** Riverpod 3 pauses a
+  provider whose listeners are all paused, and one nobody listens to is in that set — so a
+  lifecycle listener parked in an unwatched provider never fires. There is a test that fails if the
+  watch is ever traded for a read.
+
+### Left open
+
+- **No settings screen.** Turning notifications back on is a trip to system settings, which the app
+  names but does not link to. A settings surface — with the access state, an `openAppSettings`
+  link, and the check-in hour — is its own piece of work.
+- **The invitation is never re-offered**, deliberately. If retention data later argues for asking a
+  second time, the record is one boolean and the beat is one line in `redirectFor`; the argument
+  should be made on data rather than assumed now.
+- **Past occasions recorded while permission was denied still count as un-nudged.** Carried forward
+  from the notifications branch: telling "the engine chose silence" from "the app was not allowed to
+  speak" needs a column the schema does not have. The window change above shrinks the exposure to
+  days that actually elapsed, but does not close it.
+- **The permission prompt's own copy is untested against real users.** Reflection spec §8's
+  calibration questions have a sibling here: whether the offer converts better before or after the
+  first watering is a question about a screen nobody has used yet.
+
+### Next
+
+Reflection check-in, or the settings surface the two Left-opens above both point at.
+## 2026-09-16 — the question on the notification
+
+Branch: `feature/check-in-composer`, off develop with the check-in merged.
+
+### Landed
+
+The reflection half of the evening notification. `NoReflectionPrompt` is replaced by
+`CheckInPromptComposer`, which answers the same question the check-in screen answers, through the
+same functions — `occasionFor`, `selectCheckIn`, `checkInQuestion`. One message, two halves: look
+back at today, commit to tomorrow (reflection spec §1).
+
+```
+lib/features/reflection/services/  check_in_prompt_composer
+lib/features/notifications/        nudge_scheduler — one question an evening, and the refresh
+lib/core/engine/constants.dart     nudgeQuestionRefreshWindow
+```
+
+11 new tests — 776 in total. Three gates green.
+
+### Decided
+
+- **Two clocks, and they are not interchangeable.** A nudge for day D is delivered on the evening of
+  D − 1, and composed when it is queued — up to seven days before that. So detection runs at
+  `min(now, deliverAt)` and never later, while the *wording* is rendered at `deliverAt`. The first
+  is a correctness rule: the ledger holds rows for occasions that have not happened, which is the
+  scheduler's whole job, and detecting at a future `deliverAt` would read every one of them as a day
+  the user failed and queue *"No morning run on Thursday — what got in the way?"* about a Thursday
+  nobody has lived. The second is a wording rule: a question composed tonight and read tomorrow has
+  to say `yesterday` where the screen would have said `today`.
+- **One question an evening, across every habit, and the pass is the only place that can enforce
+  it.** §1 buys "one consistent conversational slot instead of two competing interruptions", which
+  is a claim about the user's evening rather than about one plant. The composer is asked about one
+  habit at a time and would say yes to all three; the planning pass sees them all, so it carries the
+  set of evenings already spoken for. Habits are planned in creation order, so the older habit keeps
+  the question — the same tie-break the pending-notification cap uses, and stable across passes.
+- **A queued notification is re-composed once it is within a day of firing.** The note on
+  `ReflectionPromptComposer` already said re-planning on every launch and after every completion is
+  what keeps the question from going stale. It was not true: the pass re-queued a notification only
+  when the OS had *lost* it, so the first pass's guess — written against a day that had not happened
+  — was what the user read a week later. The window is 24 hours because the question is about today,
+  and it is also what bounds the cost: at one occasion a day only the next evening's notification is
+  ever in range, so a pass re-queues at most one per habit. That matters because a pass now runs on
+  every launch, every completion *and* every resume.
+- **The seam is tested at the wire, not only at both ends.** The composer's own tests construct it
+  directly and the scheduler's tests inject a fake, which covers both sides and leaves the join
+  uncovered: swapping the provider back to `NoReflectionPrompt` left the whole suite green while
+  every notification lost its question. That is the same defect this branch fixes in the refresh
+  path, and the same one the review of PR #10 found twice — **a property that holds by default in
+  every scenario the tests create, so nothing can fail when it stops being true**. `NoReflectionPrompt`
+  answering null is the default; a test that never reads the real provider never disturbs it. The
+  useful question about a guard is not whether a test exists but whether a test exists that *could
+  fail*, which for a default-valued seam means exercising a non-default value. One test now reads
+  the real provider graph and asserts a real sentence.
+- **The question is scored, not attached.** Most evenings carry no question at all, and that is the
+  design: §2's priority threshold, the per-habit weekly budget and the 24-hour cooldown all gate it,
+  and most days nothing has happened that is worth asking about. The budget is counted at the
+  evening the message *arrives*, not the evening it was written, so a question queued on Monday for
+  Thursday is Thursday's spend.
+
+### Left open
+
+- **A question is composed per pass, not per delivery.** Inside the refresh window that distinction
+  does not matter; outside it, a notification the user reads without the app having been opened that
+  day carries the last answer the app could compute. There is no way around that without a
+  background task, and a background task to refine the wording of a notification is not worth what
+  it costs.
+- **The invitation preview on `feature/notification-onboarding` still composes with two arguments
+  where the scheduler passes three** — so it shows the nudge half only. Harmless until this branch
+  lands, and owned by that branch (PR #10), which is binding the preview to the composed sentence
+  and correcting the copy that promises a question on every message. Coordinated rather than fixed
+  from here, so the widget keeps one owner.
+- **Nothing reads the answer differently for having been asked by a notification.**
+  `Reflection.wasNudged` still records it faithfully and still nothing consumes it.
+
+### Next
+
+Supabase sync, per the build order, unless the settings surface #10's two Left-opens point at lands
+first.
+
+---
+
+## 2026-09-16 — The secret scan could not see inside a binary file
+
+Branch: `fix/secret-scan-binary-blind`. Closes the item the sync entry below left open. CI only —
+no app code, no tests in the Flutter suite.
+
+### What was wrong
+
+The `secrets` job has scanned with `git grep -nIE` since it was written. **`-I` skips binary files**,
+so a credential committed inside any blob git classifies as binary was invisible to the job whose
+entire purpose is finding one — on a public repository, where a secret committed once is compromised
+even after it is removed. Nothing could have told us: a scan that finds nothing looks the same
+whether it is clean or blind.
+
+It was found sideways, while fixing the binary `sync_tables.dart` — the same `-I` that hid the file
+from `git grep` was hiding it from the scan.
+
+### The fix is two changes, and the second is the one reasoning misses
+
+Dropping `-I` **is not sufficient**, which only a test shows. Measured against the job's own pattern,
+on a PNG-shaped blob with a planted `AKIA…` key id:
+
+```
+git grep -nIE  → missed          LC_ALL=C            → found
+git grep -nE   → missed          LC_ALL=C.UTF-8      → missed
+git grep -naE  → missed          LC_ALL=en_US.UTF-8  → missed
+git grep -na -F AKIA… → found
+```
+
+A fixed-string search found it every time; the regex never did. **Under a UTF-8 locale the regex
+engine abandons content containing invalid UTF-8**, and a PNG header is `0x89 'PNG'`. So the pattern
+could not match inside a binary however the binary flags were set. `LC_ALL=C` makes the engine
+compare bytes as bytes; every pattern here is ASCII, so nothing is lost.
+
+One scan rather than a separate binary sweep — fewer moving parts to keep correct. Verified in both
+directions: it catches the plant, and produces no false positives across the repository's ~70 tracked
+binaries (the app-icon PNGs).
+
+The same `LC_ALL=C` went onto the `text-encoding` gate's `tr`, in CI and in the pre-commit hook.
+Without it BSD `tr` aborts with "Illegal byte sequence" on content that is not valid UTF-8 — most
+binary files, and what the hook meets on macOS. The check still reached the right answer through the
+error, by accident rather than by design.
+
+### Both gates now have to prove they can fail
+
+This is the vacuous-assertion lesson from the entry below, applied to CI. A gate that has never been
+shown to catch anything is a statement of belief, and this one **was wrong from the day it was
+written** — which is the strongest argument for the practice that could exist.
+
+So each gate now plants its own failure first and fails the build if the check does not fire. The
+credential pattern is defined once at job level and both the self-test and the scan read it, because
+a self-test carrying its own copy of the pattern proves only that the copy works.
+
+**The first version of the self-test was itself vacuous, and that is worth recording.** Its planted
+blob went green with `LC_ALL=C` removed. `git grep` splits on newlines before matching, and the PNG's
+own CRLF pushes the credential onto a later line — every byte of which was valid UTF-8, so the locale
+made no difference to it. An invalid byte has to be **on the credential's own line**, because one
+invalid byte anywhere on a line breaks matching for that whole line. Caught by running the two
+regressions against the plant rather than by looking at it: `-I` restored, and `LC_ALL=C.UTF-8`. Both
+now go red.
+
+### Still open
+
+**History is not scanned.** Both gates look at the working tree at HEAD. A credential committed and
+then removed in a later commit is still in the object graph and still indexed, which is the thing the
+job's own comment says about public repositories. Scanning history is a different job with different
+runtime characteristics — and if one is added, this finding says to write its self-test first.
 
 ---
 
@@ -812,10 +1139,8 @@ outranks something said once last night, which is correct — that *is* the user
   stand-in creation form would have front-run habit creation. What this stage contributes instead is
   recording `frictionType` faithfully, including the authored mappings that only make sense as
   routing signals — `didn't feel thirsty` → motivation, `skipped my workout` → forgot.
-- **The check-in is not wired to the evening notification.** Scheduling composes its question through
-  `ReflectionPromptComposer`; the stand-in `NoReflectionPrompt` is still installed, so notifications
-  fire without a question. `check_in_question.dart` is a pure function precisely so the same sentence
-  can be composed on screen and into a notification queued seven days earlier. Follow-up.
+- ~~**The check-in is not wired to the evening notification.**~~ Done on
+  `feature/check-in-composer`; see the entry above.
 - **Two authoring gaps in the library are now visible at run time.** Reading logged mid-morning
   cannot meet the non-event floor — §8 names it — and early-morning journaling has one event anchor.
   The rule reports falling short rather than falling short quietly; the fix is authoring 2–3 more
