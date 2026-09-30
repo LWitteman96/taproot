@@ -166,3 +166,130 @@ Six stages and four root levels, reviewed as flat art, with a simulated thirst
 preview and a garden-scale mock beside the fern and the oak. RML generated and
 checked with `check_rml.py` (9,560 ids, 1,578 vertices, max error 0.015 px, 0
 failures). **Not built with the rive CLI yet** — see `HANDOFF.md`.
+
+### Step 2 — built
+
+Built with the rive CLI on 2026-09-30, in one pass, with nothing fixed along
+the way. `rive . --verify` gives 0 errors and 0 warnings; `rive inspect .
+--summary` reports `problems: []` and seven artboards.
+`build/sunflower.riv` is **130,610 bytes**, built in **325 ms** — the smallest
+plant so far, against the fern's 171 KB and the oak's 557 KB.
+
+**Type counts matched the handoff's table exactly** — all 91 of them, across
+seven artboards. The RML is what got built.
+
+**The built file.** `check_built.py` (now `plantgen/check_built.py`, see
+below): 1,984 keyframes all `linear` with none fallen back to `hold`; 832
+keyed objects, every `Sway`/`Still` one at a `*-sway` node and every
+`Upright`/`Drooped` one at a `*-droop` node or a `SolidColor`; 48 loop seams
+exact; 24 twin keys identical to their leaders — the `stem-upper-line` and
+`head-line` pair the handoff names. 0 failures.
+
+**Does the build draw the art?** `plantgen/check_svg_render.py`, new here, does
+the oak's SVG-vs-Rive diff as a script. All six stages and all four root levels
+pass with **zero strongly-differing pixels**. Pixels differing *at all* run
+0.133 %–2.671 %, higher than the oak's 0.008 %–0.687 % because `SunflowerBloom`
+carries 127 ellipses and the residue scales with edge count. The worst single
+pixel anywhere in the set differs by 182 of 765, which is partial-coverage
+disagreement on one edge, not a moved edge.
+
+**A trap this run found, and it was mine rather than the art's.** `--advance=0`
+is right for a stage — every sway key is 0 there, so the artboard sits in the
+rest pose the SVG describes — but **it applies no data at all**. On
+`SunflowerRoots`, where every level *is* a data-driven blend pose, all four
+levels then render the authored level-4 pose whatever `--data=roots=` says, and
+only level 4 passes. Confirmed directly: the roots-0.15 render at `--advance=0`
+is byte-identical to the level-4 render. The roots artboard carries no sway, so
+it is advanced 120 frames instead — past the 1.2 s smoothing. A stage cannot be.
+Added to `../fern/NOTES.md`.
+
+**A/B — 21 checks, 0 failures.** Same `--advance` on both sides of every one.
+
+| check | result |
+|---|---|
+| droop is bound (Sprout…Bloom, v1 vs v0) | 10,627 / 34,725 / 87,021 / 185,944 / 236,401 px |
+| healthy adds nothing (Mature v1, twice) | byte-identical |
+| sway runs (Seed…Bloom, frame 1 vs 40) | 399 → 54,117 px |
+| sway survives thirst (Mature v0, 1 vs 40) | 32,639 px |
+| seed ignores vitality | **0 px** |
+| seed still rocks | 399 px |
+| roots bound (0/.15/.3/.5/.75) | 5 of 5 distinct |
+| roots cap (0.75 vs 1) | byte-identical |
+| lean bound (Mature 0 vs 0.5; Young 0 vs 0.3) | 111,829 / 54,860 px |
+| lean stops at threshold (0.5 vs 1; 0.3 vs 1) | byte-identical, both |
+| bloom never leans (0 vs 1) | byte-identical |
+
+**Lean direction, measured.** The whole plant's x-centroid moves **+27.3 px on
+`SunflowerMature` and +22.8 px on `SunflowerYoung`** between roots 1 and roots
+0. Both tip **right**, as `LEAN_DIRECTION = +1` intends and opposite to the oak.
+
+Measuring a *part* rather than the plant does not work on `SunflowerYoung`: the
+disc-brown pixels there sit at y ≈ 886, which is the lean's own pivot, and
+nothing at a pivot moves however far the plant tips. That produced a confident
++0.1 px before the selection was widened to the whole plant. `plantgen/
+measure.py` takes `!RRGGBB` for exactly this.
+
+**The head swing, the largest rotation in the project.** Read out of the
+emitted keyframes rather than eyeballed: the head turns **+134.26°** and the
+upper stem **+24.74°** — the handoff's "about 135°" and "about 25°", to two
+decimal places. Both positive, so both clockwise, so the head goes right.
+
+Composing that transform puts the neck at (673.4, 356.6) at vitality 0, against
+its authored (524, 320). The disc centroid measures (698.0, 496.3), so the disc
+ends **+24.6 px right of the neck and +139.7 px below it** — it was 94.7 px
+*above* the neck at vitality 1. Right of and below, as the handoff asks.
+
+**Joints — looked at, not asserted.** Crops of the bend and the neck across
+vitality 1/0.5/0 × sway frames 1/75/150/225: the bend is a clean turn through
+its full 24.7° with the outline continuous around the outside of the corner,
+no notch, no light gap, and no outline crossing the stem interior. The neck is
+solid where the head attaches at every pose. The full-frame render at vitality
+0 matches `Claude outputs/sunflower-thirst-preview.png` — stem upright at the
+ground and curving above the bend, head hanging right and below its neck,
+leaves drooped and faded, petals dull straw, and every pivot holding (leaves on
+their stalks, head on its neck, upper stem on the lower).
+
+**Two automated joint checks were tried and both are wrong**, which is worth
+more than the crops. A fixed probe at the joint's coordinates misses a joint
+that travels — this neck moves 150 px. Counting background enclosed by the
+plant is drowned by the 35,748–62,596 px an already-passed `OakMature` encloses
+between its foliage by design. Both dead ends are recorded in
+`plantgen/crop_joints.py`, which now makes the crops and says plainly that it
+is not a pass/fail check.
+
+**Bench — 600 frames per artboard, all seven inside budget.**
+
+| artboard | advance (mean) | render (mean) | render p95 | memory |
+|---|---|---|---|---|
+| `SunflowerSeed` | 0.002 ms | 0.121 ms | 0.286 ms | +0 pages |
+| `SunflowerSprout` | 0.002 ms | 0.089 ms | 0.183 ms | +0 pages |
+| `SunflowerSeedling` | 0.003 ms | 0.104 ms | 0.173 ms | +0 pages |
+| `SunflowerYoung` | 0.006 ms | 0.099 ms | 0.179 ms | +0 pages |
+| `SunflowerMature` | 0.010 ms | 0.104 ms | 0.156 ms | +0 pages |
+| `SunflowerBloom` | 0.022 ms | 0.081 ms | 0.119 ms | +0 pages |
+| `SunflowerRoots` | 0.001 ms | 0.097 ms | 0.145 ms | +0 pages |
+
+Against the budget (advance ≤ 0.10 ms, render ≤ 0.30 ms, no memory growth):
+**everything passes, with room.** Worst advance is a fifth of budget and worst
+render is 40 % of it.
+
+Re-benched in the same session for a like-for-like baseline: `FernMature`
+0.136 ms and `FernBloom` 0.100 ms — against 0.132 / 0.113 in the oak's session,
+so the machine is running at the same speed and the numbers are comparable.
+`OakMature` 0.309 ms and `OakBloom` 0.317 ms, both still over the 0.30 ms
+budget. **The sunflower renders at about the same cost as the fern and a third
+of the oak**, which is what the handoff predicted from its vertex count.
+
+**Smoothing — not re-tested, and here is why.** The listener-scaffold check was
+not run for this plant. The smoothing chain is emitted entirely by shared
+`plantgen` code with no species-specific configuration, and comparing the
+emitted converter nodes across all four plants shows them **byte-identical**:
+102 nodes each, same types, same attributes, same distribution across files.
+`check_built` separately confirms every converter and interpolator reference
+resolves. So running the scaffold here would re-test the same emitted XML the
+fern and the oak each already proved converges exactly. If a species ever gains
+its own smoothing configuration, that reasoning stops holding and the scaffold
+run comes back.
+
+**Shipped.** `assets/rive/sunflower.riv`, declared in `pubspec.yaml`, and in
+`plantArts` — so the garden draws sunflowers.

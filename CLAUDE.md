@@ -75,11 +75,15 @@ supabase/
 docs/         # The five specs
 scripts/      # coverage.sh, supabase-push.sh
 plantgen/     # The shared half of every plant generator: geometry, SVG writer,
-              # RML emitter, and the sway/droop/lean/roots wiring. No Dart.
+              # RML emitter, the sway/droop/lean/roots wiring, and the checks
+              # every plant runs (check_rml, check_built, check_render,
+              # check_svg_render, measure, crop_joints). No Dart.
 fern/         # Rive CLI project: generated plant art + animation. No Dart.
               # Its own AGENTS.md and NOTES.md govern it; see docs/status.md.
 oak/          # The second one, same shape. plantgen/ + its own art and tables.
               # fern/NOTES.md is the shared trap list; oak/NOTES.md what it adds.
+sunflower/    # The third. lavender/ the fourth. Same shape again; each keeps
+lavender/     # its own NOTES.md, and thin wrappers onto plantgen's checks.
 ```
 
 Each feature under `lib/features/<name>/` contains `pages/`, `providers/` or `controllers/`,

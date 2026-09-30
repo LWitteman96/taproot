@@ -75,20 +75,41 @@ fern. Two caveats: an oak is **3× the fern's render cost**, which puts `OakMatu
 over the per-artboard budget `oak/NOTES.md` set, and the `.riv` is 544 KB against the fern's 171 KB.
 Neither has been addressed, because every way to slim it changes art that has been reviewed.
 
-The second question — **whether six generated species can look like one garden** — stays open, and
-four species still have no art and render as placeholder silhouettes.
+The second question — **whether six generated species can look like one garden** — stays open, but
+narrows: **four of the six species now have art and draw**, and only the lotus and the pine still
+render as placeholder silhouettes.
 
-**In progress: the sunflower.** `sunflower/` generates the third species on `plantgen` — six stages
-and `SunflowerRoots`, reviewed as flat art beside the fern and the oak. It has **not been built with
-the rive CLI yet** and is not committed. The next steps are in
-[`sunflower/HANDOFF.md`](../sunflower/HANDOFF.md).
+**The sunflower and the lavender are built and shipped.** `assets/rive/` carries all four `.riv`
+files, `plantArts` names all four, and the garden draws them. Both were built on the first attempt
+with nothing fixed along the way, and both matched their handoff's type-count table exactly — 91
+counts each. Against the SVG art each build came from, every stage and every root level shows **zero
+strongly-differing pixels**. The per-plant detail is in `sunflower/NOTES.md` and `lavender/NOTES.md`,
+"Step 2 — built".
 
-**In progress: the lavender.** `lavender/` generates the fourth species — six stages and
-`LavenderRoots`, reviewed as flat art beside the other three — and `plantgen/species.py` gained a
-per-part stated droop (inert for the other plants; their output is byte-identical). Not built with
-the rive CLI and not committed. The next steps are in [`lavender/HANDOFF.md`](../lavender/HANDOFF.md),
-which runs after the sunflower's. The method is in
-`fern/NOTES.md`, what the oak adds is in `oak/NOTES.md`.
+Three results worth carrying forward:
+
+- **The render budget is not about shape count.** `oak/NOTES.md` concluded that render cost follows
+  shapes and paths, and the lavender's handoff predicted from that its 60-shape `LavenderBloom`
+  would fail the bench as `OakMature`'s 62 did. It does not. Benched in one session,
+  `LavenderMature` renders in 0.181 ms against `OakMature`'s 0.309 ms at near-identical shape
+  counts, because the oak's shapes are many-vertex paths and the lavender's are ellipses. Cost
+  follows **path complexity**. What 597 ellipses do cost is *advance* — 0.066 ms, the highest of the
+  four plants, and still two-thirds of budget.
+- **Only the oak is over budget.** The sunflower and the lavender pass everywhere, with the worst
+  render at 60 % of budget. `OakMature` and `OakBloom` remain over, unchanged and still Luuk's call.
+- **A `Dots` shape can fade.** No plant had keyed a `Dots` colour before. On `LavenderBloom` the
+  healthy floret colours go to exactly zero pixels between vitality 1 and 0 and the dry ones arrive
+  at almost identical counts, which is the colour changing rather than the spikes moving.
+
+`plantgen/species.py`'s per-part stated droop, added for the lavender, stayed inert for the other
+three: all four plants regenerate byte-identically.
+
+**Four shared checks now live in `plantgen/`** rather than being re-derived per plant:
+`check_rml.py`, `check_built.py` and `check_render.py` (the oak's, made generic over the species and
+proven by reproducing all 21 of its recorded results to the pixel), plus `check_svg_render.py` and
+`measure.py`, which the oak's run did by hand. `crop_joints.py` makes the joint crops and is
+deliberately *not* a pass/fail check — two automated formulations were tried and both are wrong, and
+its docstring records why so the next run does not walk into them.
 
 **The evening check-in is a sheet over the garden.** `docs/check-in-design.md` governs it, and all six
 build steps of its §10 have landed: the copy functions the notification shares, the sheet and its

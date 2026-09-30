@@ -21,6 +21,84 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-30 — The sunflower and the lavender, built and drawing
+
+The third and fourth species went from reviewed flat art to shipped `.riv` files, and the garden now
+draws four of its six plants. Both built on the first attempt with nothing fixed along the way, and
+both matched their handoff's expected type-count table exactly — 91 counts each, across seven
+artboards.
+
+### What landed
+
+- **`sunflower.riv`** (130,610 bytes) and **`lavender.riv`** (256,612 bytes) in `assets/rive/`,
+  declared in `pubspec.yaml`, and both in `plantArts`.
+- **`plant_art.dart`'s promise held.** Adding a species really was "this list plus the asset":
+  both call sites go through `plantArtFor`, so no other app code changed.
+- **Three checks the oak's run did by hand became shared scripts** in `plantgen/` —
+  `check_svg_render.py`, `measure.py`, `crop_joints.py` — and the oak's own two,
+  `check_built.py` and `check_render.py`, were made generic over the species.
+- **Both parameterised tests picked the new species up unaided**, which is what they were for. The
+  asset test went 22 → 42 cases; the view test's per-species draw case was parameterised here too,
+  having been a hand-written fern case and oak case.
+
+### What it decided
+
+- **Render cost follows path complexity, not shape count.** `oak/NOTES.md` concluded it follows
+  "shapes and paths", and the lavender's handoff predicted from that its 60-shape `LavenderBloom`
+  would fail the bench as `OakMature`'s 62 did. It does not. Benched in one session,
+  `LavenderMature` renders in 0.181 ms against `OakMature`'s 0.309 ms at near-identical shape
+  counts — ellipses are cheap to rasterise, many-vertex paths are not. What 597 ellipses *do* cost
+  is advance time: 0.066 ms, the highest of the four plants, still two-thirds of budget.
+- **A `Dots` colour can be keyed and it drives the render.** The lavender's florets were the one
+  genuinely new thing in this batch. On `LavenderBloom` the healthy floret colours go to **exactly
+  zero pixels** between vitality 1 and 0 while the dry ones arrive at almost identical counts —
+  the colour changing, not the spikes moving.
+- **The smoothing chain is not species-specific**, so it was not re-tested per plant. The emitted
+  converter nodes are byte-identical across all four (102 each, same types and attributes),
+  `check_built` confirms every reference resolves, and the fern and oak each proved convergence in
+  motion. Recorded as a stated decision in both NOTES rather than a silent skip; it stops holding
+  the day a species gains its own smoothing configuration.
+- **The refactor of the oak's checkers was proven before anything relied on it** — `check_render`
+  reproduces all 21 of the oak's recorded results to the pixel, `check_built` its four counts.
+
+### Three traps found, all added to `fern/NOTES.md`
+
+- **`--advance=0` applies no data at all.** It is the right frame for a *stage* — every sway key is
+  0, so the artboard sits in the rest pose the SVG describes — but on an artboard whose poses *are*
+  data-driven blends it renders the authored pose whatever `--data` says. All four of
+  `SunflowerRoots`' levels diffed against the same level-4 picture until this was caught; the
+  roots-0.15 render at `--advance=0` is byte-identical to the level-4 one. This was a bug in the
+  new check, not in the art.
+- **A joint probe at fixed coordinates misses the joint**, because a joint sits at a pivot and
+  pivots move — the sunflower's neck travels 150 px between vitality 1 and 0.
+- **Counting background enclosed by the plant is not a hole detector.** `OakMature`, reviewed and
+  passed, encloses 35,748–62,596 px of sky between its foliage by design.
+
+The last two are why `crop_joints.py` makes crops for a person rather than returning a verdict. Both
+dead ends are in its docstring.
+
+### Left open
+
+- **`OakMature` and `OakBloom` are still over the render budget**, unchanged. Re-measured this
+  session at 0.309 and 0.317 ms against 0.30. Every lever changes reviewed art, so it stays Luuk's
+  call.
+- **The lotus and the pine** have no art and still draw as placeholder silhouettes. Whether six
+  generated species read as one garden cannot be answered until they exist.
+- **The garden-design art pass** (outline widths × 2, root recolour) applies to all four plants now
+  and should be done once in `plantgen`.
+- The sunflower's own calibration questions — the head's steep early droop, the head scale of 5.6 —
+  are unreviewed in motion and stay in `sunflower/NOTES.md`.
+
+### Next
+
+A significant code review of the whole `feature/rive_animations` branch before it merges. Known
+cleanup waiting on it: the `wip: per-species plant art` commit wants reshaping, `analysis_options.yaml`
+and `pubspec.lock` drift on every `flutter` invocation on this machine, and
+`lib/features/habits/services/local_completion_service.dart` fails `dart format` under the newer SDK
+formatter and will trip the CI gate.
+
+---
+
 ## 2026-09-16 — The evening check-in, as a sheet over the garden
 
 Branch: `feature/rive_animations`. `docs/check-in-design.md` arrived and now governs the check-in's
