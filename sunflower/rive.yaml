@@ -1,0 +1,7 @@
+name: sunflower
+# the artboard `rive sunflower` opens. The others: rive sunflower --artboard=SunflowerSeed
+# (Sprout, Seedling, Young, Mature, Roots)
+main: SunflowerBloom
+logs:
+  file: build/rive.log
+  problems: build/problems.log
