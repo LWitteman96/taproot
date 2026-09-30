@@ -21,10 +21,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Pinned to the version developers are on, deliberately. The two are
+      # easy to let drift and the drift is invisible until it is confusing:
+      # at 3.44.9 this pipeline was green while `dart format` and
+      # `flutter analyze` both failed on a 3.47.5 machine, because the
+      # formatter's style and the analyzer's diagnostics had both moved. The
+      # gates only mean something if CI runs what a developer runs.
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.9'
+          flutter-version: '3.47.5'
           channel: stable
           cache: true
 
@@ -42,6 +48,16 @@ jobs:
 
       - name: Analyze project source
         run: flutter analyze
+
+      # `test/features/garden/plant_art_*.dart` load the shipped `.riv` files
+      # through the real Rive runtime, which needs a platform library that is
+      # not part of `flutter pub get`. Both files assert on it in `setUpAll`
+      # rather than skipping, because a Rive test that quietly no-ops is worse
+      # than one that fails: the whole point of them is that a renamed artboard
+      # or view-model property fails *silently* at runtime, and nothing else in
+      # the suite would notice.
+      - name: Fetch the Rive native library
+        run: dart run rive_native:setup --platform linux
 
       - name: Run tests
         run: flutter test

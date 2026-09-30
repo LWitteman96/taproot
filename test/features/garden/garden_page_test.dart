@@ -10,7 +10,10 @@ import 'package:taproot/app/theme/app_motion.dart';
 import 'package:taproot/app/theme/themedata.dart';
 import 'package:taproot/features/garden/domain/garden_ticker.dart';
 import 'package:taproot/features/garden/pages/garden_page.dart';
-import 'package:taproot/features/garden/widgets/plant_card.dart';
+import 'package:taproot/features/garden/providers/plant_art_providers.dart';
+import 'package:taproot/app/theme/garden_layout.dart';
+import 'package:taproot/features/garden/widgets/empty_plot.dart';
+import 'package:taproot/features/garden/widgets/plant_detail_card.dart';
 import 'package:taproot/features/garden/controllers/garden_controller.dart';
 import 'package:taproot/features/garden/widgets/watering_control.dart';
 import 'package:taproot/features/habits/domain/completion_repository.dart';
@@ -133,6 +136,13 @@ class PageHarness {
       // settle, and a test that has to fight them is a test about the
       // animation rather than about the feature.
       gardenTickerProvider.overrideWith(() => _StillTicker()),
+      // No plant art here, explicitly. Left alone this would try to load the
+      // native library and the .riv, which is a real dependency on a setup
+      // step outside `flutter pub get` — and the async load happening to lose
+      // the race with the test's pumps is not the same thing as a test that
+      // does not depend on it. `plant_art_view_test.dart` covers the drawn
+      // path; these tests are about the card.
+      plantArtFileProvider.overrideWith((ref, plantType) async => null),
     ],
     child: MaterialApp(theme: AppTheme.light, home: const GardenPage()),
   );
@@ -163,7 +173,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text(GardenPage.emptyHeadline), findsOneWidget);
-      expect(find.byType(PlantCard), findsNothing);
+      expect(find.byType(PlantDetailCard), findsNothing);
     });
 
     testWidgets('an empty garden offers the flow that fills it', (
@@ -187,11 +197,17 @@ void main() {
       await tester.pumpWidget(harness.app);
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Seed'), findsOneWidget);
+      // On the card, not the plant: the silhouette carries the same word, and
+      // the point here is that the card followed the engine.
+      Finder onCard(String word) => find.descendant(
+        of: find.byType(PlantDetailCard),
+        matching: find.textContaining(word),
+      );
+      expect(onCard('seed'), findsOneWidget);
 
       await holdToWater(tester);
 
-      expect(find.textContaining('Sprout'), findsOneWidget);
+      expect(onCard('sprout'), findsOneWidget);
       expect(await harness.completions.completionsFor('a'), hasLength(1));
     });
 
@@ -204,25 +220,22 @@ void main() {
       await tester.pumpAndSettle();
 
       await holdToWater(tester);
-      expect(find.text(GardenPage.wateredMessage), findsOneWidget);
 
-      await tester.tap(
-        find.descendant(
-          of: find.byType(SnackBar),
-          matching: find.text(PlantCard.undoLabel),
-        ),
-      );
+      // The undo sits on the detail card rather than in a snack bar. The card
+      // is the standing correction for the rest of the day the watering
+      // happened on, so it does not time out and it does not cover the garden.
+      await tester.tap(find.text(PlantDetailCard.undoLabel));
       await tester.pumpAndSettle();
 
       expect(await harness.completions.completionsFor('a'), isEmpty);
-      expect(find.textContaining('Seed'), findsOneWidget);
+      expect(find.textContaining('seed'), findsOneWidget);
     });
 
     testWidgets('the undo stays on the card after the offer has gone', (
       tester,
     ) async {
-      // The transient snack bar is the shortcut; the card carries the
-      // correction for the rest of the day the watering happened on.
+      // The card carries the correction for the rest of the day the watering
+      // happened on, and nothing about it expires with a snack bar.
       final harness = PageHarness();
       await harness.store.saveHabit(testHabit(id: 'a'));
       await tester.pumpWidget(harness.app);
@@ -232,9 +245,10 @@ void main() {
       await tester.pump(AppMotion.undoOfferDuration);
       await tester.pumpAndSettle();
 
+      // No snack bar to outlive: the correction was never transient.
       expect(find.byType(SnackBar), findsNothing);
 
-      await tester.tap(find.text(PlantCard.undoLabel));
+      await tester.tap(find.text(PlantDetailCard.undoLabel));
       await tester.pumpAndSettle();
 
       expect(await harness.completions.completionsFor('a'), isEmpty);
@@ -264,7 +278,7 @@ void main() {
       await tester.tap(find.text(GardenPage.retryLabel));
       await tester.pumpAndSettle();
 
-      expect(find.byType(PlantCard), findsOneWidget);
+      expect(find.byType(PlantDetailCard), findsOneWidget);
       expect(find.text('Morning walk'), findsOneWidget);
     });
 
@@ -283,7 +297,7 @@ void main() {
       await holdToWater(tester);
 
       expect(find.text(couldNotWaterMessage), findsOneWidget);
-      expect(find.textContaining('Seed'), findsOneWidget);
+      expect(find.textContaining('seed'), findsOneWidget);
       expect(await harness.completions.completionsFor('a'), isEmpty);
     });
 
@@ -318,14 +332,12 @@ void main() {
       await tester.pumpAndSettle();
 
       await holdToWater(tester);
-      // Let the transient offer go, so the only Undo left is the card's.
-      await tester.pump(AppMotion.undoOfferDuration);
       await tester.pumpAndSettle();
       // The garden was left open across midnight, so the card's standing offer
       // went stale.
       harness.clock.advance(const Duration(days: 1));
 
-      await tester.tap(find.text(PlantCard.undoLabel));
+      await tester.tap(find.text(PlantDetailCard.undoLabel));
       await tester.pumpAndSettle();
 
       expect(find.text(undoWindowClosedMessage), findsOneWidget);
@@ -377,6 +389,142 @@ void main() {
     });
   });
 
+  group('the garden row', () {
+    testWidgets('tapping a plant selects it and the card follows', (
+      tester,
+    ) async {
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      await harness.store.saveHabit(testHabit(id: 'b', name: 'Evening read'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      // The first plant is selected by default: there is always a selected
+      // habit, because an empty card would be a worse state than a stale one.
+      expect(
+        find.descendant(
+          of: find.byType(PlantDetailCard),
+          matching: find.text('Morning walk'),
+        ),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.bySemanticsLabel(RegExp('^Evening read,')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.descendant(
+          of: find.byType(PlantDetailCard),
+          matching: find.text('Evening read'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('the whole column is the target, not the plant', (
+      tester,
+    ) async {
+      // A seed is 11pt wide. garden-design §4.3 makes the 128pt column the
+      // target so selecting one is not a precision exercise.
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      await harness.store.saveHabit(testHabit(id: 'b', name: 'Evening read'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      final column = find.byWidgetPredicate(
+        (widget) => widget is PlantHitColumn,
+      );
+      expect(column, findsNWidgets(2));
+      // Tall enough to cover the plant and the roots that will hang below it.
+      final size = tester.getSize(column.at(1));
+      expect(size.width, GardenLayout.slotPitch);
+      expect(size.height, greaterThan(GardenLayout.rootsDepth));
+    });
+
+    testWidgets('the empty plot offers the flow that fills the garden', (
+      tester,
+    ) async {
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      // It follows the plants rather than floating over them: a new habit
+      // appears where the offer was.
+      expect(find.byType(EmptyPlot), findsOneWidget);
+      expect(find.byType(FloatingActionButton), findsNothing);
+    });
+
+    testWidgets('a garden that could not be read offers no plot', (
+      tester,
+    ) async {
+      // An invitation to plant something, over a garden that may already have
+      // plants in it we simply could not read, is an invitation to duplicate
+      // them.
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a'));
+      harness.habits.readFailure = StateError('the disk is unreadable');
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      expect(find.byType(EmptyPlot), findsNothing);
+      expect(find.text(GardenPage.unreadableHeadline), findsOneWidget);
+    });
+
+    testWidgets('the garden scrolls once there are more plants than fit', (
+      tester,
+    ) async {
+      final harness = PageHarness();
+      for (var i = 0; i < 6; i++) {
+        await harness.store.saveHabit(testHabit(id: '$i', name: 'Habit $i'));
+      }
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      final scrollable = find.byType(Scrollable);
+      expect(scrollable, findsOneWidget);
+      final position = tester.state<ScrollableState>(scrollable).position;
+      expect(position.axisDirection, AxisDirection.right);
+      expect(position.maxScrollExtent, greaterThan(0));
+    });
+  });
+
+  group('the Reflect button', () {
+    testWidgets('is absent when the check-in is not about this plant', (
+      tester,
+    ) async {
+      // reflection-logic §2 expects no check-in on most days. A standing
+      // Reflect button would quietly argue the opposite, and would open a
+      // sheet with nothing to ask.
+      final harness = PageHarness();
+      await harness.store.saveHabit(testHabit(id: 'a', name: 'Morning walk'));
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      expect(find.text(PlantDetailCard.reflectLabel), findsNothing);
+    });
+
+    testWidgets('appears once the check-in names this plant', (tester) async {
+      final harness = PageHarness();
+      await harness.store.saveHabit(
+        testHabit(id: 'a', name: 'Morning walk', designedCue: 'after coffee'),
+      );
+      await harness.completions.recordCompletion(
+        Completion(
+          id: 'c1',
+          habitId: 'a',
+          completedAt: DateTime(2026, 3, 4, 7),
+          source: CompletionSource.tap,
+        ),
+      );
+      await tester.pumpWidget(harness.app);
+      await tester.pumpAndSettle();
+
+      expect(find.text(PlantDetailCard.reflectLabel), findsOneWidget);
+    });
+  });
+
   group('the check-in invitation', () {
     testWidgets('is absent when there is nothing worth asking', (tester) async {
       // reflection-logic §2 expects no check-in on most days. A standing button
@@ -387,7 +535,7 @@ void main() {
       await tester.pumpWidget(harness.app);
       await tester.pumpAndSettle();
 
-      expect(find.byType(PlantCard), findsOneWidget);
+      expect(find.byType(PlantDetailCard), findsOneWidget);
       expect(find.textContaining(GardenPage.checkInInvitation), findsNothing);
     });
 

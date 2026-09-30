@@ -705,11 +705,9 @@ void main() {
           .where((nudge) => LocalDate.from(nudge.deliverAt) == tonight)
           .where((nudge) => nudge.checkIn.body.startsWith('What got you going'))
           .toList();
-      expect(
-        questionsTonight.map((nudge) => nudge.payload.habitId),
-        <String>['habit-1'],
-        reason: 'the single-habit pass handed tonight a second question',
-      );
+      expect(questionsTonight.map((nudge) => nudge.payload.habitId), <String>[
+        'habit-1',
+      ], reason: 'the single-habit pass handed tonight a second question');
     });
 
     test('re-composes a queued question as its evening comes round', () async {

@@ -28,7 +28,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Taproot'), findsOneWidget);
+    // The "Taproot" title is gone from home by design — garden-design §1
+    // replaces it with the time-of-day greeting, because the home screen is a
+    // place you visit rather than a document with a title.
+    expect(find.textContaining('Good '), findsOneWidget);
     expect(find.textContaining('flavor:'), findsOneWidget);
   });
 

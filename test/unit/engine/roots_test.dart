@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:taproot/core/engine/constants.dart';
 import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/engine/roots.dart';
 import 'package:taproot/core/models/reflection.dart';
@@ -34,8 +35,68 @@ void main() {
 
     test('a one-tap confirmation is worth half', () {
       expect(
+        rootCreditFor(
+          reflectionOn(
+            0,
+            framing: Framing.confirmation,
+            matchedDesignedCue: true,
+          ),
+        ),
+        0.5,
+      );
+    });
+
+    test('a confirmation the user corrected is worth a full credit', () {
+      // check-in-design §8: "Actually, no" plus a different cue carries the
+      // same new information Discovery is paid 1.0 for. Charging half because
+      // the app happened to open with a guess would pay the user less for
+      // telling us we were wrong.
+      expect(
+        rootCreditFor(
+          reflectionOn(
+            0,
+            framing: Framing.confirmation,
+            matchedDesignedCue: false,
+          ),
+        ),
+        EngineConstants.confirmationChangedCueCredit,
+      );
+      expect(
+        rootCreditFor(
+          reflectionOn(
+            0,
+            framing: Framing.confirmation,
+            matchedDesignedCue: false,
+          ),
+        ),
+        rootCreditFor(reflectionOn(0, framing: Framing.discovery)),
+        reason: 'a corrected confirmation is discovery by another name',
+      );
+    });
+
+    test('an unrecorded confirmation stays at half', () {
+      // Null means *unrecorded*, not *corrected*: a habit with no designed cue,
+      // or a row written before the field existed. Paying the higher credit for
+      // it would silently re-price history.
+      expect(
         rootCreditFor(reflectionOn(0, framing: Framing.confirmation)),
         0.5,
+      );
+    });
+
+    test('a corrected confirmation still loses to "can\'t remember" rules', () {
+      // Input mode wins over framing: the correction only matters when there
+      // was an answer to correct with.
+      expect(
+        rootCreditFor(
+          reflectionOn(
+            0,
+            framing: Framing.confirmation,
+            inputMode: InputMode.cantRemember,
+            matchedDesignedCue: false,
+          ),
+        ),
+        EngineConstants.cantRememberCredit,
       );
     });
 

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:taproot/app/database/database_provider.dart';
 import 'package:taproot/features/garden/pages/garden_page.dart';
 import 'package:taproot/core/models/habit_journey.dart';
+import 'package:taproot/features/garden/providers/plant_art_providers.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/core/models/habit.dart';
 import 'package:taproot/features/notifications/domain/evening_check_in.dart';
@@ -52,6 +53,10 @@ void main() {
           notificationGatewayProvider.overrideWithValue(gateway),
           notificationInvitationStoreProvider.overrideWithValue(invitations),
           reflectionPromptComposerProvider.overrideWithValue(composer),
+          // These flows land in the garden, and a drawn plant sways forever —
+          // `pumpAndSettle` would never settle. They are about the invitation,
+          // not the picture, so the art stays out of them.
+          plantArtFileProvider.overrideWith((ref, plantType) async => null),
         ],
         child: const TaprootApp(),
       ),

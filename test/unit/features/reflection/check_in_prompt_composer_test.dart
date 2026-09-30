@@ -128,11 +128,14 @@ void main() {
     final onScreen = await assembler.nextCheckIn();
     expect(onScreen, isNotNull);
 
+    // The sheet draws the fact and the question as two lines (check-in-design
+    // §4); the notification joins them into one body. On every framing but
+    // Diagnosis the join is the question alone, because the notification's
+    // title is already the habit name — so here the two surfaces are the same
+    // string, compared directly rather than by asserting a copied sentence.
     final screenQuestion = checkInQuestion(
       framing: onScreen!.framing,
       habit: onScreen.habit,
-      occasionAt: onScreen.candidate.occasion.at,
-      now: now,
     );
 
     expect(await promptFor(habit, deliverAt: now), screenQuestion);

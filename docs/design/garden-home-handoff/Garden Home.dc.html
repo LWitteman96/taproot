@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Karla:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html, body { margin:0; padding:0; background: oklch(0.17 0.015 60); }
+a { color: oklch(0.78 0.08 145); } a:hover { color: oklch(0.88 0.08 145); }
+@keyframes gsway { 0%,100% { transform: rotate(-1.2deg); } 50% { transform: rotate(1.2deg); } }
+@keyframes gdrop { 0% { transform: translate(-50%,-110px) scale(.5); opacity:0; } 25% { opacity:1; } 78% { transform: translate(-50%,0) scale(1); opacity:1; } 100% { transform: translate(-50%,4px) scale(1.6,.25); opacity:0; } }
+@keyframes gripple { 0% { transform: translate(-50%,-50%) scale(.15); opacity:.8; } 100% { transform: translate(-50%,-50%) scale(1); opacity:0; } }
+@keyframes gtoast { 0% { opacity:0; transform: translate(-50%,8px); } 12% { opacity:1; transform: translate(-50%,0); } 80% { opacity:1; } 100% { opacity:0; } }
+</style>
+</helmet>
+<div style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px; box-sizing:border-box; background: oklch(0.17 0.015 60);">
+<x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+<div data-screen-label="Garden home" onClick="{{ deselect }}" style="position:relative; width:402px; height:874px; overflow:hidden; font-family: Karla, system-ui, sans-serif; color: oklch(0.94 0.015 80); background: oklch(0.19 0.02 50); user-select:none;">
+
+  <!-- sky -->
+  <div style="position:absolute; left:0; right:0; top:0; height:470px; background: {{ sky }}; transition: background 1.2s ease;"></div>
+  <div style="position:absolute; left:{{ sun.left }}px; top:{{ sun.top }}px; width:{{ sun.size }}px; height:{{ sun.size }}px; border-radius:50%; background:{{ sun.color }}; box-shadow:{{ sun.glow }}; transition: all 1.2s ease;"></div>
+  <!-- distant haze on horizon -->
+  <div style="position:absolute; left:0; right:0; top:330px; height:140px; background: linear-gradient(180deg, transparent, {{ haze }}); transition: background 1.2s ease;"></div>
+
+  <!-- ground line + soil -->
+  <div style="position:absolute; left:0; right:0; top:466px; height:7px; background: linear-gradient(180deg, oklch(0.46 0.07 130), oklch(0.36 0.05 110)); border-radius: 3px 3px 0 0;"></div>
+  <div style="position:absolute; left:0; right:0; top:472px; bottom:0; background: linear-gradient(180deg, oklch(0.33 0.04 55) 0%, oklch(0.27 0.03 52) 35%, oklch(0.21 0.02 50) 75%, oklch(0.18 0.015 50) 100%);"></div>
+  <div style="position:absolute; left:0; right:0; top:472px; bottom:0; opacity:.5; background: repeating-linear-gradient(178deg, transparent 0 22px, oklch(1 0 0 / 0.025) 22px 23px, transparent 23px 41px, oklch(0 0 0 / 0.12) 41px 42px);"></div>
+  <sc-for list="{{ pebbles }}" as="pb" hint-placeholder-count="0">
+    <div style="position:absolute; left:{{ pb.x }}px; top:{{ pb.y }}px; width:{{ pb.w }}px; height:{{ pb.h }}px; border-radius:50%; background: oklch(0.38 0.03 62 / {{ pb.o }});"></div>
+  </sc-for>
+
+  <!-- damp patches -->
+  <sc-for list="{{ plants }}" as="p" hint-placeholder-count="0">
+    <div style="position:absolute; left:{{ p.dampLeft }}px; top:464px; width:96px; height:46px; opacity:{{ p.dampOpacity }}; transition: opacity 900ms ease 480ms; background: radial-gradient(ellipse at 50% 0%, oklch(0.15 0.02 50 / 0.95), oklch(0.15 0.02 50 / 0.5) 45%, transparent 75%);"></div>
+  </sc-for>
+
+  <!-- roots -->
+  <sc-for list="{{ plants }}" as="p" hint-placeholder-count="0">
+    <div style="position:absolute; left:{{ p.x }}px; top:470px; width:0; height:0;">
+      <div style="position:absolute; left:-1.5px; top:0; width:3px; height:{{ p.depth }}px; border-radius:2px; background: linear-gradient(180deg, oklch(0.62 0.07 75 / 0.9), oklch(0.58 0.06 72 / 0.35)); transition: height 800ms cubic-bezier(.2,.8,.2,1);"></div>
+      <sc-for list="{{ p.roots }}" as="r" hint-placeholder-count="0">
+        <div style="position:absolute; left:0; top:{{ r.top }}px; width:{{ r.len }}px; height:2px; border-radius:2px; transform-origin: 0 50%; transform: rotate({{ r.angle }}deg); background: linear-gradient(90deg, oklch(0.62 0.07 75 / 0.75), oklch(0.58 0.06 72 / 0.15)); transition: width 800ms ease;"></div>
+      </sc-for>
+    </div>
+  </sc-for>
+
+  <!-- selection glow at ground -->
+  <div style="position:absolute; left:{{ selLeft }}px; top:454px; width:120px; height:28px; border-radius:50%; background: radial-gradient(ellipse, oklch(0.78 0.10 145 / 0.45), transparent 70%); opacity:{{ selOpacity }}; transition: left 500ms cubic-bezier(.2,.8,.2,1), opacity 300ms;"></div>
+
+  <!-- plants (placeholder slots) -->
+  <sc-for list="{{ plants }}" as="p" hint-placeholder-count="0">
+    <div onClick="{{ p.select }}" role="button" aria-label="{{ p.ariaLabel }}" style="position:absolute; left:{{ p.x }}px; top:468px; width:0; height:0; cursor:pointer;">
+      <div style="position:absolute; left:0; bottom:0; transform: translateX(-50%) rotate({{ p.rotate }}deg); transform-origin: 50% 100%; transition: transform 900ms cubic-bezier(.34,1.5,.64,1) 450ms;">
+        <div style="animation: {{ p.sway }}; transform-origin: 50% 100%;">
+          <div style="width:{{ p.w }}px; height:{{ p.h }}px; border-radius:{{ p.radius }}; background: {{ p.fill }}; border: 1px dashed {{ p.stroke }}; box-sizing:border-box; display:flex; align-items:center; justify-content:center; text-align:center; transition: background 700ms ease 500ms, border-color 700ms ease 500ms; box-shadow: 0 0 0 {{ p.ring }}px oklch(0.78 0.10 145 / 0.35);">
+            <sc-if value="{{ p.showLabel }}" hint-placeholder-val="{{ false }}">
+              <div style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size:9.5px; line-height:1.4; letter-spacing:.02em; color: oklch(0.90 0.03 145 / 0.75); white-space:pre;">{{ p.label }}</div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-for>
+
+  <!-- watering moment -->
+  <sc-if value="{{ isWatering }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; left:{{ waterX }}px; top:{{ waterTop }}px; width:12px; height:16px; border-radius: 50% 50% 50% 50% / 30% 30% 70% 70%; background: linear-gradient(180deg, oklch(0.88 0.05 230), oklch(0.72 0.09 235)); box-shadow: 0 2px 6px oklch(0.6 0.1 235 / .5); animation: gdrop 650ms cubic-bezier(.5,0,.8,.4) both;"></div>
+    <div style="position:absolute; left:{{ waterX }}px; top:470px; width:70px; height:18px; border-radius:50%; border:1.5px solid oklch(0.85 0.06 230 / 0.8); animation: gripple 700ms ease-out 560ms both;"></div>
+  </sc-if>
+
+  <!-- header -->
+  <div style="position:absolute; left:24px; right:24px; top:66px; display:flex; flex-direction:column; gap:6px; text-shadow: 0 1px 12px oklch(0 0 0 / .25);">
+    <div style="font-family: Newsreader, Georgia, serif; font-size:32px; font-weight:400; line-height:1.1; letter-spacing:-0.01em;">{{ greeting }}</div>
+    <div style="font-size:15px; line-height:1.4; color: oklch(0.94 0.015 80 / 0.78); text-wrap: pretty;">{{ status }}</div>
+  </div>
+
+  <!-- toast -->
+  <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; left:50%; top:600px; transform: translateX(-50%); padding:8px 14px; border-radius:999px; background: oklch(0.28 0.03 55 / 0.9); border:1px solid oklch(1 0 0 / 0.1); font-size:13px; color: oklch(0.94 0.015 80); white-space:nowrap; animation: gtoast 2400ms ease both; pointer-events:none;">{{ toast }}</div>
+  </sc-if>
+
+  <!-- detail card -->
+  <div onClick="{{ stop }}" style="position:absolute; left:16px; right:16px; bottom:50px; padding:18px 18px 16px; border-radius:24px; background: oklch(0.24 0.025 55 / 0.82); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); border:1px solid oklch(1 0 0 / 0.09); box-shadow: 0 20px 50px oklch(0 0 0 / .35); display:flex; flex-direction:column; gap:12px;">
+    <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px;">
+      <div style="font-family: Newsreader, Georgia, serif; font-size:24px; line-height:1.1; font-weight:400;">{{ sel.name }}</div>
+      <div style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size:11px; color: oklch(0.90 0.03 145 / 0.7); white-space:nowrap;">{{ sel.typeStage }}</div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:4px; font-size:14px; line-height:1.45; color: oklch(0.94 0.015 80 / 0.8);">
+      <div>{{ sel.cueLine }}</div>
+      <div>{{ sel.rootsLine }}</div>
+    </div>
+    <sc-if value="{{ sel.hint }}" hint-placeholder-val="{{ false }}">
+      <div style="font-family: Newsreader, Georgia, serif; font-style:italic; font-size:15px; line-height:1.4; color: oklch(0.86 0.06 80 / 0.9); text-wrap: pretty;">{{ sel.hint }}</div>
+    </sc-if>
+    <div style="display:flex; gap:10px; margin-top:2px;">
+      <div onClick="{{ waterSelected }}" style="flex:1.3; height:46px; border-radius:14px; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:600; cursor:pointer; background:{{ waterBg }}; color:{{ waterFg }}; transition: background 400ms, color 400ms;" style-active="transform: scale(.98)">{{ waterLabel }}</div>
+      <div onClick="{{ reflectSelected }}" style="flex:1; height:46px; border-radius:14px; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:500; cursor:pointer; border:1px solid oklch(1 0 0 / 0.18); color: oklch(0.94 0.015 80);" style-hover="background: oklch(1 0 0 / 0.05)" style-active="transform: scale(.98)">Reflect</div>
+    </div>
+  </div>
+
+</div>
+</x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;timeOfDay&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;dusk&quot;,&quot;options&quot;:[&quot;auto&quot;,&quot;dawn&quot;,&quot;day&quot;,&quot;dusk&quot;,&quot;night&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Ambient&quot;},&quot;ambientMotion&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Ambient&quot;},&quot;startThirsty&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Scenario&quot;}}">
+class Component extends DCLogic {
+  state = { plants: null, selected: 'strength', watering: null, toast: null, toastN: 0 };
+
+  basePlants(thirsty) {
+    return [
+      // Spec ladder: seed → sprout → seedling → young → mature → bloom (growth-engine §3).
+      // reflections = weighted N (Σ root credit); cueHit/cueTotal = designed-cue reliability; vitality per §4.
+      { id:'meditate', name:'Meditate', type:'lotus', stage:'mature', x:64, w:88, h:150, reflections:14, cueHit:9, cueTotal:10, vitality:1 },
+      { id:'strength', name:'Strength training', type:'oak', stage:'young', x:160, w:66, h:200, reflections:2, cueHit:6, cueTotal:8, vitality: thirsty ? 0.55 : 1 },
+      { id:'read', name:'Read 20 pages', type:'fern', stage:'seedling', x:252, w:56, h:64, reflections:4, cueHit:3, cueTotal:5, vitality: thirsty ? 0.3 : 1 },
+      { id:'journal', name:'Journal', type:'sprout', stage:'sprout', x:336, w:22, h:26, reflections:1, cueHit:1, cueTotal:1, vitality:1 },
+    ];
+  }
+  plants() { return this.state.plants || this.basePlants(this.props.startThirsty ?? true); }
+  componentDidUpdate(prev) {
+    if (prev.startThirsty !== this.props.startThirsty) this.setState({ plants: null, watering: null });
+  }
+  update(id, fn) {
+    const plants = this.plants().map(p => p.id === id ? { ...p, ...fn(p) } : p);
+    this.setState({ plants });
+  }
+  water(id) {
+    const p = this.plants().find(p => p.id === id);
+    if (!p || p.vitality >= 1 || this.state.watering) return;
+    this.setState({ watering: id, selected: id });
+    this.update(id, () => ({ vitality: 1 })); // V snaps to 1.0 on completion, always (§4)
+    clearTimeout(this._wt);
+    this._wt = setTimeout(() => this.setState({ watering: null }), 1500);
+  }
+  reflect(id) {
+    const p = this.plants().find(p => p.id === id);
+    if (!p) return;
+    this.update(id, q => ({ reflections: q.reflections + 1 }));
+    this.showToast('Roots deepened · ' + (p.reflections + 1) + ' reflections');
+  }
+  showToast(t) {
+    clearTimeout(this._tt);
+    this.setState(s => ({ toast: t, toastN: s.toastN + 1 }));
+    this._tt = setTimeout(() => this.setState({ toast: null }), 2400);
+  }
+  timeMode() {
+    const m = this.props.timeOfDay ?? 'dusk';
+    if (m !== 'auto') return m;
+    const h = new Date().getHours();
+    return h < 6 ? 'night' : h < 9 ? 'dawn' : h < 17 ? 'day' : h < 20 ? 'dusk' : 'night';
+  }
+  renderVals() {
+    const mode = this.timeMode();
+    const motion = this.props.ambientMotion ?? true;
+    const skies = {
+      dawn:  { sky:'linear-gradient(180deg, oklch(0.32 0.05 290) 0%, oklch(0.50 0.08 330) 45%, oklch(0.70 0.10 55) 100%)', haze:'oklch(0.72 0.09 60 / 0.55)', sun:{ left:52, top:392, size:60, color:'oklch(0.92 0.10 75)', glow:'0 0 70px 24px oklch(0.85 0.12 65 / 0.45)' }, greeting:'Good morning.' },
+      day:   { sky:'linear-gradient(180deg, oklch(0.52 0.07 235) 0%, oklch(0.66 0.06 220) 55%, oklch(0.78 0.05 100) 100%)', haze:'oklch(0.80 0.05 100 / 0.5)', sun:{ left:318, top:88, size:46, color:'oklch(0.97 0.05 95)', glow:'0 0 60px 18px oklch(0.95 0.08 95 / 0.35)' }, greeting:'Good afternoon.' },
+      dusk:  { sky:'linear-gradient(180deg, oklch(0.26 0.05 290) 0%, oklch(0.42 0.09 330) 45%, oklch(0.60 0.13 45) 82%, oklch(0.70 0.11 65) 100%)', haze:'oklch(0.70 0.11 60 / 0.55)', sun:{ left:296, top:386, size:58, color:'oklch(0.88 0.13 60)', glow:'0 0 80px 26px oklch(0.75 0.15 50 / 0.5)' }, greeting:'Good evening.' },
+      night: { sky:'linear-gradient(180deg, oklch(0.15 0.03 280) 0%, oklch(0.21 0.035 295) 60%, oklch(0.27 0.03 320) 100%)', haze:'oklch(0.30 0.03 320 / 0.6)', sun:{ left:312, top:112, size:34, color:'oklch(0.93 0.02 95)', glow:'0 0 50px 14px oklch(0.85 0.03 95 / 0.25)' }, greeting:'Good night.' },
+    };
+    const S = skies[mode];
+    const raw = this.plants();
+    const labels = { lotus:'lotus\nmature', oak:'oak\nyoung', fern:'fern\nseedling', sprout:'' };
+    const radii = { lotus:'50% 50% 32% 32% / 60% 60% 30% 30%', oak:'46% 46% 10px 10px / 30% 30% 10px 10px', fern:'50% 50% 24% 24%', sprout:'50% 50% 40% 40%' };
+    const advisoryRoots = { young:0.30, mature:0.50, bloom:0.75 }; // ρ column, §3
+    const plants = raw.map(p => {
+      const watered = p.vitality >= 1;
+      // Roots (§5): R = N/(N+4) × (0.5 + 0.5c); c ≈ designed-cue share here
+      const c = p.cueTotal >= 3 ? p.cueHit / p.cueTotal : 0;
+      const R = (p.reflections / (p.reflections + 4)) * (0.5 + 0.5 * c);
+      const shallow = advisoryRoots[p.stage] != null && R < advisoryRoots[p.stage];
+      const depth = Math.round(12 + R * 150);
+      const nSide = Math.min(6, Math.ceil(p.reflections / 2));
+      const roots = Array.from({ length: nSide }, (_, i) => {
+        const side = i % 2 === 0 ? 1 : -1;
+        const frac = (i + 1) / (nSide + 1);
+        return { top: Math.round(depth * frac * 0.85), len: Math.round(14 + (1 - frac) * 22 + (p.reflections > 8 ? 8 : 0)), angle: side === 1 ? 32 + i * 5 : 148 - i * 5 };
+      });
+      const selected = p.id === this.state.selected;
+      return {
+        ...p, depth, roots, watered, R,
+        // droop angle scales with lost vitality; shallow roots add a permanent lean
+        rotate: -Math.round((1 - p.vitality) * 14) + (shallow ? -3 : 0),
+        ariaLabel: `${p.name}, ${p.stage}, vitality ${Math.round(p.vitality * 100)} percent, roots ${Math.round(R * 100)} percent${shallow ? ', shallow for its size' : ''}`,
+        sway: motion ? `gsway ${5 + (p.h / 60)}s ease-in-out ${p.x / 100}s infinite` : 'none',
+        radius: radii[p.type],
+        fill: watered
+          ? 'repeating-linear-gradient(135deg, oklch(1 0 0 / 0.05) 0 5px, transparent 5px 11px), oklch(0.48 0.08 145 / 0.5)'
+          : 'repeating-linear-gradient(135deg, oklch(1 0 0 / 0.04) 0 5px, transparent 5px 11px), oklch(0.46 0.04 105 / 0.32)',
+        stroke: watered ? 'oklch(0.80 0.07 145 / 0.55)' : 'oklch(0.72 0.05 100 / 0.45)',
+        ring: selected ? 2 : 0,
+        showLabel: !!labels[p.type],
+        label: labels[p.type],
+        dampLeft: p.x - 48,
+        dampOpacity: watered ? 1 : 0,
+        select: (e) => { e.stopPropagation(); if (selected) this.water(p.id); else this.setState({ selected: p.id }); },
+        shallow,
+      };
+    });
+    const sel = plants.find(p => p.id === this.state.selected) || plants[0];
+    const thirsty = plants.filter(p => !p.watered).length;
+    const words = ['No', 'One', 'Two', 'Three', 'Four'];
+    const status = thirsty === 0 ? 'Everything\u2019s watered. Just visiting?' : thirsty === 1 ? 'One plant could use a drink.' : `${words[thirsty]} plants could use a drink.`;
+    const stageWord = { seed:'seed', sprout:'sprout', seedling:'seedling', young:'young', mature:'mature', bloom:'in bloom' };
+    const rootsWord = sel.R < 0.3 ? 'shallow roots' : sel.R < 0.6 ? 'roots taking hold' : 'deep roots';
+    const hint = sel.shallow ? 'Growing fast on shallow roots \u2014 a reflection or two would anchor it.'
+      : (!sel.watered && (sel.stage === 'seedling' || sel.stage === 'sprout')) ? 'Looking a little thirsty. Seedlings perk right up.'
+      : sel.stage === 'mature' ? 'Locked in. A missed day won\u2019t shake this one.' : null;
+    const waterX = sel.x;
+    return {
+      sky: S.sky, haze: S.haze, sun: S.sun, greeting: S.greeting, status,
+      pebbles: [ {x:30,y:520,w:7,h:5,o:.9},{x:118,y:562,w:5,h:4,o:.8},{x:210,y:505,w:9,h:6,o:.85},{x:300,y:590,w:6,h:4,o:.7},{x:370,y:530,w:8,h:5,o:.8},{x:150,y:620,w:5,h:3,o:.6},{x:262,y:650,w:7,h:4,o:.55} ],
+      plants,
+      sel: { name: sel.name, typeStage: `${sel.type} \u00b7 ${stageWord[sel.stage]}`, cueLine: `Cue worked ${sel.cueHit} of ${sel.cueTotal} times`, rootsLine: `${sel.reflections} reflection${sel.reflections === 1 ? '' : 's'} \u00b7 ${rootsWord}`, hint },
+      selLeft: sel.x - 60, selOpacity: 1,
+      isWatering: !!this.state.watering, waterX, waterTop: 466,
+      waterLabel: sel.watered ? 'Watered today' : 'Water',
+      waterBg: sel.watered ? 'oklch(1 0 0 / 0.07)' : 'oklch(0.74 0.09 145)',
+      waterFg: sel.watered ? 'oklch(0.94 0.015 80 / 0.55)' : 'oklch(0.18 0.03 145)',
+      waterSelected: (e) => { e.stopPropagation(); this.water(sel.id); },
+      reflectSelected: (e) => { e.stopPropagation(); this.reflect(sel.id); },
+      toast: this.state.toast,
+      deselect: () => {},
+      stop: (e) => e.stopPropagation(),
+    };
+  }
+}
+</script>
+</body>
+</html>

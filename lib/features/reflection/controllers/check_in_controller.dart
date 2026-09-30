@@ -88,14 +88,22 @@ class CheckInController extends Notifier<CheckInState> {
   void _log(String action, String message) =>
       dev.log(message, name: 'CheckInController.$action');
 
-  /// Works out whether there is a question worth asking.
+  /// Works out what question this check-in is asking.
   ///
-  /// [offered] is the offer the garden already assembled and handed over. It is
-  /// re-verified rather than trusted — a notification answer written by a
-  /// background isolate can land in between — but re-verifying one habit is a
-  /// fraction of electing a winner among all of them a second time. Without
-  /// one, or on a retry, the whole assembly runs.
-  Future<void> load({CheckInOffer? offered}) async {
+  /// [entry] is how the sheet was opened, and it decides which of three things
+  /// happens:
+  ///
+  /// - [OfferedCheckIn] — the garden assembled an offer and handed it over. It
+  ///   is re-verified rather than trusted, because a notification answer
+  ///   written by a background isolate can land in between; but re-verifying
+  ///   one habit is a fraction of electing a winner among all of them again.
+  /// - [RequestedCheckIn] — the user tapped Reflect on a plant they just
+  ///   watered. The question is composed for that habit with the scheduling
+  ///   gates skipped: they asked, so there is nothing to decide about whether
+  ///   to bring it up.
+  /// - null — a deep link, a cold start on this path, or a retry. The whole
+  ///   assembly runs.
+  Future<void> load({CheckInEntry? entry}) async {
     // A fresh answer replaces the last one: `_pendingId` belongs to the offer
     // it was minted for.
     _pendingId = null;
@@ -106,9 +114,13 @@ class CheckInController extends Notifier<CheckInState> {
       errorMessage: () => null,
     );
     try {
-      final offer = offered == null
-          ? await _assembler.nextCheckIn()
-          : await _assembler.reverify(offered);
+      final offer = switch (entry) {
+        null => await _assembler.nextCheckIn(),
+        OfferedCheckIn(:final offer) => await _assembler.reverify(offer),
+        RequestedCheckIn(:final habitId) => await _assembler.requestedCheckIn(
+          habitId,
+        ),
+      };
       if (!ref.mounted) return;
       state = state.copyWith(
         status: offer == null

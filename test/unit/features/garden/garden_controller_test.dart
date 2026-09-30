@@ -532,6 +532,77 @@ void main() {
         expect(harness.state.plants['a']!.growth.stage, Stage.sprout);
       });
     });
+
+    group('something to reflect on', () {
+      // `canReflectOnProvider` is what puts Reflect on the detail card. It is
+      // deliberately not the check-in offer: the offer is gated to protect the
+      // user from the *app* raising things, and a user who just watered a plant
+      // and wants to say why is not being interrupted by anyone.
+
+      test('a plant nothing has happened to has nothing to say', () async {
+        final harness = Harness();
+        await harness.habits.saveHabit(testHabit(id: 'a'));
+        await harness.start();
+
+        expect(harness.container.read(canReflectOnProvider('a')), isFalse);
+      });
+
+      test('watering makes it askable in the same frame', () async {
+        // In the same frame is the requirement, not a nicety: the button has
+        // to appear with the watering, and anything assembled from the store
+        // would arrive a round trip later.
+        final harness = Harness();
+        await harness.habits.saveHabit(testHabit(id: 'a'));
+        await harness.start();
+
+        harness.completions.gate = Completer<void>();
+        final pending = harness.controller.water('a');
+
+        expect(harness.container.read(canReflectOnProvider('a')), isTrue);
+
+        harness.completions.gate!.complete();
+        await pending;
+      });
+
+      test('undoing the watering takes the question back', () async {
+        final harness = Harness();
+        await harness.habits.saveHabit(testHabit(id: 'a'));
+        await harness.start();
+
+        final completion = await harness.controller.water('a');
+        expect(harness.container.read(canReflectOnProvider('a')), isTrue);
+
+        await harness.controller.undo('a', completion!.id);
+
+        expect(harness.container.read(canReflectOnProvider('a')), isFalse);
+      });
+
+      test('a watering that failed to store is not askable', () async {
+        // The growth was taken back, so the question has to go with it —
+        // reflecting on a completion that is not on disk would write a
+        // reflection about nothing.
+        final harness = Harness();
+        await harness.habits.saveHabit(testHabit(id: 'a'));
+        await harness.start();
+
+        harness.completions.recordFailure = StateError('disk full');
+        await harness.controller.water('a');
+
+        expect(harness.container.read(canReflectOnProvider('a')), isFalse);
+      });
+
+      test('a paused plant is not asked about', () async {
+        final harness = Harness();
+        await harness.habits.saveHabit(testHabit(id: 'a'));
+        await harness.start();
+        await harness.controller.water('a');
+
+        await harness.habits.pauseHabit('a');
+        await harness.controller.refresh();
+
+        expect(harness.container.read(canReflectOnProvider('a')), isFalse);
+      });
+    });
   });
 }
 

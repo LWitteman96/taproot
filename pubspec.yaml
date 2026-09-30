@@ -53,12 +53,16 @@ dependencies:
   http: ^1.2.2
   cupertino_icons: ^1.0.6
 
-  # Plant art is expected to arrive as SVG (guide §1).
+  # Plant art. Guide §1 expected SVG from an external illustrator, and
+  # flutter_svg stays for whatever arrives that way. Rive is the second half:
+  # `fern/` generates an animated plant whose sway and droop are driven by the
+  # engine's own vitality number, which a static SVG cannot express.
   flutter_svg: ^2.0.10+1
   flutter_local_notifications: ^22.3.0
   timezone: ^0.11.1
   permission_handler: ^13.0.1
   flutter_animate: ^4.5.2
+  rive: ^0.14.11
 
 dev_dependencies:
   flutter_test:
@@ -93,6 +97,29 @@ flutter:
     - .env.dev
     - .env.stg
     - .env.prod
+    # Built by the Rive CLI from fern/ — `cd fern && rive . --once`, then copy
+    # build/fern.riv here. Committed because it is a build product of a
+    # committed generator, and the CLI is not part of the Flutter toolchain.
+    - assets/rive/fern.riv
+    # Built by the Rive CLI from oak/ — `cd oak && rive . --once`, then copy
+    # build/oak.riv here. Same arrangement as the fern above.
+    - assets/rive/oak.riv
+    # Built by the Rive CLI from sunflower/ — same arrangement again.
+    - assets/rive/sunflower.riv
+    # Built by the Rive CLI from lavender/ — same arrangement again.
+    - assets/rive/lavender.riv
+
+  # Bundled, not fetched at runtime (garden-design §8). Both are SIL OFL;
+  # the licences sit beside them in assets/fonts/.
+  fonts:
+    - family: Newsreader
+      fonts:
+        - asset: assets/fonts/Newsreader.ttf
+        - asset: assets/fonts/NewsreaderItalic.ttf
+          style: italic
+    - family: Karla
+      fonts:
+        - asset: assets/fonts/Karla.ttf
 
 # Native flavor configuration. Regenerate with:
 #   dart run flutter_flavorizr

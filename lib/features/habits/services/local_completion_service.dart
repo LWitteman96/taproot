@@ -121,16 +121,13 @@ class LocalCompletionService implements CompletionRepository {
 
           // The completion row stays. It is still an event that was recorded;
           // this is the event that says it did not count.
-          await transaction.insert(
-            AppSchema.completionRetractions,
-            <String, Object?>{
-              'habit_id': habitId,
-              'completion_id': completionId,
-              'retracted_at': encodeDateTime(_clock()),
-              'pending_sync': 1,
-            },
-            conflictAlgorithm: ConflictAlgorithm.ignore,
-          );
+          await transaction
+              .insert(AppSchema.completionRetractions, <String, Object?>{
+                'habit_id': habitId,
+                'completion_id': completionId,
+                'retracted_at': encodeDateTime(_clock()),
+                'pending_sync': 1,
+              }, conflictAlgorithm: ConflictAlgorithm.ignore);
         });
       });
 
@@ -142,16 +139,13 @@ class LocalCompletionService implements CompletionRepository {
   }) => guardStore(_log, 'recordRetraction', () async {
     await _database.transaction((transaction) async {
       await requireExistingHabit(transaction, habitId);
-      await transaction.insert(
-        AppSchema.completionRetractions,
-        <String, Object?>{
-          'habit_id': habitId,
-          'completion_id': completionId,
-          'retracted_at': encodeDateTime(retractedAt),
-          'pending_sync': 0,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      await transaction
+          .insert(AppSchema.completionRetractions, <String, Object?>{
+            'habit_id': habitId,
+            'completion_id': completionId,
+            'retracted_at': encodeDateTime(retractedAt),
+            'pending_sync': 0,
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
     });
   });
 

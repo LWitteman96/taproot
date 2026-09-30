@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:taproot/app/database/database_provider.dart';
+import 'package:taproot/features/garden/providers/plant_art_providers.dart';
 import 'package:taproot/features/habits/providers/habit_providers.dart';
 import 'package:taproot/features/notifications/domain/notification_access.dart';
 import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
@@ -58,6 +59,10 @@ void main() {
           notificationInvitationStoreProvider.overrideWithValue(
             FakeNotificationInvitationStore(offered: true),
           ),
+          // These flows land in the garden, and a drawn plant sways forever —
+          // `pumpAndSettle` would never settle. They are about the invitation,
+          // not the picture, so the art stays out of them.
+          plantArtFileProvider.overrideWith((ref, plantType) async => null),
         ],
         child: const TaprootApp(),
       ),

@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400&family=Karla:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html, body { margin:0; padding:0; background: oklch(0.17 0.015 60); }
+a { color: oklch(0.78 0.08 145); } a:hover { color: oklch(0.88 0.08 145); }
+@keyframes ciup { 0% { transform: translateY(40px); opacity:0; } 100% { transform: translateY(0); opacity:1; } }
+@keyframes cifade { 0% { opacity:0; transform: translateY(8px); } 100% { opacity:1; transform: translateY(0); } }
+@keyframes cisway { 0%,100% { transform: rotate(-1deg); } 50% { transform: rotate(1deg); } }
+@keyframes ciglow { 0% { opacity:0; } 30% { opacity:1; } 100% { opacity:0; } }
+</style>
+</helmet>
+<div style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:40px; box-sizing:border-box; background: oklch(0.17 0.015 60);">
+<x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+<div data-screen-label="Evening check-in" style="position:relative; width:402px; height:874px; overflow:hidden; font-family: Karla, system-ui, sans-serif; color: oklch(0.94 0.015 80); background: oklch(0.19 0.02 50); user-select:none;">
+
+  <!-- garden backdrop (dusk) -->
+  <div style="position:absolute; left:0; right:0; top:0; height:470px; background: linear-gradient(180deg, oklch(0.26 0.05 290) 0%, oklch(0.42 0.09 330) 45%, oklch(0.60 0.13 45) 82%, oklch(0.70 0.11 65) 100%);"></div>
+  <div style="position:absolute; left:296px; top:386px; width:58px; height:58px; border-radius:50%; background: oklch(0.88 0.13 60); box-shadow: 0 0 80px 26px oklch(0.75 0.15 50 / 0.5);"></div>
+  <div style="position:absolute; left:0; right:0; top:330px; height:140px; background: linear-gradient(180deg, transparent, oklch(0.70 0.11 60 / 0.55));"></div>
+  <div style="position:absolute; left:0; right:0; top:466px; height:7px; background: linear-gradient(180deg, oklch(0.46 0.07 130), oklch(0.36 0.05 110)); border-radius: 3px 3px 0 0;"></div>
+  <div style="position:absolute; left:0; right:0; top:472px; bottom:0; background: linear-gradient(180deg, oklch(0.33 0.04 55) 0%, oklch(0.27 0.03 52) 35%, oklch(0.21 0.02 50) 75%, oklch(0.18 0.015 50) 100%);"></div>
+  <div style="position:absolute; left:0; right:0; top:472px; bottom:0; opacity:.5; background: repeating-linear-gradient(178deg, transparent 0 22px, oklch(1 0 0 / 0.025) 22px 23px, transparent 23px 41px, oklch(0 0 0 / 0.12) 41px 42px);"></div>
+  <div style="position:absolute; left:153px; top:464px; width:96px; height:46px; background: radial-gradient(ellipse at 50% 0%, oklch(0.15 0.02 50 / 0.95), oklch(0.15 0.02 50 / 0.5) 45%, transparent 75%);"></div>
+
+  <!-- roots of the habit being reflected on -->
+  <div style="position:absolute; left:201px; top:470px; width:0; height:0;">
+    <div style="position:absolute; left:-2px; top:0; width:4px; height:{{ depth }}px; border-radius:2px; background: linear-gradient(180deg, oklch(0.62 0.07 75 / 0.9), oklch(0.58 0.06 72 / 0.35)); transition: height 900ms cubic-bezier(.2,.8,.2,1);"></div>
+    <sc-for list="{{ roots }}" as="r" hint-placeholder-count="0">
+      <div style="position:absolute; left:0; top:{{ r.top }}px; width:{{ r.len }}px; height:2.5px; border-radius:2px; transform-origin: 0 50%; transform: rotate({{ r.angle }}deg); background: linear-gradient(90deg, oklch(0.62 0.07 75 / 0.8), oklch(0.58 0.06 72 / 0.15)); transition: width 900ms ease, top 900ms ease;"></div>
+    </sc-for>
+    <sc-if value="{{ rootGlow }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute; left:-70px; top:-6px; width:140px; height:{{ glowH }}px; border-radius:50%; background: radial-gradient(ellipse at 50% 20%, oklch(0.78 0.10 145 / 0.4), transparent 70%); animation: ciglow 1800ms ease both; pointer-events:none;"></div>
+    </sc-if>
+  </div>
+
+  <!-- the oak, young, shallow-rooted -->
+  <div style="position:absolute; left:201px; top:468px; width:0; height:0;">
+    <div style="position:absolute; left:0; bottom:0; transform: translateX(-50%) rotate({{ lean }}deg); transform-origin: 50% 100%; transition: transform 900ms cubic-bezier(.34,1.5,.64,1);">
+      <div style="animation: cisway 7s ease-in-out infinite; transform-origin: 50% 100%;">
+        <div style="width:66px; height:200px; border-radius: 46% 46% 10px 10px / 30% 30% 10px 10px; background: repeating-linear-gradient(135deg, oklch(1 0 0 / 0.05) 0 5px, transparent 5px 11px), oklch(0.48 0.08 145 / 0.5); border: 1px dashed oklch(0.80 0.07 145 / 0.55); box-sizing:border-box; display:flex; align-items:center; justify-content:center; text-align:center;">
+          <div style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size:9.5px; line-height:1.4; letter-spacing:.02em; color: oklch(0.90 0.03 145 / 0.75); white-space:pre;">oak
+young</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- scrim -->
+  <div style="position:absolute; inset:0; background: linear-gradient(180deg, oklch(0.10 0.02 50 / 0.35) 0%, oklch(0.10 0.02 50 / 0.55) 100%);"></div>
+
+  <!-- sheet -->
+  <div style="position:absolute; left:0; right:0; bottom:0; padding: 10px 20px 44px; border-radius: 28px 28px 0 0; background: oklch(0.24 0.025 55 / 0.96); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-top: 1px solid oklch(1 0 0 / 0.10); box-shadow: 0 -20px 60px oklch(0 0 0 / .4); display:flex; flex-direction:column; gap:18px; animation: ciup 520ms cubic-bezier(.2,.8,.2,1) both;">
+    <div style="align-self:center; width:36px; height:4px; border-radius:2px; background: oklch(1 0 0 / 0.18);"></div>
+    <div style="display:flex; justify-content:space-between; align-items:center; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size:11px; letter-spacing:.04em; color: oklch(0.90 0.03 145 / 0.65);">
+      <div>EVENING CHECK-IN</div>
+      <div>{{ habitName }} · {{ stepLabel }}</div>
+    </div>
+
+    <!-- step: reflect -->
+    <sc-if value="{{ isReflect }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex; flex-direction:column; gap:6px; animation: cifade 360ms ease both;">
+        <div style="font-size:15px; line-height:1.4; color: oklch(0.94 0.015 80 / 0.7);">{{ fact }}</div>
+        <div style="font-family: Newsreader, Georgia, serif; font-size:27px; line-height:1.15; letter-spacing:-0.01em; text-wrap: pretty;">{{ question }}</div>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; animation: cifade 360ms ease 60ms both;">
+        <sc-for list="{{ chips }}" as="c" hint-placeholder-count="0">
+          <div onClick="{{ c.tap }}" style="min-height:44px; padding:11px 16px; box-sizing:border-box; border-radius:999px; display:flex; align-items:center; gap:8px; font-size:15px; font-weight:500; cursor:pointer; background:{{ c.bg }}; color:{{ c.fg }}; border:1px solid {{ c.border }}; transition: background 160ms, color 160ms, transform 120ms;" style-active="transform: scale(.96)">
+            <sc-if value="{{ c.pinned }}" hint-placeholder-val="{{ false }}">
+              <div style="width:6px; height:6px; border-radius:50%; background: oklch(0.74 0.09 145);"></div>
+            </sc-if>
+            <div>{{ c.label }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display:flex; gap:18px; align-items:center; font-size:14px; color: oklch(0.94 0.015 80 / 0.6); animation: cifade 360ms ease 120ms both;">
+        <sc-if value="{{ showSomethingElse }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ goTyping }}" style="cursor:pointer; padding:10px 0; text-decoration: underline; text-underline-offset:3px; text-decoration-color: oklch(1 0 0 / 0.25);" style-hover="color: oklch(0.94 0.015 80)">Something else</div>
+        </sc-if>
+        <sc-if value="{{ showCantRemember }}" hint-placeholder-val="{{ true }}">
+          <div onClick="{{ cantRemember }}" style="cursor:pointer; padding:10px 0; text-decoration: underline; text-underline-offset:3px; text-decoration-color: oklch(1 0 0 / 0.25);" style-hover="color: oklch(0.94 0.015 80)">Can’t remember</div>
+        </sc-if>
+        <div onClick="{{ skip }}" style="cursor:pointer; padding:10px 0; margin-left:auto; color: oklch(0.94 0.015 80 / 0.4);" style-hover="color: oklch(0.94 0.015 80 / 0.7)">Skip</div>
+      </div>
+    </sc-if>
+
+    <!-- step: typing -->
+    <sc-if value="{{ isTyping }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex; flex-direction:column; gap:6px; animation: cifade 360ms ease both;">
+        <div style="font-size:15px; line-height:1.4; color: oklch(0.94 0.015 80 / 0.7);">{{ fact }}</div>
+        <div style="font-family: Newsreader, Georgia, serif; font-size:27px; line-height:1.15; letter-spacing:-0.01em;">{{ typingQuestion }}</div>
+      </div>
+      <input value="{{ typed }}" onChange="{{ onType }}" placeholder="{{ typingPlaceholder }}" autoFocus="{{ true }}" style="width:100%; box-sizing:border-box; height:52px; padding:0 16px; border-radius:16px; border:1px solid oklch(1 0 0 / 0.18); background: oklch(1 0 0 / 0.06); color: oklch(0.94 0.015 80); font-family: Karla, system-ui, sans-serif; font-size:16px; outline:none;">
+      <div style="display:flex; gap:10px;">
+        <div onClick="{{ backToChips }}" style="flex:1; height:46px; border-radius:14px; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:500; cursor:pointer; border:1px solid oklch(1 0 0 / 0.18);">Back</div>
+        <div onClick="{{ saveTyped }}" style="flex:1.3; height:46px; border-radius:14px; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:600; cursor:pointer; background:{{ saveBg }}; color:{{ saveFg }}; transition: background 200ms, color 200ms;">Save</div>
+      </div>
+    </sc-if>
+
+    <!-- step: commit to tomorrow -->
+    <sc-if value="{{ isCommit }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex; flex-direction:column; gap:6px; animation: cifade 360ms ease both;">
+        <div style="font-size:15px; line-height:1.4; color: oklch(0.94 0.015 80 / 0.7);">{{ commitFact }}</div>
+        <div style="font-family: Newsreader, Georgia, serif; font-size:27px; line-height:1.15; letter-spacing:-0.01em; text-wrap: pretty;">{{ commitQuestion }}</div>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; animation: cifade 360ms ease 60ms both;">
+        <sc-for list="{{ commitChips }}" as="c" hint-placeholder-count="0">
+          <div onClick="{{ c.tap }}" style="min-height:44px; padding:11px 16px; box-sizing:border-box; border-radius:999px; display:flex; align-items:center; font-size:15px; font-weight:500; cursor:pointer; background:{{ c.bg }}; color:{{ c.fg }}; border:1px solid {{ c.border }}; transition: background 160ms, color 160ms;" style-active="transform: scale(.96)">{{ c.label }}</div>
+        </sc-for>
+      </div>
+    </sc-if>
+
+    <!-- step: done -->
+    <sc-if value="{{ isDone }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex; flex-direction:column; gap:8px; animation: cifade 420ms ease both;">
+        <div style="font-family: Newsreader, Georgia, serif; font-size:30px; line-height:1.1; letter-spacing:-0.01em;">{{ doneTitle }}</div>
+        <div style="font-size:15px; line-height:1.45; color: oklch(0.94 0.015 80 / 0.75);">{{ doneSub }}</div>
+      </div>
+      <sc-if value="{{ insight }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex; flex-direction:column; gap:12px; padding:14px 16px; border-radius:18px; background: oklch(1 0 0 / 0.05); border:1px solid oklch(1 0 0 / 0.09); animation: cifade 420ms ease 220ms both;">
+          <div style="font-family: Newsreader, Georgia, serif; font-style:italic; font-size:17px; line-height:1.4; color: oklch(0.86 0.06 80); text-wrap: pretty;">{{ insight }}</div>
+          <sc-if value="{{ insightAction }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex; gap:10px;">
+              <div style="padding:10px 14px; border-radius:12px; font-size:14px; font-weight:600; cursor:pointer; background: oklch(0.74 0.09 145 / 0.18); color: oklch(0.86 0.09 145); border:1px solid oklch(0.74 0.09 145 / 0.35);">{{ insightAction }}</div>
+              <div style="padding:10px 14px; border-radius:12px; font-size:14px; cursor:pointer; color: oklch(0.94 0.015 80 / 0.6);">Not now</div>
+            </div>
+          </sc-if>
+        </div>
+      </sc-if>
+      <div onClick="{{ reset }}" style="height:48px; border-radius:14px; display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:600; cursor:pointer; background: oklch(0.74 0.09 145); color: oklch(0.18 0.03 145); animation: cifade 420ms ease 320ms both;" style-active="transform: scale(.98)">Back to the garden</div>
+    </sc-if>
+  </div>
+</div>
+</x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;framing&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;validation&quot;,&quot;options&quot;:[&quot;validation&quot;,&quot;discovery&quot;,&quot;confirmation&quot;,&quot;autonomy&quot;,&quot;diagnosis&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Scenario&quot;},&quot;showCantRemember&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Scenario&quot;}}">
+class Component extends DCLogic {
+  // Habit under reflection: Strength training · exercise · designed cue "after breakfast" (family: breakfast)
+  // Logged 07:10 (early) → starter set per starter-chip-library §7.1 worked example A.
+  state = { step: 'reflect', mode: null, picked: null, typed: '', credit: 0, N: 2, day: null, glowKey: 0 };
+  base = { N: 2, cueHits: 6, cueTotal: 8 };
+
+  framing() { return this.props.framing ?? 'validation'; }
+  componentDidUpdate(prev) { if (prev.framing !== this.props.framing) this.reset(); }
+  reset = () => this.setState({ step: 'reflect', mode: null, picked: null, typed: '', credit: 0, N: this.base.N, day: null });
+
+  answer(label, credit, mode) {
+    this.setState({ picked: label, credit, mode: mode || 'chip' });
+    clearTimeout(this._t);
+    this._t = setTimeout(() => this.setState({ step: 'commit' }), 420);
+  }
+  finish(day) {
+    const credit = this.state.credit;
+    this.setState({ day, step: 'done', N: this.base.N + credit, glowKey: this.state.glowKey + 1 });
+  }
+  rootsFor(N) {
+    const c = this.base.cueHits / this.base.cueTotal; // designed-cue share stands in for convergence c
+    return (N / (N + 4)) * (0.5 + 0.5 * c);
+  }
+
+  renderVals() {
+    const f = this.framing();
+    const s = this.state;
+    const isDiag = f === 'diagnosis';
+    const expanded = s.mode === 'expanded';
+    const chipStyle = (sel, pinned) => sel
+      ? { bg: 'oklch(0.74 0.09 145)', fg: 'oklch(0.18 0.03 145)', border: 'oklch(0.74 0.09 145)' }
+      : pinned
+        ? { bg: 'oklch(0.74 0.09 145 / 0.14)', fg: 'oklch(0.94 0.015 80)', border: 'oklch(0.74 0.09 145 / 0.45)' }
+        : { bg: 'oklch(1 0 0 / 0.06)', fg: 'oklch(0.94 0.015 80)', border: 'oklch(1 0 0 / 0.12)' };
+    const mk = (label, credit, pinned) => ({ label, pinned: !!pinned, ...chipStyle(s.picked === label, pinned), tap: () => this.answer(label, credit) });
+
+    const cueChips = [ mk('after breakfast', 1.0, true), mk('after coffee', 1.0), mk('put my shoes on', 1.0), mk('first thing up', 1.0), mk('walked past the gym', 1.0) ];
+    const frictionChips = [ 'just forgot', 'ran out of time', 'too tired', 'something came up', 'didn\u2019t feel like it' ].map(l => mk(l, 1.0));
+
+    let fact, question, chips;
+    if (f === 'validation') {
+      fact = 'You trained this morning.';
+      question = expanded ? 'What got you going, then?' : 'Did after breakfast kick it off?';
+      chips = expanded ? cueChips.slice(1) : [
+        { ...mk('Yes', 1.0, true) },
+        { label: 'No, something else', pinned: false, ...chipStyle(false, false), tap: () => this.setState({ mode: 'expanded' }) },
+      ];
+    } else if (f === 'confirmation') {
+      fact = 'You trained this morning.';
+      question = expanded ? 'What was it this time?' : 'Same as usual \u2014 after breakfast?';
+      chips = expanded ? cueChips.slice(1) : [
+        { ...mk('Yes', 0.5, true) },
+        { label: 'Actually, no', pinned: false, ...chipStyle(false, false), tap: () => this.setState({ mode: 'expanded' }) },
+      ];
+    } else if (f === 'discovery') {
+      fact = 'You trained this morning.'; question = 'What got you going?'; chips = cueChips;
+    } else if (f === 'autonomy') {
+      fact = 'You trained this morning \u2014 without us asking.'; question = 'What reminded you?';
+      chips = cueChips.map(c => ({ ...c, tap: () => this.answer(c.label, 1.5) }));
+    } else {
+      fact = 'No training yesterday.'; question = 'What got in the way?'; chips = frictionChips;
+    }
+
+    const yesNoStage = (f === 'validation' || f === 'confirmation') && !expanded;
+    const cantRememberAllowed = (this.props.showCantRemember ?? true) && !isDiag;
+    const N = s.N, R = this.rootsFor(N);
+    const depth = Math.round(20 + R * 260);
+    const nSide = Math.min(6, Math.ceil(N / 2));
+    const roots = Array.from({ length: nSide }, (_, i) => {
+      const side = i % 2 === 0, frac = (i + 1) / (nSide + 1);
+      return { top: Math.round(depth * frac * 0.85), len: Math.round(22 + (1 - frac) * 34), angle: side ? 32 + i * 5 : 148 - i * 5 };
+    });
+    const rootsWord = R < 0.3 ? 'still shallow' : R < 0.6 ? 'taking hold' : 'deep';
+    const creditWord = { 1.5: '+1.5 credit', 1: '+1 credit', 0.5: '+\u00bd credit', 0.25: '+\u00bc credit', 0: 'no credit' }[s.credit];
+
+    // done copy + at most one insight (reflection-logic §6)
+    let doneTitle = 'Roots deepened.', doneSub = `${creditWord} \u00b7 ${N % 1 === 0 ? N : N.toFixed(2)} reflections \u00b7 roots ${rootsWord}`, insight = null, insightAction = null;
+    if (s.mode === 'cant') { doneTitle = 'Noted.'; doneSub = `An honest blank counts a little \u00b7 ${creditWord}`; }
+    else if (s.mode === 'skip') { doneTitle = 'Another time.'; doneSub = 'Tomorrow is set. We\u2019ll ask again when there\u2019s something to learn.'; }
+    else if (f === 'autonomy') { insight = 'You trained without us asking. That\u2019s the whole idea.'; }
+    else if (isDiag) {
+      const route = {
+        'just forgot': ['Sounds like the cue didn\u2019t fire. Want to try anchoring to something that always happens?', 'Look at the cue'],
+        'ran out of time': ['Might be too big for the slot it\u2019s in. Want to shrink the routine?', 'Shrink it'],
+        'too tired': ['Energy runs out before the habit does. Want to try it earlier?', 'Move it earlier'],
+        'something came up': ['Other things keep winning that slot. Want a more protected one?', 'Pick a slot'],
+        'didn\u2019t feel like it': ['The routine happened, the reward didn\u2019t. Want to revisit what follows it?', 'Revisit the reward'],
+      }[s.picked];
+      if (route) { insight = route[0]; insightAction = route[1]; }
+      doneTitle = 'Thanks \u2014 that helps.';
+    }
+    else if (s.picked && s.picked !== 'Yes' && s.picked !== 'after breakfast') { insight = `Second time it\u2019s been \u201c${s.picked}\u201d. A few more and we\u2019ll suggest making it official.`; }
+
+    const dayLabel = s.day && s.day !== 'Yes' ? s.day : 'Thursday';
+    if (s.step === 'done' && s.mode !== 'skip') doneSub += ` \u00b7 ${dayLabel} is set`;
+
+    const commitChips = s.mode === 'days'
+      ? ['Friday', 'Saturday', 'Sunday', 'Monday'].map(d => ({ label: d, ...chipStyle(false, false), tap: () => this.finish(d) }))
+      : [ { label: 'Yes', ...chipStyle(false, true), tap: () => this.finish('Yes') }, { label: 'Different day', ...chipStyle(false, false), tap: () => this.setState({ mode: 'days' }) } ];
+
+    return {
+      habitName: 'Strength training',
+      stepLabel: s.step === 'reflect' || s.step === 'typing' ? '1 of 2' : s.step === 'commit' ? '2 of 2' : 'done',
+      isReflect: s.step === 'reflect', isTyping: s.step === 'typing', isCommit: s.step === 'commit', isDone: s.step === 'done',
+      fact, question, chips,
+      showSomethingElse: !yesNoStage, showCantRemember: cantRememberAllowed && !yesNoStage,
+      goTyping: () => this.setState({ step: 'typing' }),
+      cantRemember: () => { this.setState({ picked: null, credit: 0.25, mode: 'cant' }); this._t = setTimeout(() => this.setState({ step: 'commit' }), 200); },
+      skip: () => { this.setState({ picked: null, credit: 0, mode: 'skip' }); this._t = setTimeout(() => this.setState({ step: 'commit' }), 200); },
+      typingQuestion: isDiag ? 'What got in the way?' : 'What got you going?',
+      typingPlaceholder: isDiag ? 'e.g. dentist ran over' : 'e.g. the dog woke me up',
+      typed: s.typed, onType: (e) => this.setState({ typed: e.target.value }),
+      saveBg: s.typed.trim() ? 'oklch(0.74 0.09 145)' : 'oklch(1 0 0 / 0.07)', saveFg: s.typed.trim() ? 'oklch(0.18 0.03 145)' : 'oklch(0.94 0.015 80 / 0.4)',
+      saveTyped: () => { if (!s.typed.trim()) return; this.setState({ picked: s.typed.trim(), credit: f === 'autonomy' ? 1.5 : 1.0, mode: 'typed', step: 'commit' }); },
+      backToChips: () => this.setState({ step: 'reflect' }),
+      commitFact: isDiag ? 'Tomorrow, then.' : 'Thursday next, then.',
+      commitQuestion: s.mode === 'days' ? 'Which day?' : isDiag ? 'After breakfast \u2014 still the plan?' : 'After breakfast?',
+      commitChips,
+      doneTitle, doneSub, insight, insightAction,
+      depth, roots, lean: R < 0.30 ? -3 : 0,
+      rootGlow: s.step === 'done' && s.credit > 0, glowH: depth + 20,
+      reset: this.reset,
+    };
+  }
+}
+</script>
+</body>
+</html>

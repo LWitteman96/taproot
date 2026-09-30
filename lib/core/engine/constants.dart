@@ -68,7 +68,12 @@ abstract final class EngineConstants {
   /// cadence decides *which* local dates are expected occasions, and those are
   /// the rows autonomy's denominator is counted over. Changing the cadence
   /// changes a derivation.
-  static const int version = 2;
+  ///
+  /// 3 — [confirmationChangedCueCredit]. A Confirmation whose answer changed
+  /// the cue now earns a full credit rather than half, which changes N, which
+  /// changes R, which gates Bloom. Every cached root depth computed under 2 is
+  /// wrong for those habits.
+  static const int version = 3;
 
   // ── Inputs ────────────────────────────────────────────────────────────────
 
@@ -153,6 +158,11 @@ abstract final class EngineConstants {
   static const double rootsSaturationConstant = 4;
 
   /// Root credit by framing, for a substantive answer.
+  ///
+  /// Confirmation is the cheap one because it is usually a one-tap yes: the
+  /// user confirms what the app already believed, which is worth something but
+  /// is not new information. See [confirmationChangedCueCredit] for the case
+  /// where it *is*.
   static const Map<Framing, double> rootCreditByFraming = <Framing, double>{
     Framing.autonomy: 1.5,
     Framing.validation: 1.0,
@@ -160,6 +170,16 @@ abstract final class EngineConstants {
     Framing.diagnosis: 1.0,
     Framing.confirmation: 0.5,
   };
+
+  /// A Confirmation the user *corrected* earns a full credit, like Discovery.
+  ///
+  /// reflection-logic §3 sets credit by framing **x input mode**, and the
+  /// framing alone does not capture the difference between "yes, as usual" and
+  /// "actually, no — it was this instead". The second answer is exactly the new
+  /// cue information Discovery is paid 1.0 for; charging it half because the
+  /// app happened to open with a guess would pay the user less for telling us
+  /// we were wrong (check-in-design §8).
+  static const double confirmationChangedCueCredit = 1.0;
 
   /// An honest non-answer is real evidence of autopilot, but it builds no cue
   /// understanding — it must never be worth what an actual answer is worth.

@@ -21,6 +21,390 @@ merge is that the entries are still newest-first — union keeps both blocks but
 
 ---
 
+## 2026-09-30 — The sunflower and the lavender, built and drawing
+
+The third and fourth species went from reviewed flat art to shipped `.riv` files, and the garden now
+draws four of its six plants. Both built on the first attempt with nothing fixed along the way, and
+both matched their handoff's expected type-count table exactly — 91 counts each, across seven
+artboards.
+
+### What landed
+
+- **`sunflower.riv`** (130,610 bytes) and **`lavender.riv`** (256,612 bytes) in `assets/rive/`,
+  declared in `pubspec.yaml`, and both in `plantArts`.
+- **`plant_art.dart`'s promise held.** Adding a species really was "this list plus the asset":
+  both call sites go through `plantArtFor`, so no other app code changed.
+- **Three checks the oak's run did by hand became shared scripts** in `plantgen/` —
+  `check_svg_render.py`, `measure.py`, `crop_joints.py` — and the oak's own two,
+  `check_built.py` and `check_render.py`, were made generic over the species.
+- **Both parameterised tests picked the new species up unaided**, which is what they were for. The
+  asset test went 22 → 42 cases; the view test's per-species draw case was parameterised here too,
+  having been a hand-written fern case and oak case.
+
+### What it decided
+
+- **Render cost follows path complexity, not shape count.** `oak/NOTES.md` concluded it follows
+  "shapes and paths", and the lavender's handoff predicted from that its 60-shape `LavenderBloom`
+  would fail the bench as `OakMature`'s 62 did. It does not. Benched in one session,
+  `LavenderMature` renders in 0.181 ms against `OakMature`'s 0.309 ms at near-identical shape
+  counts — ellipses are cheap to rasterise, many-vertex paths are not. What 597 ellipses *do* cost
+  is advance time: 0.066 ms, the highest of the four plants, still two-thirds of budget.
+- **A `Dots` colour can be keyed and it drives the render.** The lavender's florets were the one
+  genuinely new thing in this batch. On `LavenderBloom` the healthy floret colours go to **exactly
+  zero pixels** between vitality 1 and 0 while the dry ones arrive at almost identical counts —
+  the colour changing, not the spikes moving.
+- **The smoothing chain is not species-specific**, so it was not re-tested per plant. The emitted
+  converter nodes are byte-identical across all four (102 each, same types and attributes),
+  `check_built` confirms every reference resolves, and the fern and oak each proved convergence in
+  motion. Recorded as a stated decision in both NOTES rather than a silent skip; it stops holding
+  the day a species gains its own smoothing configuration.
+- **The refactor of the oak's checkers was proven before anything relied on it** — `check_render`
+  reproduces all 21 of the oak's recorded results to the pixel, `check_built` its four counts.
+
+### Three traps found, all added to `fern/NOTES.md`
+
+- **`--advance=0` applies no data at all.** It is the right frame for a *stage* — every sway key is
+  0, so the artboard sits in the rest pose the SVG describes — but on an artboard whose poses *are*
+  data-driven blends it renders the authored pose whatever `--data` says. All four of
+  `SunflowerRoots`' levels diffed against the same level-4 picture until this was caught; the
+  roots-0.15 render at `--advance=0` is byte-identical to the level-4 one. This was a bug in the
+  new check, not in the art.
+- **A joint probe at fixed coordinates misses the joint**, because a joint sits at a pivot and
+  pivots move — the sunflower's neck travels 150 px between vitality 1 and 0.
+- **Counting background enclosed by the plant is not a hole detector.** `OakMature`, reviewed and
+  passed, encloses 35,748–62,596 px of sky between its foliage by design.
+
+The last two are why `crop_joints.py` makes crops for a person rather than returning a verdict. Both
+dead ends are in its docstring.
+
+### Left open
+
+- **`OakMature` and `OakBloom` are still over the render budget**, unchanged. Re-measured this
+  session at 0.309 and 0.317 ms against 0.30. Every lever changes reviewed art, so it stays Luuk's
+  call.
+- **The lotus and the pine** have no art and still draw as placeholder silhouettes. Whether six
+  generated species read as one garden cannot be answered until they exist.
+- **The garden-design art pass** (outline widths × 2, root recolour) applies to all four plants now
+  and should be done once in `plantgen`.
+- The sunflower's own calibration questions — the head's steep early droop, the head scale of 5.6 —
+  are unreviewed in motion and stay in `sunflower/NOTES.md`.
+
+### Next
+
+A significant code review of the whole `feature/rive_animations` branch before it merges. Known
+cleanup waiting on it: the `wip: per-species plant art` commit wants reshaping, `analysis_options.yaml`
+and `pubspec.lock` drift on every `flutter` invocation on this machine, and
+`lib/features/habits/services/local_completion_service.dart` fails `dart format` under the newer SDK
+formatter and will trip the CI gate.
+
+---
+
+## 2026-09-16 — The evening check-in, as a sheet over the garden
+
+Branch: `feature/rive_animations`. `docs/check-in-design.md` arrived and now governs the check-in's
+presentation; it is in the spec table. All six build steps of its §10 landed, on top of
+garden-design steps 1–4.
+
+### What changed
+
+The check-in stopped being a full-screen page and became a **bottom sheet over the live garden**.
+The reason is the payoff: reflection is the only thing that deepens roots, so the user should watch
+the roots of the habit they just reflected on grow. A page cannot show that.
+
+`/check-in` still exists — the notification deep link keeps working — but it now builds the garden
+with the sheet up rather than a screen of its own.
+
+What did **not** change, deliberately: priority scoring, framing selection, chip surfacing, the
+`Reflection` record, and local-first writes. This was presentation.
+
+### The decisions worth keeping
+
+**Validation and Confirmation ask yes or no first.** reflection-logic §3 asks for that specifically,
+and the built page showed the full chip list immediately — which made a Validation
+indistinguishable from a Discovery and never actually tested the designed cue. "No, something else"
+is not an answer by itself: it records nothing and opens the list, and the list comes back *without*
+the cue just ruled out.
+
+**The reflection is written on answer, not on done**, so swiping the sheet away after answering
+keeps the answer.
+
+**The roots are pinned until done.** Because the write happens on answer, the engine's root depth
+moves immediately; left alone the roots would grow while the user was still mid-question and the
+done state would have nothing to show. The sheet pins the pre-answer depth on open and releases it
+at done, which is what starts Rive's 1.2s ease.
+
+**The garden is refreshed before the pin is released.** The reflection went through the check-in
+controller, so the garden's engine state still predated it — releasing without recomputing grew the
+roots to exactly where they already were. A test caught this: the depth came back 0.0 after a real
+answer.
+
+**Words only on done.** No credit values, no reflection count, in any state. Credit is an internal
+weighting, and "+½ credit · 3.50 reflections" turns a moment of being understood into a scoreboard.
+
+**One voice.** Every sentence is a pure function shared with `composeEveningCheckIn()`. §5 says "if
+they differ, change both together"; making both compose from one place turns that from a promise
+into a property, and a test asserts it.
+
+**A corrected Confirmation earns a full credit** (engine version 2 → 3). The trigger is
+`matchedDesignedCue == false`, not "anything but true" — the field is nullable and null means
+*unrecorded*, so paying the higher credit for null would silently re-price history and break
+reflection-logic's rule that a user coasting on one-tap confirmations deepens roots slowly. That
+rule had a test, which is how the first attempt was caught.
+
+### What the tests and the render harness caught
+
+- The "nothing to ask" and "failed" states read the offer before the status, so both showed a
+  spinner that could never resolve.
+- The sheet reached for `GoRouter` directly, which throws under any test that mounts it without a
+  router.
+- `dispose()` read the provider container from an already-deactivated element.
+- The footer — `Something else`, `Can't remember`, `Skip` — overflowed a 402pt screen by 113px,
+  losing the way out entirely. No widget test had caught it because none laid the sheet out at
+  phone width.
+
+That last one came from `check_in_shots_test`, which renders each framing's step 1 and both done
+states to `.tmp/shots/`. It exists because the five framings are chosen from a habit's history, so
+reaching them on a device means seeding five histories — and this machine's Xcode has no
+SimulatorKit, so there is no tap automation either.
+
+### What it leaves open
+
+Recorded in `docs/status.md` as later features: the **day picker** (`Different day` records
+`declined` and nothing else), **insight surfacing** (one insight fires — the autonomy milestone —
+because §0.4 forbids an insight without an action), and the **action editors** those insights would
+need.
+
+Four calibration questions are implemented at their defaults and named: the camera's 2.2× and 38%
+ground line, `Can't remember` on reflection #1 (behind a flag, default shown), the 420ms
+auto-advance, and the 25%/10% scrim, which is calibrated against dusk only.
+
+---
+
+## 2026-09-16 — A second species: plantgen, the oak, and oak.riv in the assets
+
+Branch: `feature/rive_animations`. Two sessions: one drew the oak and split the generator, this one
+built it with the rive CLI and shipped the asset. It answers the first of the two questions
+[status.md](status.md) has been carrying about the generator approach.
+
+### What landed
+
+- **`plantgen/`** — the generic half of `fern_generator.py`, lifted out whole: the geometry model,
+  the SVG writer, the RML emitter, and the sway / droop / lean / roots wiring. A plant is now a
+  `Species(...)` holding its own art and tables. **The fern's generated output was byte-identical
+  across the move**, every `.rml` and `.svg`, in both sway modes — which is the only reason the
+  refactor is trustworthy, and the check to re-run after any future change to `plantgen/`.
+- **`oak/`** — six oak stages plus `OakRoots`, a generator, a structural checker (`check_rml.py`),
+  and a built-file checker (`check_built.py`, written to be reused by the next plant).
+- **`assets/rive/oak.riv`**, 544 KB, registered in `pubspec.yaml` beside `fern.riv`, with
+  `test/features/garden/oak_asset_test.dart` pinning its names the way the fern's test does.
+
+### What it decided
+
+The art decisions are in [`oak/NOTES.md`](../oak/NOTES.md) and were reviewed as flat SVG before any
+of this: the crown is laid out *before* the limbs (leaves-on-sticks read as a bare tree with tufts),
+wood is drawn in two passes with front limbs split so no outline crosses the trunk, droop lives in
+the leaves rather than the wood (drooping limbs split the crown open — a tree breaking, not a tree
+thirsty), the lean goes **left** where the fern's goes right, and the taproot is the level-1 root.
+
+What this session decided is smaller and all about proof:
+
+- **Compare the build against the art it came from, not against an approved picture.** Headless
+  Chrome renders the generated `.svg`, `rive --screenshot` renders the `.riv`, and the two are
+  diffed at `--advance=0`. Zero strongly-differing pixels across six stages and four root levels.
+  The recipe is now in `fern/NOTES.md` for every plant after this one.
+- **Negative-control the checker.** Each of `check_built.py`'s four assertions was re-run against a
+  deliberately corrupted tree to confirm it fails. A checker that silently passes is the exact class
+  of bug this project keeps finding.
+
+### What it left open
+
+- **`OakMature` and `OakBloom` are over the render budget** — 0.34 and 0.36 ms against 0.30 ms, with
+  `advance` and memory comfortably inside. Shrinking the viewport does not help: the cost is path
+  count, not pixel count. Nothing was slimmed, because every lever changes art that was reviewed.
+  The levers are in `oak/NOTES.md` under "Weight". **This is a decision for Luuk.**
+- **The app does not draw oaks.** `plant_art.dart` hard-codes the fern, and generalising it to
+  per-species names was deliberately out of scope here.
+- The garden-design §10 step 7 art pass (outline widths × 2, root recolour) now applies to two
+  plants, so it is best done once in `plantgen/`.
+- The oak's motion tuning was judged on stills; the rosette droop scale, the limb scale and the
+  trunk's quarter-degree sway are unreviewed in motion.
+
+### Next
+
+**Per-species plant art in the app** — a species → (artboard prefix, state machine, view model) map
+in `plant_art.dart` in place of the fern special case, which also collapses the two asset tests into
+one. `OakRoots` is the same 1024×520 canvas with its ground line at y=0 as `FernRoots`, so
+`GardenLayout.rootsDepth` stays a global constant rather than becoming per-species.
+
+---
+
+## 2026-09-16 — The garden home screen, and the fern standing in it
+
+Branch: `feature/rive_animations`. `docs/garden-design.md` arrived and now governs this screen; it
+is in the spec table. Build steps 1–3 of its §10 landed, plus the Rive runtime underneath them.
+
+### What the home screen is now
+
+A list of cards became **one garden**: a vertical cross-section with sky above a ground line and
+soil below, every habit standing on the same ground at one world scale, a floating detail card for
+the selected plant, and a horizontal scroll. The greeting replaced the "Taproot" title, the empty
+plot replaced the floating action button, and the undo moved out of a snack bar onto the card.
+
+`PlantCard` is gone. Its semantic label — the whole plant in one sentence — moved onto the plant
+itself, which is where it belonged: the picture is now the thing a screen reader cannot see.
+
+### Rive, and the two things that had never been tested
+
+Nothing had ever loaded a CLI-built `.riv` into the Flutter runtime, and the file uses view-model
+data binding, which is the newest part of the format. It works. Two things only running it revealed:
+
+- **`rive_native` needs a platform library `pub get` does not fetch.** Without
+  `dart run rive_native:setup` every Rive test dies on a `dlopen` failure. That is a new CI step.
+- **`Factory.rive` aborts the process under `flutter test`** — it wants a graphics context, and the
+  failure is a `SIGABRT` rather than an exception. `Factory.flutter` works headless.
+
+`assets/rive/fern.riv` is committed rather than built in CI, because a build step would need the
+Rive CLI and its auth inside the pipeline. That means a copy step after every generator change,
+which is now written down in `fern/NOTES.md` rather than living in commit messages.
+
+### What the build decided
+
+**Scene colours are generated from the handoff's `tokens.json`,** not typed. Forty-six colours is
+too many to hand-copy without drift; oklch stays in the doc comments as the canonical source.
+
+**The ground line is a function of the viewport, not the reference frame,** and on a short screen it
+moves *up* rather than letting the detail card cover a plant's roots.
+
+**The hit target is the 128pt column, not the plant.** A seed is 11pt wide. The column already
+reserves the depth the roots will occupy, so the target will not move when they arrive.
+
+**Selection is a glow on the ground, not a ring on the plant.** The art deliberately overflows its
+slot, so there is no box to ring — and the ground is where every plant agrees on a position.
+
+**The art is anchored on canvas y = 900, not on the canvas bottom.** The plant stands there, so the
+artboard's top goes 135pt above the ground line and the remaining 18.6pt hangs below it under the
+soil. Anchoring on the bottom floats every plant off the ground.
+
+**Where the prototype and the art disagreed, garden-design §9 decided, and this followed it**: the
+plant's droop, lean and sway are all in the Rive file, and Flutter never rotates, scales or tints a
+plant to express state. It places plants and writes numbers.
+
+### What the device caught that the tests could not
+
+Worth recording because it is the argument for the screenshot step:
+
+- the ground has to be at least as wide as the viewport, or the world runs out of floor;
+- `Alignment` distributes *slack* around a child rather than placing its centre, so the sun landed
+  well short of its fraction and collided with the greeting;
+- a caption under a placeholder lifts the plant off the ground line, so the caption became a
+  separate widget the slot places below the grass.
+
+### What it leaves open
+
+The rest of garden-design §10: **roots** (step 4), the **watering choreography** (step 5), **time of
+day** (step 6) and the **art pass** for the 0.15 scale (step 7). `roots` is verified end to end —
+including that one `ViewModelInstance` shared by the plant and its roots is what the composition
+needs, since a bind inside a `NestedArtboard` silently resolves to nothing — but nothing writes it
+yet, so it reads 0 in the app.
+
+Two calibration questions are implemented at their defaults and named rather than settled: the
+world scale of 0.15 and the 128pt pitch come from a 402pt mock-up and are unchecked on the smallest
+phone or a tablet; and `AppMotion.stageAdvanceDuration` is 700ms because a dissolve between two
+silhouettes reads as a glitch at 240ms, but the specs do not say what an earned stage advance should
+feel like.
+
+### Next
+
+Step 4: `FernRoots` under each fern slot on one shared `ViewModelInstance`, and `roots` written from
+the engine.
+
+---
+
+## 2026-09-16 — The fern: procedural plant art, animated in Rive
+
+Branch: `feature/rive_animations`. **No Dart changed.** This is a new top-level directory, `fern/`,
+holding a Rive CLI project and the Python that generates it. The three gates are untouched because
+nothing it contains is Dart.
+
+The garden has been "blocked on an external illustrator" since the design spec sent plant art out to
+a paid designer (§4) and `plant_choices.dart` was written as a deliberate placeholder. This branch
+tests a different answer for one of the six plants: **generate the art.**
+
+### What landed
+
+`fern/` builds one 109 KB `.riv` holding five artboards — `FernSprout`, `FernSeedling`, `FernYoung`,
+`FernMature`, `FernBloom` — the five growth stages the engine already computes. Each carries:
+
+- a **looping sway**, five seconds, every frond rotating a couple of degrees about the plant's base;
+- a **vitality droop**, bound to a `vitality` number (0–1) on a shared `Fern` view model: at 1 the
+  fronds stand upright in full colour, and as it falls they rotate outward and down while the
+  leaflet fills desaturate toward grey-green;
+- **sway amplitude that scales with vitality**, with a floor — a wilted plant moves less, never
+  freezes.
+
+Nothing is wired into the app. No `.riv` is in `pubspec.yaml`, no widget renders one, and nothing
+sets `vitality`. The garden still renders its plants as words.
+
+### The method, which is the point
+
+The fern is a first subject; the method is meant to carry to the other five plants, and to whatever
+else needs animating. `fern/NOTES.md` is the full write-up. In short:
+
+**One generator, two outputs, no hand-transcription.** `fern_generator.py` holds a small geometry
+model, and the SVG writer and the RML emitter are two readers over it. Neither format is the source
+of truth. This matters more than it sounds: Rive stores bezier handles as **polar offsets from the
+vertex**, where SVG writes absolute control points, so a hand conversion is both tedious and certain
+to drift. Where a format needed something the other lacked — SVG's elliptical arc caps — the
+*geometry* changed so both writers see the same points, rather than the emitter learning a special
+case.
+
+**Parameters derived from the art, not tuned per instance.** A frond's droop is
+`DROOP_MAX_DEGREES` scaled by how upright it already is, in the direction it already leans. That one
+rule produced all five stages without a table of hand-picked angles, including a stage-2 frond and
+three fiddleheads that exist in no layout table.
+
+**Declared, not inferred, where inference is fragile.** Above 80° from horizontal, which way a part
+leans is an accident of the art — the centre frond leans right by 36 px out of 743. So near-vertical
+parts must be declared in `DROOP_DIRECTION`, and the generator **raises** rather than falling back to
+a guess that would silently flip on a trivial edit.
+
+**One owner per animated property.** Each part is wrapped in two nested transform nodes, an outer one
+for the droop and an inner one for the sway. Two state machine layers then animate the same logical
+thing without either clobbering the other — had both keyed one node, the later layer would simply
+have won.
+
+**Verification by measurement, because clean builds prove almost nothing.** Demonstrated on this
+branch: `rive --verify` reports *0 errors, 0 warnings* on a data bind pointing at a view model that
+does not exist. `rive inspect` catches it. Neither catches a bind that resolves and drives nothing —
+for that you change the data and diff the render. So the branch carries `pngdiff.py`, a
+dependency-free PNG reader, and checks things like "the sway floor actually does something" by
+rebuilding with it at zero and confirming the plant freezes completely.
+
+The general shape: **assert on the built file, not the markup.** Every emitted vertex was
+reconstructed from the RML and compared against the model (max error 0.005 px); the loop seam was
+checked for exact equality rather than eyeballed; and when the mature stage was refactored to
+generalise across stages, the proof was that it rendered **byte-identical** to before.
+
+### What it leaves open
+
+- **Five of six plants.** Oak, lotus, sunflower, lavender and pine have no art. Whether the
+  generator approach suits a tree as well as a fern is untested — fronds are repetitive in a way
+  branches are not.
+- **The roots.** `docs/growth-engine.md` has root depth as a first-class derived value, and the
+  generator already emits root SVGs grouped one-per-primary for rigging, but no root artboard exists.
+- **Growth transitions.** Five separate artboards cannot animate *between* stages. If a plant should
+  be seen growing when it advances, that is a different structure and worth deciding before anything
+  depends on the current one.
+- **Whether procedural art is good enough.** This is the real open question and it is not a
+  technical one. The fern reads well in stills and motion, but six coherent species that look like
+  one garden is a different bar from one plant that looks right on its own.
+
+### Next
+
+Wiring one stage into the garden screen end to end — asset, widget, and the vitality the engine
+already computes — would answer more than another four plants would. It is also the first point at
+which `DataConverterInterpolator` earns its place: the chains already smooth a changed vitality over
+0.6s, so a completion tap should ease the fern upright rather than snapping it.
 ## 2026-09-16 — the invitation's review fixes
 
 Branch: `feature/notification-onboarding`, off `develop`. Five review findings on PR #10, plus the

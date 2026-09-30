@@ -1,0 +1,7 @@
+name: oak
+# the artboard `rive oak` opens. The others: rive oak --artboard=OakSeed
+# (Sprout, Seedling, Young, Bloom, Roots)
+main: OakMature
+logs:
+  file: build/rive.log
+  problems: build/problems.log

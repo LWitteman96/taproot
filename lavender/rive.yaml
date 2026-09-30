@@ -1,0 +1,7 @@
+name: lavender
+# the artboard `rive lavender` opens. The others: rive lavender --artboard=LavenderSeed
+# (Sprout, Seedling, Young, Mature, Roots)
+main: LavenderBloom
+logs:
+  file: build/rive.log
+  problems: build/problems.log

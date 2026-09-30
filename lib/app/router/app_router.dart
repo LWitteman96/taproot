@@ -15,7 +15,6 @@ import 'package:taproot/features/notifications/domain/notification_invitation.da
 import 'package:taproot/features/notifications/pages/notification_invitation_page.dart';
 import 'package:taproot/features/notifications/providers/notification_onboarding_providers.dart';
 import 'package:taproot/features/notifications/providers/nudge_providers.dart';
-import 'package:taproot/features/reflection/pages/check_in_page.dart';
 import 'package:taproot/features/reflection/services/check_in_assembler.dart';
 
 /// Every path in the app, in one place.
@@ -209,12 +208,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: AppRoutes.checkIn,
-        // The garden hands its already-assembled offer over as `extra`, so the
-        // screen re-verifies one habit instead of re-electing a winner among
-        // all of them. Absent — a deep link, a cold start on this path — the
-        // screen assembles from scratch.
-        builder: (context, state) =>
-            CheckInPage(offered: state.extra as CheckInOffer?),
+        // How the sheet was opened travels as `extra`: the garden's
+        // already-assembled offer, so the screen re-verifies one habit instead
+        // of re-electing a winner among all of them, or the habit the user
+        // tapped Reflect on. Absent — a deep link, a cold start on this path —
+        // the screen assembles from scratch.
+        // The garden *with the sheet up*, not a screen of its own. The roots
+        // growing behind the sheet are the payoff (check-in-design §1), so a
+        // route that replaced the garden would have nothing to grow. The deep
+        // link keeps working; what it opens changed.
+        builder: (context, state) => GardenPage(
+          showCheckIn: true,
+          checkIn: state.extra as CheckInEntry?,
+        ),
       ),
     ],
   );

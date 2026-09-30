@@ -1,3 +1,4 @@
+import 'package:taproot/core/engine/domain.dart';
 import 'package:taproot/core/engine/engine.dart';
 import 'package:taproot/core/models/habit.dart';
 import 'package:taproot/features/habits/services/habit_inputs_loader.dart';
@@ -122,11 +123,52 @@ class CheckInPromptComposer implements ReflectionPromptComposer {
     );
     if (candidate == null) return null;
 
-    return checkInQuestion(
+    return _notificationSentence(
       framing: candidate.framing,
       habit: habit,
       occasionAt: candidate.occasion.at,
       now: deliverAt,
     );
+  }
+
+  /// The look-back half of the notification, as one sentence.
+  ///
+  /// Both surfaces say the same words — check-in-design §2's "one voice" —
+  /// but they arrange them differently, because their chrome differs. The
+  /// sheet draws [checkInFact] and [checkInQuestion] as two lines under a
+  /// header that already names the habit (§4's Fact and Question columns). A
+  /// notification has one body, so the two halves are joined into it.
+  ///
+  /// Only Diagnosis carries its fact across. Every other framing's fact is
+  /// `{habit} — done {when}.`, and the notification's **title is the habit
+  /// name**, so prefixing it would make the body repeat the line above it.
+  /// Diagnosis is the one whose fact is not a restatement: *which day had no
+  /// run* is the thing being asked about, and without it "What got in the
+  /// way?" arrives with no referent at all.
+  static String _notificationSentence({
+    required Framing framing,
+    required Habit habit,
+    required DateTime occasionAt,
+    required DateTime now,
+  }) {
+    final question = checkInQuestion(framing: framing, habit: habit);
+    if (framing != Framing.diagnosis) return question;
+
+    // `checkInFact` ends the fact with a full stop for the sheet, where it is
+    // its own line. Joined into a sentence it becomes a clause, so the stop
+    // gives way to the dash and the question opens in lower case.
+    final fact = checkInFact(
+      framing: framing,
+      habit: habit,
+      occasionAt: occasionAt,
+      now: now,
+    );
+    final clause = fact.endsWith('.')
+        ? fact.substring(0, fact.length - 1)
+        : fact;
+    final opened = question.isEmpty
+        ? question
+        : question[0].toLowerCase() + question.substring(1);
+    return '$clause — $opened';
   }
 }

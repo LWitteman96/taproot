@@ -36,6 +36,8 @@ Before implementing anything, read the governing document.
 | Document | Governs |
 |---|---|
 | [docs/design-spec.md](docs/design-spec.md) | Concept, the garden metaphor, visual and UX direction |
+| [docs/garden-design.md](docs/garden-design.md) | The garden **home screen**: scene, layout, how the plant art sits in it, and the watering and reflection moments |
+| [docs/check-in-design.md](docs/check-in-design.md) | The evening check-in's **presentation**: the sheet, its steps, copy, chip states, the done state and the roots payoff. *Not* whether to ask, which habit or which framing — those stay with reflection-logic |
 | [docs/growth-engine.md](docs/growth-engine.md) | Stage / vitality / roots / autonomy — every formula |
 | [docs/reflection-logic.md](docs/reflection-logic.md) | Prompt scheduling, framings, cue and friction taxonomies, insight rules |
 | [docs/starter-chip-library.md](docs/starter-chip-library.md) | Chip content and the first-reflection surfacing rule |
@@ -72,6 +74,16 @@ supabase/
   functions/  # Deno edge functions
 docs/         # The five specs
 scripts/      # coverage.sh, supabase-push.sh
+plantgen/     # The shared half of every plant generator: geometry, SVG writer,
+              # RML emitter, the sway/droop/lean/roots wiring, and the checks
+              # every plant runs (check_rml, check_built, check_render,
+              # check_svg_render, measure, crop_joints). No Dart.
+fern/         # Rive CLI project: generated plant art + animation. No Dart.
+              # Its own AGENTS.md and NOTES.md govern it; see docs/status.md.
+oak/          # The second one, same shape. plantgen/ + its own art and tables.
+              # fern/NOTES.md is the shared trap list; oak/NOTES.md what it adds.
+sunflower/    # The third. lavender/ the fourth. Same shape again; each keeps
+lavender/     # its own NOTES.md, and thin wrappers onto plantgen's checks.
 ```
 
 Each feature under `lib/features/<name>/` contains `pages/`, `providers/` or `controllers/`,

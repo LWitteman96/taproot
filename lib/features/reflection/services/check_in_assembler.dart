@@ -11,8 +11,10 @@ import 'package:taproot/features/reflection/domain/check_in_scheduler.dart';
 import 'package:taproot/features/reflection/domain/chip_surfacing.dart';
 import 'package:taproot/features/reflection/domain/cue_families.dart';
 import 'package:taproot/features/reflection/domain/daypart.dart';
+import 'package:taproot/features/reflection/domain/framing_selection.dart';
 import 'package:taproot/features/reflection/domain/friction_surfacing.dart';
 import 'package:taproot/features/reflection/domain/occasion_detection.dart';
+import 'package:taproot/features/reflection/domain/reflection_priority.dart';
 import 'package:taproot/features/reflection/domain/remembered_chips.dart';
 import 'package:taproot/features/reflection/domain/starter_chip.dart';
 
@@ -54,6 +56,55 @@ class CheckInOffer {
   Occasion get occasion => candidate.occasion.occasion;
 
   bool get isDiagnosis => framing == Framing.diagnosis;
+}
+
+/// Why the check-in sheet is open, and what it already knows.
+///
+/// The two ways in are genuinely different questions, and collapsing them into
+/// one nullable offer hid that. The app offering is governed by
+/// reflection-logic §2's gates — the once-a-day slot, the weekly budget, the
+/// 0.5 threshold — because those exist to stop the app from *asking too often*.
+/// The user asking is governed by none of them: they are already here, they
+/// just did the thing, and refusing them on the grounds that we had not planned
+/// to bring it up would be the app talking over them.
+@immutable
+sealed class CheckInEntry {
+  const CheckInEntry();
+
+  /// Which habit this check-in is about, known before the question is composed.
+  ///
+  /// Both ways in name the habit up front, and the sheet needs it one frame
+  /// after opening — it pins the plant's roots at their pre-answer depth, and a
+  /// pin taken after the answer is written would grow the roots to exactly
+  /// where they already were (check-in-design §8).
+  String get habitId => switch (this) {
+    OfferedCheckIn(:final offer) => offer.habit.id,
+    RequestedCheckIn(:final habitId) => habitId,
+  };
+}
+
+/// The app offered it, and the garden assembled the offer already.
+///
+/// Re-verified rather than trusted — a notification answer can land in between
+/// — but re-verifying one habit is a fraction of electing a winner among all of
+/// them a second time.
+@immutable
+final class OfferedCheckIn extends CheckInEntry {
+  const OfferedCheckIn(this.offer);
+
+  final CheckInOffer offer;
+}
+
+/// The user asked, on this habit, after watering it.
+///
+/// Carries the id rather than an offer: the garden knows only that there is
+/// something to reflect on, and composing the question is the assembler's job.
+@immutable
+final class RequestedCheckIn extends CheckInEntry {
+  const RequestedCheckIn(this.habitId);
+
+  @override
+  final String habitId;
 }
 
 /// Assembles the evening check-in from the store.
@@ -192,6 +243,67 @@ class CheckInAssembler {
       reflections: inputs.reflections,
       candidate: candidate,
       lastCheckInAnywhere: lastCheckInAnywhere,
+    );
+  }
+
+  /// The check-in the **user** asked for, on one habit.
+  ///
+  /// Everything [nextCheckIn] does to decide *whether* to bring a habit up is
+  /// deliberately skipped here — the app-wide daily slot, the per-habit weekly
+  /// budget, and the 0.5 priority threshold. All three exist to stop the app
+  /// from interrupting (reflection-logic §2), and none of them describes a user
+  /// who has just watered a plant and tapped Reflect. A gate that turned that
+  /// tap into "nothing to ask today" would be the app refusing an answer it
+  /// spent the rest of its design asking for.
+  ///
+  /// What is *not* skipped is the occasion: there has to be something to
+  /// reflect **on**. Null when the habit has nothing new since its last
+  /// reflection — which is also what makes the affordance clear itself up,
+  /// since answering removes the occasion that offered it.
+  ///
+  /// The priority is still computed and carried on the candidate. It decides
+  /// nothing here, but it is the same number the scheduler would have scored,
+  /// and throwing it away would make a requested check-in unrecognisable
+  /// against a scheduled one in anything that reads them later.
+  Future<CheckInOffer?> requestedCheckIn(String habitId) async {
+    final now = _clock();
+    final habit = await _habits.habitById(habitId);
+    if (habit == null || habit.isPaused) return null;
+
+    final inputs = await _loader.loadFor(habit);
+    final (context, lastPromptedAt) = _contextFor(
+      habit: habit,
+      inputs: inputs,
+      now: now,
+    );
+
+    final occasion = context.occasion;
+    if (occasion == null) return null;
+
+    return _offerFor(
+      habit: habit,
+      reflections: inputs.reflections,
+      candidate: CheckInCandidate(
+        occasion: occasion,
+        framing: framingFor(
+          occasion: occasion.occasion,
+          stage: context.stage,
+          convergence: context.convergence,
+        ),
+        priority: reflectionPriority(
+          occasion: occasion,
+          convergence: context.convergence,
+          reflectionCount: context.reflectionCount,
+          lastPromptedAt: context.lastPromptedAt,
+          now: now,
+        ),
+      ),
+      // Carried so the answer lands in the app-wide daily slot exactly as a
+      // scheduled one would: a reflection the user volunteered is still the
+      // day's reflection, and asking them again this evening about a habit
+      // they have already talked about is the over-prompting §2 is built to
+      // avoid.
+      lastCheckInAnywhere: lastPromptedAt,
     );
   }
 

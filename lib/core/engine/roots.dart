@@ -45,12 +45,35 @@ class RootDepth {
 ///
 /// Set by both, not framing alone — a Discovery answered "can't remember"
 /// conveys no cue information and must not earn what an answer earns.
+///
+/// The one place framing is not enough on its own is Confirmation. Its 0.5 is
+/// priced for a one-tap yes; an answer that *corrected* the cue carries the
+/// same new information Discovery is paid 1.0 for, so it earns the same.
 double rootCreditFor(Reflection reflection) => switch (reflection.inputMode) {
   InputMode.skipped => EngineConstants.skippedCredit,
   InputMode.cantRemember => EngineConstants.cantRememberCredit,
-  InputMode.chip ||
-  InputMode.typed => EngineConstants.rootCreditByFraming[reflection.framing]!,
+  InputMode.chip || InputMode.typed => _substantiveCredit(reflection),
 };
+
+double _substantiveCredit(Reflection reflection) {
+  // Explicitly `false`, not "anything but true". `matchedDesignedCue` is
+  // nullable and null means *unrecorded* — a habit with no designed cue to
+  // confirm, or a reflection written before the field existed. Paying the
+  // higher credit for null would quietly re-price every historical row and
+  // would break reflection-logic's rule that a user coasting on one-tap
+  // confirmations deepens roots slowly.
+  //
+  // OPEN: a Confirmation on a habit with **no** designed cue falls back to the
+  // full chip list (check-in-design §5), which is Discovery in everything but
+  // name and arguably worth 1.0. It is left at 0.5 here because the field
+  // cannot currently tell that case apart from an unrecorded one.
+  final correctedTheCue =
+      reflection.framing == Framing.confirmation &&
+      reflection.matchedDesignedCue == false;
+  return correctedTheCue
+      ? EngineConstants.confirmationChangedCueCredit
+      : EngineConstants.rootCreditByFraming[reflection.framing]!;
+}
 
 /// Whether this reflection counts toward convergence. `cantRemember` and
 /// skips are excluded from both numerator and denominator.
