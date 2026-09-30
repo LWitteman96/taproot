@@ -1,7 +1,8 @@
 /// Which plants have art, and what the app calls the pieces of it.
 ///
-/// Each `.riv` is generated outside the Flutter toolchain (`fern/`, `oak/`, and
-/// the shared `plantgen/`), so every name here is a contract with a project
+/// Each `.riv` is generated outside the Flutter toolchain (`fern/`, `oak/`,
+/// `sunflower/`, `lavender/`, and the shared `plantgen/`), so every name here
+/// is a contract with a project
 /// `flutter analyze` cannot see. They are asserted against the shipped assets in
 /// `test/features/garden/plant_art_asset_test.dart`, which is the only thing
 /// that would catch a rename: a missing artboard throws, but a renamed view
@@ -97,11 +98,30 @@ const PlantArt oakArt = PlantArt(
   assetPath: 'assets/rive/oak.riv',
 );
 
+const PlantArt sunflowerArt = PlantArt(
+  plantType: 'sunflower',
+  name: 'Sunflower',
+  assetPath: 'assets/rive/sunflower.riv',
+);
+
+const PlantArt lavenderArt = PlantArt(
+  plantType: 'lavender',
+  name: 'Lavender',
+  assetPath: 'assets/rive/lavender.riv',
+);
+
 /// Every species with art, in no particular order.
 ///
-/// Four of the six in `plantChoices` are still missing, and adding one is this
-/// list plus the asset — nothing else in the app changes.
-const List<PlantArt> plantArts = <PlantArt>[fernArt, oakArt];
+/// Two of the six in `plantChoices` are still missing — the lotus and the pine
+/// — and adding one is this list plus the asset, nothing else in the app.
+/// `plant_art_asset_test.dart` is parameterised over this list, so a species
+/// added here is covered the moment it is added.
+const List<PlantArt> plantArts = <PlantArt>[
+  fernArt,
+  oakArt,
+  sunflowerArt,
+  lavenderArt,
+];
 
 /// The art for [plantType], or null if that species has none.
 ///

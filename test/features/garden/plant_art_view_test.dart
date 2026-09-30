@@ -126,34 +126,45 @@ void main() {
     );
   });
 
-  testWidgets('an oak draws itself too, from its own asset', (tester) async {
-    // The second species, and the reason [PlantArt] exists. It is a different
-    // `.riv` with different artboard names behind the same two numbers, so the
-    // hard-coded fern this replaced would draw nothing at all here.
-    await tester.pumpWidget(harness(plantType: 'oak', stage: Stage.mature));
-    await tester.pump();
+  // Every species with art, not a hand-written case per species. The fern's
+  // test above stays because it also pins the world scale; this is the part
+  // that has to hold for all of them, and a species added to `plantArts` is
+  // covered by it the moment it is added.
+  for (final art in plantArts) {
+    testWidgets('${art.plantType} draws itself from its own asset', (
+      tester,
+    ) async {
+      // The reason [PlantArt] exists. Each is a different `.riv` with
+      // different artboard names behind the same two numbers, so the
+      // hard-coded fern this replaced would draw nothing at all for any of
+      // them.
+      await tester.pumpWidget(
+        harness(plantType: art.plantType, stage: Stage.mature),
+      );
+      await tester.pump();
 
-    expect(find.byType(rive.RiveWidget), findsNWidgets(2));
+      expect(find.byType(rive.RiveWidget), findsNWidgets(2));
 
-    final artboards = tester
-        .widgetList<rive.RiveWidget>(find.byType(rive.RiveWidget))
-        .map((widget) => widget.controller.artboard.name)
-        .toList();
-    // Named from the map rather than spelled here, so this fails if the widget
-    // drew the fern's artboards for an oak habit — the actual regression.
-    expect(artboards, contains(oakArt.artboardFor(Stage.mature)));
-    expect(artboards, contains(oakArt.rootsArtboard));
+      final artboards = tester
+          .widgetList<rive.RiveWidget>(find.byType(rive.RiveWidget))
+          .map((widget) => widget.controller.artboard.name)
+          .toList();
+      // Named from the art rather than spelled here, so this fails if the
+      // widget drew some other species' artboards — the actual regression.
+      expect(artboards, contains(art.artboardFor(Stage.mature)));
+      expect(artboards, contains(art.rootsArtboard));
 
-    // And it occupies exactly the box the fern does, because
-    // `GardenLayout.rootsDepth` is one constant for every species.
-    expect(
-      tester.getSize(find.byType(PlantArtView)),
-      const Size(
-        GardenLayout.stageSize,
-        GardenLayout.stageSize + GardenLayout.rootsDepth,
-      ),
-    );
-  });
+      // And every species occupies exactly the same box, because
+      // `GardenLayout.rootsDepth` is one constant for all of them.
+      expect(
+        tester.getSize(find.byType(PlantArtView)),
+        const Size(
+          GardenLayout.stageSize,
+          GardenLayout.stageSize + GardenLayout.rootsDepth,
+        ),
+      );
+    });
+  }
 
   testWidgets('each species draws from its own file, not a shared one', (
     tester,
@@ -189,12 +200,14 @@ void main() {
   });
 
   testWidgets('a species with no art takes no space at all', (tester) async {
-    // Not a spinner and not a gap: four of six species have nothing to draw,
-    // and a reserved empty box on every one of them would be worse than the
-    // card simply being shorter.
+    // Not a spinner and not a gap: two of six species have nothing to draw,
+    // and a reserved empty box on either of them would be worse than the card
+    // simply being shorter.
     //
     // `lotus` is offered by `plantChoices` and absent from `plantArts`, which
-    // is exactly this case. The oak used to stand here and now draws.
+    // is exactly this case. The oak used to stand here, then the sunflower and
+    // the lavender; all three draw now, and the lotus and the pine are what is
+    // left.
     await tester.pumpWidget(harness(plantType: 'lotus', stage: Stage.mature));
     await tester.pump();
 

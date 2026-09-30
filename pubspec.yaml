@@ -98,6 +98,10 @@ flutter:
     # Built by the Rive CLI from oak/ — `cd oak && rive . --once`, then copy
     # build/oak.riv here. Same arrangement as the fern above.
     - assets/rive/oak.riv
+    # Built by the Rive CLI from sunflower/ — same arrangement again.
+    - assets/rive/sunflower.riv
+    # Built by the Rive CLI from lavender/ — same arrangement again.
+    - assets/rive/lavender.riv
 
   # Bundled, not fetched at runtime (garden-design §8). Both are SIL OFL;
   # the licences sit beside them in assets/fonts/.
